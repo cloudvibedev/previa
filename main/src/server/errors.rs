@@ -49,6 +49,17 @@ pub fn not_found_response(message: &str) -> Response {
         .into_response()
 }
 
+pub fn conflict_response(message: &str) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(ErrorResponse {
+            error: "conflict".to_owned(),
+            message: message.to_owned(),
+        }),
+    )
+        .into_response()
+}
+
 pub fn internal_error_response(message: String) -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,

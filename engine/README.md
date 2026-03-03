@@ -20,7 +20,6 @@ Exported functions:
 
 ## Core Types
 
-- `BaseUrl`
 - `RuntimeSpec`
 - `Pipeline`
 - `PipelineStep`
@@ -39,6 +38,8 @@ For each step:
 3. Perform request.
 4. Evaluate assertions.
 5. Retry (if allowed by `retry` and assertion behavior).
+
+`step.url` must always be an absolute URL (`http://` or `https://`).
 
 ## Template System
 

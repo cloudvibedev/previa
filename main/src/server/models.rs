@@ -74,6 +74,12 @@ pub struct ProjectListQuery {
     pub order: Option<HistoryOrder>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectTransferQuery {
+    pub include_history: Option<bool>,
+}
+
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProxyRequest {
@@ -148,7 +154,7 @@ pub struct ProjectSpecUpsertRequest {
     pub live: bool,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSpecRecord {
     pub id: String,
@@ -164,6 +170,48 @@ pub struct ProjectSpecRecord {
     pub live: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectHistoryExport {
+    pub e2e: Vec<E2eHistoryRecord>,
+    pub load: Vec<LoadHistoryRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectExportProject {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[schema(value_type = Object, nullable = true)]
+    pub spec: Option<Value>,
+    pub pipelines: Vec<Pipeline>,
+    pub specs: Vec<ProjectSpecRecord>,
+    pub history: ProjectHistoryExport,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectExportEnvelope {
+    pub format: String,
+    pub exported_at: String,
+    pub history_included: bool,
+    pub project: ProjectExportProject,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectImportResponse {
+    pub project_id: String,
+    pub include_history: bool,
+    pub pipelines_imported: usize,
+    pub specs_imported: usize,
+    pub e2e_history_imported: usize,
+    pub load_history_imported: usize,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -234,7 +282,7 @@ pub struct HistoryMetadata {
     pub pipeline_index: Option<i64>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct E2eHistoryRecord {
     pub id: String,
@@ -258,7 +306,7 @@ pub struct E2eHistoryRecord {
     pub request: Value,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadHistoryRecord {
     pub id: String,

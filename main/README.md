@@ -50,6 +50,8 @@ http://127.0.0.1:5588
 
 Base URL: `http://localhost:5588`
 
+Pipeline rule: every `step.url` must be an absolute URL (`http://` or `https://`).
+
 ### System
 
 - `GET /health`

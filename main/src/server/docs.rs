@@ -5,9 +5,11 @@ use crate::server::models::{
     HistoryOrder, HistoryQuery, LoadHistoryRecord, LoadTestConfig, OpenApiValidationPoint,
     OpenApiValidationRequest, OpenApiValidationResponse, OpenApiValidationSeverity,
     OpenApiValidationStatus, OrchestratorInfoResponse, OrchestratorSseEventData, PipelineInput,
-    ProjectE2eTestRequest, ProjectListQuery, ProjectLoadTestRequest, ProjectMetadataUpsertRequest,
-    ProjectRecord, ProjectSpecRecord, ProjectSpecUpsertRequest, ProjectUpsertRequest, ProxyRequest,
-    RunnerInfo, RunnerLoadLine, RunnerRuntimeInfo, SpecUrlEntry,
+    ProjectE2eTestRequest, ProjectExportEnvelope, ProjectExportProject, ProjectHistoryExport,
+    ProjectImportResponse, ProjectListQuery, ProjectLoadTestRequest, ProjectMetadataUpsertRequest,
+    ProjectRecord, ProjectSpecRecord, ProjectSpecUpsertRequest, ProjectTransferQuery,
+    ProjectUpsertRequest, ProxyRequest, RunnerInfo, RunnerLoadLine, RunnerRuntimeInfo,
+    SpecUrlEntry,
 };
 
 #[derive(OpenApi)]
@@ -23,6 +25,8 @@ use crate::server::models::{
         crate::server::handlers::proxy::proxy_request,
         crate::server::handlers::projects::list_projects,
         crate::server::handlers::projects::get_project,
+        crate::server::handlers::transfers::export_project,
+        crate::server::handlers::transfers::import_project,
         crate::server::handlers::specs::validate_openapi_spec,
         crate::server::handlers::specs::list_project_specs,
         crate::server::handlers::specs::create_project_spec,
@@ -57,8 +61,13 @@ use crate::server::models::{
         LoadTestConfig,
         HistoryQuery,
         ProjectListQuery,
+        ProjectTransferQuery,
         ProjectUpsertRequest,
         ProjectMetadataUpsertRequest,
+        ProjectHistoryExport,
+        ProjectExportProject,
+        ProjectExportEnvelope,
+        ProjectImportResponse,
         ProxyRequest,
         OpenApiValidationRequest,
         OpenApiValidationSeverity,
@@ -83,7 +92,7 @@ use crate::server::models::{
         ConsolidatedLoadMetrics
     )),
     servers(
-        (url = "http://localhost:3100", description = "Orchestrator local")
+        (url = "http://localhost:5588", description = "Orchestrator local")
     )
 )]
 pub struct ApiDoc;

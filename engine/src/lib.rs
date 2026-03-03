@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 pub use core::types::{
-    AssertionResult, Pipeline, PipelineStep, RuntimeSpec, StepAssertion,
-    StepExecutionResult, StepRequest, StepResponse,
+    AssertionResult, Pipeline, PipelineStep, RuntimeSpec, StepAssertion, StepExecutionResult,
+    StepRequest, StepResponse,
 };
 pub use execution::{
     execute_pipeline, execute_pipeline_with_client, execute_pipeline_with_client_hooks,

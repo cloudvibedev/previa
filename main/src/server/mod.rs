@@ -26,6 +26,7 @@ use crate::server::handlers::specs::{
 };
 use crate::server::handlers::tests_e2e::run_e2e_test_for_project;
 use crate::server::handlers::tests_load::run_load_test_for_project;
+use crate::server::handlers::transfers::{export_project, import_project};
 use crate::server::middleware::transaction::propagate_transaction_header;
 use crate::server::state::AppState;
 
@@ -56,8 +57,10 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route("/api/v1/projects", get(list_projects))
         .route("/api/v1/projects", post(create_project))
+        .route("/api/v1/projects/import", post(import_project))
         .route("/api/v1/specs/validate", post(validate_openapi_spec))
         .route("/api/v1/projects/{projectId}", get(get_project))
+        .route("/api/v1/projects/{projectId}/export", get(export_project))
         .route(
             "/api/v1/projects/{projectId}/specs",
             get(list_project_specs).post(create_project_spec),
