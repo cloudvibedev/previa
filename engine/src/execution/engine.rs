@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crate::assertions::evaluate_assertions;
 use crate::core::types::{Pipeline, RuntimeSpec, StepExecutionResult, StepRequest, StepResponse};
 use crate::execution::cancel::await_with_cancel;
-use crate::execution::http::parse_method;
+use crate::execution::http::{parse_absolute_http_url, parse_method};
 use crate::execution::logging::{log_step_request, log_step_response};
 use crate::template::resolve::resolve_template_variables;
 
@@ -221,7 +221,43 @@ where
                 }
             };
 
-            let mut request_builder = client.request(method, resolved_url.clone());
+            let url = match parse_absolute_http_url(&resolved_url) {
+                Ok(url) => url,
+                Err(err) => {
+                    let result = StepExecutionResult {
+                        step_id: step.id.clone(),
+                        status: "error".to_owned(),
+                        request: Some(StepRequest {
+                            method: step.method.clone(),
+                            url: resolved_url.clone(),
+                            headers: resolved_headers.clone(),
+                            body: resolved_body.clone(),
+                        }),
+                        response: None,
+                        error: Some(err),
+                        duration: Some(start.elapsed().as_millis()),
+                        attempts: if max_attempts > 1 {
+                            Some(attempt)
+                        } else {
+                            None
+                        },
+                        attempt: Some(attempt),
+                        max_attempts: Some(max_attempts),
+                        assert_results: None,
+                    };
+                    log_step_response(&step.id, None, result.error.as_deref());
+
+                    if attempt < max_attempts {
+                        continue;
+                    }
+                    context.insert(step.id.clone(), result.clone());
+                    on_step_result(&result);
+                    results.push(result);
+                    break;
+                }
+            };
+
+            let mut request_builder = client.request(method, url);
 
             for (k, v) in &resolved_headers {
                 request_builder = request_builder.header(k, v);
@@ -406,7 +442,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{BaseUrl, Pipeline, PipelineStep, RuntimeSpec, StepAssertion};
+    use crate::core::types::{Pipeline, PipelineStep, RuntimeSpec, StepAssertion};
     use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
     use serde_json::json;
@@ -441,7 +477,6 @@ mod tests {
             id: None,
             name: "User flow".to_owned(),
             description: Some("Pipeline test".to_owned()),
-            base_url: BaseUrl::Single(server.base_url()),
             steps: vec![
                 PipelineStep {
                     id: "create_user".to_owned(),
@@ -536,10 +571,6 @@ mod tests {
             id: None,
             name: "Env".to_owned(),
             description: None,
-            base_url: BaseUrl::Multi(HashMap::from([
-                ("dev".to_owned(), server_dev.base_url()),
-                ("prod".to_owned(), server_prod.base_url()),
-            ])),
             steps: vec![PipelineStep {
                 id: "health".to_owned(),
                 name: "Health".to_owned(),
@@ -598,7 +629,6 @@ mod tests {
             id: None,
             name: "Assert".to_owned(),
             description: None,
-            base_url: BaseUrl::Single(server.base_url()),
             steps: vec![PipelineStep {
                 id: "status".to_owned(),
                 name: "Status".to_owned(),
@@ -662,7 +692,6 @@ mod tests {
         let payload = json!({
             "name": "Criar Usuário e Enviar Email",
             "description": "Pipeline de cadastro completo",
-            "base_url": server.base_url(),
             "steps": [
                 {
                     "id": "create_user",
@@ -787,7 +816,6 @@ mod tests {
             id: None,
             name: "Retry assertions".to_owned(),
             description: None,
-            base_url: BaseUrl::Single(server.base_url()),
             steps: vec![PipelineStep {
                 id: "status".to_owned(),
                 name: "Status".to_owned(),
@@ -830,7 +858,6 @@ mod tests {
             id: None,
             name: "No retry on HTTP".to_owned(),
             description: None,
-            base_url: BaseUrl::Single(server.base_url()),
             steps: vec![PipelineStep {
                 id: "fails".to_owned(),
                 name: "Fails".to_owned(),
@@ -871,7 +898,6 @@ mod tests {
             id: None,
             name: "Delay before attempts".to_owned(),
             description: None,
-            base_url: BaseUrl::Single(server.base_url()),
             steps: vec![PipelineStep {
                 id: "delayed".to_owned(),
                 name: "Delayed".to_owned(),

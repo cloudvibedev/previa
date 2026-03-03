@@ -1,14 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 use utoipa::ToSchema;
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(untagged)]
-pub enum BaseUrl {
-    Single(String),
-    Multi(HashMap<String, String>),
-}
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RuntimeSpec {
@@ -23,7 +16,6 @@ pub struct Pipeline {
     pub id: Option<String>,
     pub name: String,
     pub description: Option<String>,
-    pub base_url: BaseUrl,
     #[schema(min_items = 1)]
     pub steps: Vec<PipelineStep>,
 }

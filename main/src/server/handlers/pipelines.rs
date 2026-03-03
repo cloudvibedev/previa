@@ -135,7 +135,6 @@ pub async fn create_project_pipeline(
         id: Some(new_uuid_v7()),
         name: pipeline.name,
         description: pipeline.description,
-        base_url: pipeline.base_url,
         steps: pipeline.steps,
     };
 
@@ -197,7 +196,6 @@ pub async fn upsert_project_pipeline(
         id: Some(pipeline_id.clone()),
         name: pipeline.name,
         description: pipeline.description,
-        base_url: pipeline.base_url,
         steps: pipeline.steps,
     };
     match update_project_pipeline(&state.db, &project_id, &pipeline_id, pipeline).await {

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 pub use core::types::{
-    AssertionResult, BaseUrl, Pipeline, PipelineStep, RuntimeSpec, StepAssertion,
+    AssertionResult, Pipeline, PipelineStep, RuntimeSpec, StepAssertion,
     StepExecutionResult, StepRequest, StepResponse,
 };
 pub use execution::{

@@ -49,10 +49,6 @@ pub(crate) fn resolve_template_variables_with_context(
 }
 
 pub(crate) fn resolve_expression(expression: &str, template_context: &Value) -> Option<String> {
-    if expression == "base_url" {
-        return None;
-    }
-
     if expression.starts_with("helpers.") {
         let helper_expr = expression.trim_start_matches("helpers.");
         return resolve_helper(helper_expr);

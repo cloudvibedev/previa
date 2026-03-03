@@ -120,7 +120,6 @@ pub struct ProjectRecord {
 pub struct PipelineInput {
     pub name: String,
     pub description: Option<String>,
-    pub base_url: previa_runner::BaseUrl,
     pub steps: Vec<previa_runner::PipelineStep>,
 }
 

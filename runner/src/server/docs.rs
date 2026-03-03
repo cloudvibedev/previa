@@ -1,7 +1,7 @@
 use utoipa::OpenApi;
 
 use previa_runner::{
-    AssertionResult, BaseUrl, Pipeline, PipelineStep, RuntimeSpec, StepAssertion,
+    AssertionResult, Pipeline, PipelineStep, RuntimeSpec, StepAssertion,
     StepExecutionResult, StepRequest, StepResponse,
 };
 
@@ -30,7 +30,6 @@ use crate::server::models::{
         E2eTestRequest,
         LoadTestRequest,
         Pipeline,
-        BaseUrl,
         PipelineStep,
         StepAssertion,
         AssertionResult,

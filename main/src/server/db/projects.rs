@@ -184,7 +184,6 @@ pub async fn upsert_project_with_pipelines(
             id: Some(pipeline_id.clone()),
             name: pipeline_input.name,
             description: pipeline_input.description,
-            base_url: pipeline_input.base_url,
             steps: pipeline_input.steps,
         };
 
