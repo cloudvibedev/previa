@@ -2,13 +2,24 @@
 resolver = "3"
 members = ['engine', 'main', 'runner']
 
+[workspace.package]
+name = "previa-engine"
+version = "0.0.1"
+edition = "2024"
+authors = ["Previa Labs <previa@cloudvibe.dev>"]
+
 [workspace.dependencies]
 axum = "0.8"
 rand = "0.10.0"
 dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
 tokio-stream = "0.1"
 tokio-util = "0.7"
 tower-http = { version = "0.6", features = ["cors"] }

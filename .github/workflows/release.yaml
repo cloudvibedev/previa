@@ -1,16 +1,6 @@
-name: Api Release Docker Image (Artifact Build)
+name: Release Binaries, Docker Images and Crates
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "engine/**"
-      - "main/**"
-      - "runner/**"
-      - "Cargo.*"
-      - "Dockerfile.artifact"
-      - ".github/workflows/release.yaml"
   workflow_dispatch:
 
 permissions:
@@ -19,78 +9,243 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  APP_NAME: qrud
   CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
 jobs:
-  build-and-push:
-    name: Build binary per arch and push multi-platform image
+  version_check:
+    name: Resolve And Validate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve workspace crate versions
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          main_version="$(cargo pkgid -p previa-main | sed -E 's/.*@([0-9]+\.[0-9]+\.[0-9]+.*)$/\1/')"
+          runner_version="$(cargo pkgid -p previa-runner | sed -E 's/.*@([0-9]+\.[0-9]+\.[0-9]+.*)$/\1/')"
+          engine_version="$(cargo pkgid -p previa-engine | sed -E 's/.*@([0-9]+\.[0-9]+\.[0-9]+.*)$/\1/')"
+
+          echo "main=${main_version}"
+          echo "runner=${runner_version}"
+          echo "engine=${engine_version}"
+
+          if [ "${main_version}" != "${runner_version}" ] || [ "${main_version}" != "${engine_version}" ]; then
+            echo "::error::Version mismatch between crates. main=${main_version}, runner=${runner_version}, engine=${engine_version}"
+            exit 1
+          fi
+
+          if ! grep -Eq '^version\s*=\s*\{ workspace = true \}\s*$' main/Cargo.toml; then
+            echo "::warning::main/Cargo.toml does not declare package version from workspace"
+          fi
+
+          echo "version=${main_version}" >> "${GITHUB_OUTPUT}"
+
+  build_binaries:
+    name: Build binaries (${{ matrix.name }})
+    needs: version_check
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            runs_on: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            os_slug: linux
+            arch_slug: amd64
+            exe_ext: ""
+            use_cross: false
+          - name: linux-arm64
+            runs_on: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            os_slug: linux
+            arch_slug: arm64
+            exe_ext: ""
+            use_cross: true
+          - name: macos-amd64
+            runs_on: macos-13
+            target: x86_64-apple-darwin
+            os_slug: macos
+            arch_slug: amd64
+            exe_ext: ""
+            use_cross: false
+          - name: macos-arm64
+            runs_on: macos-14
+            target: aarch64-apple-darwin
+            os_slug: macos
+            arch_slug: arm64
+            exe_ext: ""
+            use_cross: false
+          - name: windows-amd64
+            runs_on: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_slug: windows
+            arch_slug: amd64
+            exe_ext: ".exe"
+            use_cross: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup QEMU
+        if: matrix.use_cross == true
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Buildx
+        if: matrix.use_cross == true
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install cross
+        if: matrix.use_cross == true
+        shell: bash
+        run: cargo install cross --locked
+
+      - name: Build previa-main and previa-runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target "${{ matrix.target }}" -p previa-main
+            cross build --release --target "${{ matrix.target }}" -p previa-runner
+          else
+            cargo build --release --target "${{ matrix.target }}" -p previa-main
+            cargo build --release --target "${{ matrix.target }}" -p previa-runner
+          fi
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          main_src="target/${{ matrix.target }}/release/previa-main${{ matrix.exe_ext }}"
+          runner_src="target/${{ matrix.target }}/release/previa-runner${{ matrix.exe_ext }}"
+
+          main_asset="previa-main-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
+          runner_asset="previa-runner-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
+
+          cp "${main_src}" "dist/${main_asset}"
+          cp "${runner_src}" "dist/${runner_asset}"
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  tag_release:
+    name: Create git tag
+    needs: [version_check, build_binaries]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version_check.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags
+
+          if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag v${VERSION} already exists"
+            exit 1
+          fi
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+
+  github_release:
+    name: Publish GitHub Release
+    needs: [version_check, tag_release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: List release assets
+        shell: bash
+        run: ls -la release-assets
+
+      - name: Create release and upload binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version_check.outputs.version }}
+          name: Release v${{ needs.version_check.outputs.version }}
+          files: release-assets/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker_build_arch:
+    name: Build and push Docker (${{ matrix.service }}-${{ matrix.arch }})
+    needs: [version_check, build_binaries]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
-            platform: linux/amd64
-            target: x86_64-unknown-linux-gnu
-          - arch: arm64
-            platform: linux/arm64
-            target: aarch64-unknown-linux-gnu
+          - service: previa-main
+            image: cloudvibe-main
+            arch: amd64
+          - service: previa-main
+            image: cloudvibe-main
+            arch: arm64
+          - service: previa-runner
+            image: cloudvibe-runner
+            arch: amd64
+          - service: previa-runner
+            image: cloudvibe-runner
+            arch: arm64
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        run: |
-          if ! command -v rustup >/dev/null 2>&1; then
-            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.cargo/bin:$PATH"
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add ${{ matrix.target }}
+      - name: Download Linux binaries artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: downloaded
 
-      - name: Install cross
+      - name: Prepare Docker artifact layout
+        shell: bash
         run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          if ! command -v cross >/dev/null 2>&1; then
-            cargo install cross --locked
-          fi
+          set -euo pipefail
 
-      - name: Set up QEMU (for cross-compiling and image assembly)
+          src_file="${{ matrix.service }}-linux-${{ matrix.arch }}"
+          mkdir -p "artifacts/${{ matrix.service }}/${{ matrix.arch }}"
+          cp "downloaded/${src_file}" "artifacts/${{ matrix.service }}/${{ matrix.arch }}/${{ matrix.service }}"
+          chmod +x "artifacts/${{ matrix.service }}/${{ matrix.arch }}/${{ matrix.service }}"
+
+      - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/${{ matrix.target }}
-          key: ${{ env.APP_NAME }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build release binary (cross)
-        run: |
-          cross build --release --target ${{ matrix.target }} -p ${{ env.APP_NAME }}
-
-      - name: Prepare artifact directory
-        run: |
-          mkdir -p artifacts/${{ matrix.arch }}
-          cp target/${{ matrix.target }}/release/${{ env.APP_NAME }} artifacts/${{ matrix.arch }}/${{ env.APP_NAME }}
-
-      - name: Set up Docker Buildx
+      - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ghcr.io/${{ github.repository_owner }}/${{ env.APP_NAME }}
-          tags: |
-            type=raw,value=latest-${{ matrix.arch }}
-            type=raw,value=${{ github.sha }}-${{ matrix.arch }}
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -99,36 +254,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image for ${{ matrix.platform }}
+      - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.artifact
-          platforms: ${{ matrix.platform }}
+          platforms: linux/${{ matrix.arch }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            TARGETARCH=${{ matrix.arch }}
-            APP_NAME=${{ env.APP_NAME }}
-          cache-from: type=gha,scope=${{ env.APP_NAME }}-artifact-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ env.APP_NAME }}-artifact-${{ matrix.arch }}
-
-  manifest:
-    name: Create multi-arch manifest
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ghcr.io/${{ github.repository_owner }}/${{ env.APP_NAME }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest-${{ matrix.arch }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.version_check.outputs.version }}-${{ matrix.arch }}
+          build-args: |
+            BIN_NAME=${{ matrix.service }}
+            TARGETARCH=${{ matrix.arch }}
+            ARTIFACT_ROOT=artifacts
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
 
+  docker_manifest:
+    name: Create Docker manifests
+    needs: [version_check, docker_build_arch]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: cloudvibe-main
+          - image: cloudvibe-runner
+    steps:
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -136,10 +289,61 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create and push manifest list
+      - name: Create manifest
+        shell: bash
+        env:
+          VERSION: ${{ needs.version_check.outputs.version }}
         run: |
-          latest_tag=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          sha_tag=$(echo "${{ steps.meta.outputs.tags }}" | sed -n '2p')
-          docker buildx imagetools create -t "$latest_tag" -t "$sha_tag" \
-            "${latest_tag}-amd64" "${latest_tag}-arm64" \
-            "${sha_tag}-amd64" "${sha_tag}-arm64"
+          set -euo pipefail
+          image="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}"
+
+          docker buildx imagetools create \
+            -t "${image}:latest" \
+            -t "${image}:${VERSION}" \
+            "${image}:latest-amd64" \
+            "${image}:latest-arm64" \
+            "${image}:${VERSION}-amd64" \
+            "${image}:${VERSION}-arm64"
+
+  publish_crates:
+    name: Publish crates.io packages
+    needs: [version_check, github_release, docker_manifest]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Package previa-engine
+        shell: bash
+        run: cargo package -p previa-engine --allow-dirty --no-verify
+
+      - name: Publish previa-engine
+        shell: bash
+        run: cargo publish -p previa-engine --token "${CARGO_REGISTRY_TOKEN}" --no-verify
+
+      - name: Wait for previa-engine indexing
+        shell: bash
+        run: sleep 30
+
+      - name: Package previa-runner
+        shell: bash
+        run: cargo package -p previa-runner --allow-dirty --no-verify
+
+      - name: Publish previa-runner
+        shell: bash
+        run: cargo publish -p previa-runner --token "${CARGO_REGISTRY_TOKEN}" --no-verify
+
+      - name: Wait for previa-runner indexing
+        shell: bash
+        run: sleep 30
+
+      - name: Package previa-main
+        shell: bash
+        run: cargo package -p previa-main --allow-dirty --no-verify
+
+      - name: Publish previa-main
+        shell: bash
+        run: cargo publish -p previa-main --token "${CARGO_REGISTRY_TOKEN}" --no-verify

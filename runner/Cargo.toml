@@ -1,9 +1,9 @@
 [package]
 name = "previa-runner"
-version = "0.1.0"
-edition = "2024"
+version = { workspace = true }
+edition = { workspace = true }
 description = "API for remote execution of integration and load tests via HTTP streaming (SSE)."
-authors = ["Previa Labs <previa@previa.dev>"]
+authors = { workspace = true }
 
 [dependencies]
 axum = { workspace = true }
@@ -19,7 +19,7 @@ tracing-subscriber = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
 http-body-util = "0.1"
-previa-engine = { path = "../engine" }
+previa-engine = { path = "../engine", version = "0.0.1" }
 sysinfo = "0.38.3"
 
 [dev-dependencies]

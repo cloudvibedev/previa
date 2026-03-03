@@ -1,0 +1,19 @@
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+ARG ARTIFACT_ROOT=artifacts
+ARG TARGETARCH
+ARG BIN_NAME
+
+COPY ./${ARTIFACT_ROOT}/${BIN_NAME}/${TARGETARCH}/${BIN_NAME} /app/${BIN_NAME}
+
+RUN chmod +x /app/${BIN_NAME}
+
+ENV BIN_NAME=${BIN_NAME}
+
+CMD ["/bin/sh", "-c", "exec /app/${BIN_NAME}"]
