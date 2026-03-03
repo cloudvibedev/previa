@@ -1,0 +1,98 @@
+# `previa-runner`
+
+> Rustdoc-style crate documentation.
+
+## Crate Purpose
+
+`previa-runner` is the remote execution API. It receives E2E/load requests, runs pipelines through `previa-engine`, and streams SSE events.
+
+## Runtime Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `ADDRESS` | `0.0.0.0` | Bind address |
+| `PORT` | `3000` | Bind port |
+| `RUST_LOG` | unset | Tracing filter |
+
+## Quick Start
+
+```bash
+ADDRESS=0.0.0.0 PORT=3000 RUST_LOG=info cargo run -p previa-runner
+```
+
+You can also download prebuilt binaries at: **https://previa.dev/downloads**
+
+## HTTP API Surface
+
+Base URL: `http://localhost:3000`
+
+- `GET /health`
+- `GET /info`
+- `GET /openapi.json`
+- `POST /api/v1/tests/e2e`
+- `POST /api/v1/tests/load`
+
+## Request Models
+
+### E2E
+
+```json
+{
+  "pipeline": { "name": "E2E", "baseUrl": "https://httpbin.org", "steps": [] },
+  "selectedBaseUrlKey": null,
+  "specs": []
+}
+```
+
+### Load
+
+```json
+{
+  "pipeline": { "name": "Load", "baseUrl": "https://httpbin.org", "steps": [] },
+  "config": { "totalRequests": 100, "concurrency": 10, "rampUpSeconds": 5 },
+  "selectedBaseUrlKey": null,
+  "specs": []
+}
+```
+
+## SSE Event Contracts
+
+### E2E sequence
+
+1. `execution:init`
+2. `step:start`
+3. `step:result`
+4. `pipeline:complete`
+
+### Load sequence
+
+1. `execution:init`
+2. `metrics` (repeated)
+3. `complete`
+
+## Transaction Header
+
+`x-transaction-id` is propagated and echoed by middleware.
+
+## Error Contract
+
+```json
+{
+  "error": "bad_request",
+  "message": "description"
+}
+```
+
+## Curl Example
+
+```bash
+curl -N http://localhost:3000/api/v1/tests/e2e \
+  -H 'content-type: application/json' \
+  -d '{"pipeline":{"name":"E2E","baseUrl":"https://httpbin.org","steps":[{"id":"s1","name":"Status","method":"GET","url":"https://httpbin.org/status/200","headers":{},"body":null,"asserts":[]}]},"selectedBaseUrlKey":null,"specs":[]}'
+```
+
+## Module Relationship
+
+```text
+main -> runner -> engine
+```

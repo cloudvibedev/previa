@@ -1,0 +1,145 @@
+name: Api Release Docker Image (Artifact Build)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "engine/**"
+      - "main/**"
+      - "runner/**"
+      - "Cargo.*"
+      - "Dockerfile.artifact"
+      - ".github/workflows/release.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  APP_NAME: qrud
+  CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+jobs:
+  build-and-push:
+    name: Build binary per arch and push multi-platform image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            platform: linux/arm64
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - name: Install cross
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if ! command -v cross >/dev/null 2>&1; then
+            cargo install cross --locked
+          fi
+
+      - name: Set up QEMU (for cross-compiling and image assembly)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/${{ matrix.target }}
+          key: ${{ env.APP_NAME }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary (cross)
+        run: |
+          cross build --release --target ${{ matrix.target }} -p ${{ env.APP_NAME }}
+
+      - name: Prepare artifact directory
+        run: |
+          mkdir -p artifacts/${{ matrix.arch }}
+          cp target/${{ matrix.target }}/release/${{ env.APP_NAME }} artifacts/${{ matrix.arch }}/${{ env.APP_NAME }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/${{ env.APP_NAME }}
+          tags: |
+            type=raw,value=latest-${{ matrix.arch }}
+            type=raw,value=${{ github.sha }}-${{ matrix.arch }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image for ${{ matrix.platform }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.artifact
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            TARGETARCH=${{ matrix.arch }}
+            APP_NAME=${{ env.APP_NAME }}
+          cache-from: type=gha,scope=${{ env.APP_NAME }}-artifact-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ env.APP_NAME }}-artifact-${{ matrix.arch }}
+
+  manifest:
+    name: Create multi-arch manifest
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/${{ env.APP_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ github.sha }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest list
+        run: |
+          latest_tag=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          sha_tag=$(echo "${{ steps.meta.outputs.tags }}" | sed -n '2p')
+          docker buildx imagetools create -t "$latest_tag" -t "$sha_tag" \
+            "${latest_tag}-amd64" "${latest_tag}-arm64" \
+            "${sha_tag}-amd64" "${sha_tag}-arm64"

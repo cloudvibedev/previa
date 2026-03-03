@@ -1,0 +1,89 @@
+use utoipa::OpenApi;
+
+use crate::server::models::{
+    CancelExecutionResponse, ConsolidatedLoadMetrics, E2eHistoryRecord, ErrorResponse,
+    HistoryOrder, HistoryQuery, LoadHistoryRecord, LoadTestConfig, OpenApiValidationPoint,
+    OpenApiValidationRequest, OpenApiValidationResponse, OpenApiValidationSeverity,
+    OpenApiValidationStatus, OrchestratorInfoResponse, OrchestratorSseEventData, PipelineInput,
+    ProjectE2eTestRequest, ProjectListQuery, ProjectLoadTestRequest, ProjectMetadataUpsertRequest,
+    ProjectRecord, ProjectSpecRecord, ProjectSpecUpsertRequest, ProjectUpsertRequest, ProxyRequest,
+    RunnerInfo, RunnerLoadLine, RunnerRuntimeInfo, SpecUrlEntry,
+};
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Previa Orchestrator API",
+        version = "1.0.0",
+        description = "API orquestradora para distribuicao de carga entre runners. A desconexão do cliente SSE não interrompe a execução no orchestrator; use a rota de cancelamento manual para interromper."
+    ),
+    paths(
+        crate::server::handlers::health::health,
+        crate::server::handlers::health::get_info,
+        crate::server::handlers::proxy::proxy_request,
+        crate::server::handlers::projects::list_projects,
+        crate::server::handlers::projects::get_project,
+        crate::server::handlers::specs::validate_openapi_spec,
+        crate::server::handlers::specs::list_project_specs,
+        crate::server::handlers::specs::create_project_spec,
+        crate::server::handlers::specs::get_project_spec,
+        crate::server::handlers::pipelines::list_project_pipelines,
+        crate::server::handlers::pipelines::get_project_pipeline,
+        crate::server::handlers::projects::create_project,
+        crate::server::handlers::specs::upsert_project_spec,
+        crate::server::handlers::pipelines::create_project_pipeline,
+        crate::server::handlers::projects::upsert_project,
+        crate::server::handlers::pipelines::upsert_project_pipeline,
+        crate::server::handlers::specs::delete_project_spec,
+        crate::server::handlers::pipelines::delete_project_pipeline,
+        crate::server::handlers::projects::delete_project,
+        crate::server::handlers::history_e2e::get_e2e_test_by_id,
+        crate::server::handlers::history_e2e::delete_e2e_test_by_id,
+        crate::server::handlers::history_load::get_load_test_by_id,
+        crate::server::handlers::history_load::delete_load_test_by_id,
+        crate::server::handlers::tests_e2e::run_e2e_test_for_project,
+        crate::server::handlers::tests_load::run_load_test_for_project,
+        crate::server::handlers::executions::stream_execution,
+        crate::server::handlers::executions::cancel_execution,
+        crate::server::handlers::history_e2e::list_e2e_history,
+        crate::server::handlers::history_e2e::delete_e2e_history,
+        crate::server::handlers::history_load::list_load_history,
+        crate::server::handlers::history_load::delete_load_history
+    ),
+    components(schemas(
+        ProjectE2eTestRequest,
+        ProjectLoadTestRequest,
+        previa_runner::RuntimeSpec,
+        LoadTestConfig,
+        HistoryQuery,
+        ProjectListQuery,
+        ProjectUpsertRequest,
+        ProjectMetadataUpsertRequest,
+        ProxyRequest,
+        OpenApiValidationRequest,
+        OpenApiValidationSeverity,
+        OpenApiValidationStatus,
+        OpenApiValidationPoint,
+        OpenApiValidationResponse,
+        ProjectRecord,
+        PipelineInput,
+        SpecUrlEntry,
+        ProjectSpecUpsertRequest,
+        ProjectSpecRecord,
+        HistoryOrder,
+        ErrorResponse,
+        CancelExecutionResponse,
+        E2eHistoryRecord,
+        LoadHistoryRecord,
+        RunnerRuntimeInfo,
+        RunnerInfo,
+        OrchestratorInfoResponse,
+        OrchestratorSseEventData,
+        RunnerLoadLine,
+        ConsolidatedLoadMetrics
+    )),
+    servers(
+        (url = "http://localhost:3100", description = "Orchestrator local")
+    )
+)]
+pub struct ApiDoc;
