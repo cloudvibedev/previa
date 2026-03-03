@@ -11,7 +11,7 @@
 ### Start runner(s)
 
 ```bash
-ADDRESS=0.0.0.0 PORT=3000 cargo run -p previa-runner
+ADDRESS=0.0.0.0 PORT=55880 cargo run -p previa-runner
 ```
 
 You can also download prebuilt binaries at: **https://previa.dev/downloads**
@@ -20,8 +20,8 @@ You can also download prebuilt binaries at: **https://previa.dev/downloads**
 
 ```bash
 ORCHESTRATOR_DATABASE_URL="sqlite://orchestrator.db" \
-RUNNER_ENDPOINTS="http://127.0.0.1:3000" \
-ADDRESS=0.0.0.0 PORT=3100 \
+RUNNER_ENDPOINTS="http://127.0.0.1:55880" \
+ADDRESS=0.0.0.0 PORT=5588 \
 cargo run -p previa-main
 ```
 
@@ -32,7 +32,7 @@ You can also download prebuilt binaries at: **https://previa.dev/downloads**
 Use **https://previa.dev** and add:
 
 ```text
-http://127.0.0.1:3100
+http://127.0.0.1:5588
 ```
 
 ## Environment Variables
@@ -43,12 +43,12 @@ http://127.0.0.1:3100
 | `RUNNER_RPS_PER_NODE` | `1000` | Per-node capacity hint for load planning |
 | `RUNNER_ENDPOINTS` | empty | Runner endpoints CSV |
 | `ADDRESS` | `0.0.0.0` | Bind address |
-| `PORT` | `3100` | Bind port |
+| `PORT` | `8383` | Bind port |
 | `RUST_LOG` | unset | Tracing filter |
 
 ## HTTP API Surface
 
-Base URL: `http://localhost:3100`
+Base URL: `http://localhost:5588`
 
 ### System
 

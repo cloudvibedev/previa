@@ -8,6 +8,8 @@ use crate::server::state::AppState;
 
 #[tokio::main]
 async fn main() {
+    let _ = dotenvy::dotenv();
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -17,7 +19,8 @@ async fn main() {
     let port = std::env::var("PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(3000);
+        .unwrap_or(55880);
+    info!("runner startup config: ADDRESS={}, PORT={}", address, port);
     let bind_addr = format!("{}:{}", address, port);
 
     let app = build_app(state);

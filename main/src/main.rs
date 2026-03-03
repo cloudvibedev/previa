@@ -17,6 +17,8 @@ use crate::server::state::{AppState, DB_SCHEMA_VERSION};
 
 #[tokio::main]
 async fn main() {
+    let _ = dotenvy::dotenv();
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -33,7 +35,7 @@ async fn main() {
     let port = std::env::var("PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(3100);
+        .unwrap_or(5588);
     let bind_addr = format!("{}:{}", address, port);
 
     let connect_options = SqliteConnectOptions::from_str(&database_url)

@@ -11,20 +11,20 @@
 | Variable | Default | Description |
 |---|---|---|
 | `ADDRESS` | `0.0.0.0` | Bind address |
-| `PORT` | `3000` | Bind port |
+| `PORT` | `7373` | Bind port |
 | `RUST_LOG` | unset | Tracing filter |
 
 ## Quick Start
 
 ```bash
-ADDRESS=0.0.0.0 PORT=3000 RUST_LOG=info cargo run -p previa-runner
+ADDRESS=0.0.0.0 PORT=55880 RUST_LOG=info cargo run -p previa-runner
 ```
 
 You can also download prebuilt binaries at: **https://previa.dev/downloads**
 
 ## HTTP API Surface
 
-Base URL: `http://localhost:3000`
+Base URL: `http://localhost:55880`
 
 - `GET /health`
 - `GET /info`
@@ -86,7 +86,7 @@ Base URL: `http://localhost:3000`
 ## Curl Example
 
 ```bash
-curl -N http://localhost:3000/api/v1/tests/e2e \
+curl -N http://localhost:55880/api/v1/tests/e2e \
   -H 'content-type: application/json' \
   -d '{"pipeline":{"name":"E2E","baseUrl":"https://httpbin.org","steps":[{"id":"s1","name":"Status","method":"GET","url":"https://httpbin.org/status/200","headers":{},"body":null,"asserts":[]}]},"selectedBaseUrlKey":null,"specs":[]}'
 ```

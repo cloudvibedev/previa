@@ -35,15 +35,15 @@ main -> runner -> engine
 ### 1. Start one or more runners
 
 ```bash
-ADDRESS=0.0.0.0 PORT=3000 cargo run -p previa-runner
+ADDRESS=0.0.0.0 PORT=55880 cargo run -p previa-runner
 ```
 
 ### 2. Start the orchestrator
 
 ```bash
 ORCHESTRATOR_DATABASE_URL="sqlite://orchestrator.db" \
-RUNNER_ENDPOINTS="http://127.0.0.1:3000" \
-ADDRESS=0.0.0.0 PORT=3100 \
+RUNNER_ENDPOINTS="http://127.0.0.1:55880" \
+ADDRESS=0.0.0.0 PORT=5588 \
 cargo run -p previa-main
 ```
 
@@ -54,7 +54,7 @@ Open **https://previa.dev** (fully free UI), add your server URL, and start runn
 Example server URL:
 
 ```text
-http://127.0.0.1:3100
+http://127.0.0.1:5588
 ```
 
 ## Workspace Crates
