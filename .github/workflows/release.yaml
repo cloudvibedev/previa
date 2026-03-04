@@ -51,7 +51,7 @@ jobs:
 
   build_binaries:
     name: Build binaries (${{ matrix.name }})
-    needs: version_check
+    needs: [version_check, tag_release]
     runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
@@ -201,7 +201,7 @@ jobs:
 
   tag_release:
     name: Create git tag
-    needs: [version_check, build_binaries, upload_r2_artifacts]
+    needs: version_check
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version_check.outputs.version }}
@@ -209,25 +209,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create tag
+      - name: Create tag if missing
         shell: bash
         run: |
           set -euo pipefail
+          tag="v${VERSION}"
           git fetch --tags
 
-          if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
-            echo "::error::Tag v${VERSION} already exists"
-            exit 1
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists on remote, skipping creation."
+            exit 0
           fi
 
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag "v${VERSION}"
-          git push origin "v${VERSION}"
+          git tag "${tag}"
+          if git push origin "refs/tags/${tag}"; then
+            echo "Tag ${tag} created and pushed."
+          elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} was created concurrently, continuing."
+          else
+            echo "::error::Failed to push tag ${tag}"
+            exit 1
+          fi
 
   github_release:
     name: Publish GitHub Release
-    needs: [version_check, tag_release]
+    needs: [version_check, tag_release, build_binaries, upload_r2_artifacts]
     runs-on: ubuntu-latest
     steps:
       - name: Download all release artifacts
