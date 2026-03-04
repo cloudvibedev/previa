@@ -4,6 +4,9 @@ version = { workspace = true }
 edition = { workspace = true }
 description = "Motor de execucao de pipelines da plataforma Previa."
 authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

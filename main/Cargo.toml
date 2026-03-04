@@ -4,6 +4,9 @@ version = { workspace = true }
 edition = { workspace = true }
 description = "API orchestrator for load distribution between runners."
 authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
 axum = { workspace = true }

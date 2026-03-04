@@ -4,6 +4,9 @@ version = { workspace = true }
 edition = { workspace = true }
 description = "API for remote execution of integration and load tests via HTTP streaming (SSE)."
 authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
 axum = { workspace = true }

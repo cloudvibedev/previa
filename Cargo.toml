@@ -3,10 +3,12 @@ resolver = "3"
 members = ['engine', 'main', 'runner']
 
 [workspace.package]
-name = "previa-engine"
 version = "0.0.1"
 edition = "2024"
 authors = ["Previa Labs <previa@cloudvibe.dev>"]
+license = "MIT"
+repository = "https://github.com/cloudvibedev/previa"
+homepage = "https://github.com/cloudvibedev/previa"
 
 [workspace.dependencies]
 axum = "0.8"
