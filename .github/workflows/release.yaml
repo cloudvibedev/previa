@@ -369,7 +369,20 @@ jobs:
 
       - name: Publish previa-engine
         shell: bash
-        run: cargo publish -p previa-engine --token "${CARGO_REGISTRY_TOKEN}" --no-verify
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(cargo publish -p previa-engine --no-verify 2>&1)"
+          status=$?
+          set -e
+          echo "${output}"
+          if [ ${status} -ne 0 ]; then
+            if echo "${output}" | grep -q "already exists on crates.io index"; then
+              echo "previa-engine already published at this version, continuing."
+            else
+              exit ${status}
+            fi
+          fi
 
       - name: Wait for previa-engine indexing
         shell: bash
@@ -381,7 +394,20 @@ jobs:
 
       - name: Publish previa-runner
         shell: bash
-        run: cargo publish -p previa-runner --token "${CARGO_REGISTRY_TOKEN}" --no-verify
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(cargo publish -p previa-runner --no-verify 2>&1)"
+          status=$?
+          set -e
+          echo "${output}"
+          if [ ${status} -ne 0 ]; then
+            if echo "${output}" | grep -q "already exists on crates.io index"; then
+              echo "previa-runner already published at this version, continuing."
+            else
+              exit ${status}
+            fi
+          fi
 
       - name: Wait for previa-runner indexing
         shell: bash
@@ -393,4 +419,17 @@ jobs:
 
       - name: Publish previa-main
         shell: bash
-        run: cargo publish -p previa-main --token "${CARGO_REGISTRY_TOKEN}" --no-verify
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(cargo publish -p previa-main --no-verify 2>&1)"
+          status=$?
+          set -e
+          echo "${output}"
+          if [ ${status} -ne 0 ]; then
+            if echo "${output}" | grep -q "already exists on crates.io index"; then
+              echo "previa-main already published at this version, continuing."
+            else
+              exit ${status}
+            fi
+          fi
