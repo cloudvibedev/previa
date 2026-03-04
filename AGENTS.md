@@ -16,7 +16,4 @@
 - **Release build & push**: after finishing any change run
   `cargo build --release`; if the release build succeeds, commit the changes and
   push to the remote.
-- **Agent execution behavior**: `POST /v1/agents/{agent_id}` supports recursive
-  tool execution until the model stops returning tool calls; in streaming mode,
-  responses must keep the `{assistantMessage, providerPayload}` contract and
-  stream only model output chunks.
+
