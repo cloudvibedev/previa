@@ -3,7 +3,7 @@ resolver = "3"
 members = ['engine', 'main', 'runner']
 
 [workspace.package]
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 authors = ["Previa Labs <previa@cloudvibe.dev>"]
 license = "MIT"
@@ -14,8 +14,8 @@ homepage = "https://github.com/cloudvibedev/previa"
 axum = "0.8"
 rand = "0.10.0"
 dotenvy = "0.15"
-previa-engine = { path = "engine", version = "0.0.3" }
-previa-runner = { path = "runner", version = "0.0.3" }
+previa-engine = { path = "engine" }
+previa-runner = { path = "runner" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = [
