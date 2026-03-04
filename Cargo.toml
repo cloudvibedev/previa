@@ -14,8 +14,8 @@ homepage = "https://github.com/cloudvibedev/previa"
 axum = "0.8"
 rand = "0.10.0"
 dotenvy = "0.15"
-previa-engine = { path = "engine" }
-previa-runner = { path = "runner" }
+previa-engine = { path = "engine", version = "0.0.4" }
+previa-runner = { path = "runner", version = "0.0.4" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = [
