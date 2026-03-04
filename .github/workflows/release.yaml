@@ -24,25 +24,34 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Resolve workspace crate versions
+      - name: Resolve root workspace version
         id: version
         shell: bash
         run: |
           set -euo pipefail
 
-          main_version="$(cargo pkgid -p previa-main | sed -E 's/.*@([0-9]+\.[0-9]+\.[0-9]+.*)$/\1/')"
-          runner_version="$(cargo pkgid -p previa-runner | sed -E 's/.*@([0-9]+\.[0-9]+\.[0-9]+.*)$/\1/')"
-          engine_version="$(cargo pkgid -p previa-engine | sed -E 's/.*@([0-9]+\.[0-9]+\.[0-9]+.*)$/\1/')"
+          workspace_version="$(
+            awk '
+              /^\[workspace\.package\]$/ { in_section=1; next }
+              /^\[/ { in_section=0 }
+              in_section && /^version[[:space:]]*=/ {
+                match($0, /"([^"]+)"/, m)
+                if (m[1] != "") {
+                  print m[1]
+                  exit
+                }
+              }
+            ' Cargo.toml
+          )"
 
-          echo "main=${main_version}"
-          echo "runner=${runner_version}"
-          echo "engine=${engine_version}"
-
-          if [ "${main_version}" != "${runner_version}" ] || [ "${main_version}" != "${engine_version}" ]; then
-            echo "::notice::Crate versions differ. Using previa-main version (${main_version}) as release/tag version."
+          if [ -z "${workspace_version}" ]; then
+            echo "::error::Could not resolve [workspace.package].version from Cargo.toml"
+            exit 1
           fi
 
-          echo "version=${main_version}" >> "${GITHUB_OUTPUT}"
+          echo "workspace=${workspace_version}"
+
+          echo "version=${workspace_version}" >> "${GITHUB_OUTPUT}"
 
   build_binaries:
     name: Build binaries (${{ matrix.name }})
