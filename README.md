@@ -23,6 +23,7 @@ Previa architecture is composed of three Rust crates:
 - `previa-main` (orchestrator API)
 - `previa-runner` (remote execution API)
 - `previa-engine` (pipeline execution core)
+- `previactl` (Linux CLI para install/update/uninstall dos binários)
 
 Data flow:
 
@@ -62,6 +63,7 @@ http://127.0.0.1:5588
 - [`engine/README.md`](engine/README.md)
 - [`runner/README.md`](runner/README.md)
 - [`main/README.md`](main/README.md)
+- [`previactl/README.md`](previactl/README.md)
 
 ## Local Verification
 

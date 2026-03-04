@@ -22,7 +22,7 @@ tracing-subscriber = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
 http-body-util = "0.1"
-previa-engine = { path = "../engine", version = "0.0.1" }
+previa-engine = { path = "../engine" }
 sysinfo = "0.38.3"
 
 [dev-dependencies]

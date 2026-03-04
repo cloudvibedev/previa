@@ -24,7 +24,7 @@ uuid = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 md5 = "0.8"
 oas3 = { version = "0.20.1", features = ["yaml-spec"] }
-previa-runner = { path = "../runner", version = "0.0.1" }
+previa-runner = { path = "../runner" }
 rand = { workspace = true }
 reqwest = { version = "0.13.2", default-features = false, features = [
     "json",
