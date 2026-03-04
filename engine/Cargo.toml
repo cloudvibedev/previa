@@ -1,12 +1,13 @@
 [package]
 name = "previa-engine"
-version = "0.0.4"
-edition = { workspace = true }
 description = "Motor de execucao de pipelines da plataforma Previa."
-authors = { workspace = true }
-license = { workspace = true }
-repository = { workspace = true }
-homepage = { workspace = true }
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = true
 
 [dependencies]
 chrono = { workspace = true }

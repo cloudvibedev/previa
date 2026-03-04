@@ -1,7 +1,7 @@
 [package]
 name = "previa-main"
 description = "API orchestrator for load distribution between runners."
-version = "0.0.4"
+version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

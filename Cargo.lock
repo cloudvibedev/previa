@@ -1685,7 +1685,7 @@ dependencies = [
 
 [[package]]
 name = "previa-engine"
-version = "0.0.4"
+version = "0.0.6"
 dependencies = [
  "chrono",
  "fakeit",
@@ -1703,7 +1703,7 @@ dependencies = [
 
 [[package]]
 name = "previa-main"
-version = "0.0.4"
+version = "0.0.6"
 dependencies = [
  "axum",
  "chrono",
