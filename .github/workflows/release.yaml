@@ -148,9 +148,55 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  upload_r2_artifacts:
+    name: Upload release artifacts to Cloudflare R2
+    needs: [version_check, build_binaries]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version_check.outputs.version }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_REGION: auto
+      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET }}
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Upload artifacts to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${R2_ACCOUNT_ID:?Missing secret CLOUDFLARE_R2_ACCOUNT_ID}"
+          : "${R2_BUCKET:?Missing var/secret CLOUDFLARE_R2_BUCKET}"
+          : "${AWS_ACCESS_KEY_ID:?Missing secret CLOUDFLARE_R2_ACCESS_KEY_ID}"
+          : "${AWS_SECRET_ACCESS_KEY:?Missing secret CLOUDFLARE_R2_SECRET_ACCESS_KEY}"
+          : "${VERSION:?Missing resolved release version}"
+
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          shopt -s nullglob
+          files=(release-assets/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No release assets found to upload"
+            exit 1
+          fi
+
+          for file in "${files[@]}"; do
+            filename="$(basename "${file}")"
+            key="${VERSION}/files/${filename}"
+            echo "Uploading ${file} to s3://${R2_BUCKET}/${key}"
+            aws s3 cp "${file}" "s3://${R2_BUCKET}/${key}" --endpoint-url "${endpoint}" --no-progress
+          done
+
   tag_release:
     name: Create git tag
-    needs: [version_check, build_binaries]
+    needs: [version_check, build_binaries, upload_r2_artifacts]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version_check.outputs.version }}
