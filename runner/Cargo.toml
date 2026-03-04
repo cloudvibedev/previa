@@ -1,12 +1,13 @@
 [package]
 name = "previa-runner"
-version = { workspace = true }
-edition = { workspace = true }
 description = "API for remote execution of integration and load tests via HTTP streaming (SSE)."
-authors = { workspace = true }
-license = { workspace = true }
-repository = { workspace = true }
-homepage = { workspace = true }
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = true
 
 [dependencies]
 axum = { workspace = true }

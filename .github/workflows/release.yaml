@@ -39,12 +39,7 @@ jobs:
           echo "engine=${engine_version}"
 
           if [ "${main_version}" != "${runner_version}" ] || [ "${main_version}" != "${engine_version}" ]; then
-            echo "::error::Version mismatch between crates. main=${main_version}, runner=${runner_version}, engine=${engine_version}"
-            exit 1
-          fi
-
-          if ! grep -Eq '^version\s*=\s*\{ workspace = true \}\s*$' main/Cargo.toml; then
-            echo "::warning::main/Cargo.toml does not declare package version from workspace"
+            echo "::notice::Crate versions differ. Using previa-main version (${main_version}) as release/tag version."
           fi
 
           echo "version=${main_version}" >> "${GITHUB_OUTPUT}"

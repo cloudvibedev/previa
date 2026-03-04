@@ -1,12 +1,13 @@
 [package]
 name = "previa-main"
-version = { workspace = true }
-edition = { workspace = true }
 description = "API orchestrator for load distribution between runners."
-authors = { workspace = true }
-license = { workspace = true }
-repository = { workspace = true }
-homepage = { workspace = true }
+version = "0.0.4"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = true
 
 [dependencies]
 axum = { workspace = true }
@@ -21,7 +22,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 utoipa = { workspace = true }
 uuid = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { workspace = true }
 md5 = "0.8"
 oas3 = { version = "0.20.1", features = ["yaml-spec"] }
 previa-runner = { workspace = true }

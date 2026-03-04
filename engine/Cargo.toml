@@ -1,6 +1,6 @@
 [package]
 name = "previa-engine"
-version = { workspace = true }
+version = "0.0.4"
 edition = { workspace = true }
 description = "Motor de execucao de pipelines da plataforma Previa."
 authors = { workspace = true }
@@ -9,7 +9,7 @@ repository = { workspace = true }
 homepage = { workspace = true }
 
 [dependencies]
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { workspace = true }
 fakeit = "1.4.1"
 handlebars = "6.3.2"
 regex = "1"
