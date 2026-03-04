@@ -4,19 +4,18 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT}
 
 use crate::models::release::{GitHubReleaseResponse, Release};
 
-const DEFAULT_PREVIA_REPO: &str = "cloudvibedev/previa";
+const PREVIA_REPO_URL: &str = "https://github.com/cloudvibedev/previa";
+const PREVIA_RELEASES_URL: &str = "https://github.com/cloudvibedev/previa/releases";
+const PREVIA_LATEST_RELEASE_API_URL: &str =
+    "https://api.github.com/repos/cloudvibedev/previa/releases/latest";
 
 #[derive(Clone, Debug)]
 pub struct GitHubClient {
     client: reqwest::Client,
-    latest_release_url: String,
 }
 
 impl GitHubClient {
     pub fn new() -> Result<Self> {
-        let repo = std::env::var("PREVIA_REPO").unwrap_or_else(|_| DEFAULT_PREVIA_REPO.to_string());
-        let latest_release_url = format!("https://api.github.com/repos/{repo}/releases/latest");
-
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("previactl/0.0.2"));
         headers.insert(
@@ -37,30 +36,28 @@ impl GitHubClient {
             .build()
             .context("falha ao inicializar cliente HTTP")?;
 
-        Ok(Self {
-            client,
-            latest_release_url,
-        })
+        Ok(Self { client })
     }
 
     pub async fn latest_release(&self) -> Result<Release> {
         let response = self
             .client
-            .get(&self.latest_release_url)
+            .get(PREVIA_LATEST_RELEASE_API_URL)
             .send()
             .await
             .context("falha ao consultar release mais recente")?;
 
         if response.status() == StatusCode::NOT_FOUND {
             return Err(anyhow!(
-                "release mais recente nao encontrada (404). Verifique se existe uma release publicada ou se PREVIA_REPO esta correto."
+                "release mais recente nao encontrada (404) no repositorio principal: {PREVIA_REPO_URL}. Verifique se existe uma release publicada."
             ));
         }
 
         if !response.status().is_success() {
             return Err(anyhow!(
-                "GitHub API retornou status {} ao buscar release mais recente",
-                response.status()
+                "GitHub API retornou status {} ao buscar release mais recente. Consulte: {}",
+                response.status(),
+                PREVIA_RELEASES_URL
             ));
         }
 

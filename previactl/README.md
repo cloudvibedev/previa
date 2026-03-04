@@ -2,6 +2,10 @@
 
 CLI Linux para gerenciar binarios do Previa.
 
+Fonte oficial das releases:
+
+- `https://github.com/cloudvibedev/previa/releases`
+
 ## Comandos iniciais
 
 - `previactl install`: baixa a release mais recente e instala sem trocar a versao ativa atual.
@@ -17,6 +21,4 @@ CLI Linux para gerenciar binarios do Previa.
 
 ## Variaveis de ambiente
 
-- `PREVIA_REPO`: repo GitHub para buscar releases (padrao: `cloudvibedev/previa`)
 - `GITHUB_TOKEN`: token opcional para evitar rate-limit/acessar repositorios privados
-
