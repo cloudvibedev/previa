@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ['engine', 'main', 'runner', 'previactl']
+members = ['engine', 'main', 'runner']
 
 [workspace.package]
 version = "0.0.2"

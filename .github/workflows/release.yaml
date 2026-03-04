@@ -119,11 +119,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target "${{ matrix.target }}" -p previa-main
             cross build --release --target "${{ matrix.target }}" -p previa-runner
+            cross build --release --target "${{ matrix.target }}" -p previa-main
           else
-            cargo build --release --target "${{ matrix.target }}" -p previa-main
             cargo build --release --target "${{ matrix.target }}" -p previa-runner
+            cargo build --release --target "${{ matrix.target }}" -p previa-main
           fi
 
       - name: Prepare release assets
@@ -132,11 +132,11 @@ jobs:
           set -euo pipefail
 
           mkdir -p dist
-          main_src="target/${{ matrix.target }}/release/previa-main${{ matrix.exe_ext }}"
           runner_src="target/${{ matrix.target }}/release/previa-runner${{ matrix.exe_ext }}"
+          main_src="target/${{ matrix.target }}/release/previa-main${{ matrix.exe_ext }}"
 
-          main_asset="previa-main-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
           runner_asset="previa-runner-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
+          main_asset="previa-main-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
 
           cp "${main_src}" "dist/${main_asset}"
           cp "${runner_src}" "dist/${runner_asset}"
@@ -209,17 +209,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - service: previa-main
-            image: cloudvibe-main
+          - service: previa-runner
+            image: cloudvibe-runner
             arch: amd64
-          - service: previa-main
-            image: cloudvibe-main
+          - service: previa-runner
+            image: cloudvibe-runner
             arch: arm64
-          - service: previa-runner
-            image: cloudvibe-runner
+          - service: previa-main
+            image: cloudvibe-main
             arch: amd64
-          - service: previa-runner
-            image: cloudvibe-runner
+          - service: previa-main
+            image: cloudvibe-main
             arch: arm64
     steps:
       - name: Checkout
