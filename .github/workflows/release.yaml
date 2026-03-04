@@ -145,7 +145,7 @@ jobs:
 
   upload_r2_artifacts:
     name: Upload release artifacts to Cloudflare R2
-    needs: [version_check, build_binaries, github_release]
+    needs: [version_check, build_binaries]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version_check.outputs.version }}
@@ -230,14 +230,22 @@ jobs:
 
   github_release:
     name: Publish GitHub Release
-    needs: [version_check, tag_release]
+    needs: [version_check, tag_release, build_binaries]
     runs-on: ubuntu-latest
     steps:
-      - name: Create release
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create release and upload binaries
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.version_check.outputs.version }}
           name: Release v${{ needs.version_check.outputs.version }}
+          files: release-assets/*
           draft: false
           prerelease: false
         env:
@@ -349,7 +357,7 @@ jobs:
 
   publish_crates:
     name: Publish crates.io packages
-    needs: [version_check, github_release]
+    needs: [version_check, build_binaries]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
