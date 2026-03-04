@@ -154,11 +154,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version_check.outputs.version }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_REGION: auto
-      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
-      R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ENDPOINT: ${{ secrets.R2_S3_API || secrets.R2_ENPOINT }}
+      R2_BUCKET: ${{ vars.R2_BUCKET || secrets.R2_BUCKET || vars.CLOUDFLARE_R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET }}
     steps:
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
@@ -172,13 +173,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          : "${R2_ACCOUNT_ID:?Missing secret CLOUDFLARE_R2_ACCOUNT_ID}"
-          : "${R2_BUCKET:?Missing var/secret CLOUDFLARE_R2_BUCKET}"
-          : "${AWS_ACCESS_KEY_ID:?Missing secret CLOUDFLARE_R2_ACCESS_KEY_ID}"
-          : "${AWS_SECRET_ACCESS_KEY:?Missing secret CLOUDFLARE_R2_SECRET_ACCESS_KEY}"
+          : "${R2_BUCKET:?Missing var/secret R2_BUCKET (or CLOUDFLARE_R2_BUCKET fallback)}"
+          : "${AWS_ACCESS_KEY_ID:?Missing secret R2_ACCESS_KEY_ID}"
+          : "${AWS_SECRET_ACCESS_KEY:?Missing secret R2_SECRET_ACCESS_KEY}"
           : "${VERSION:?Missing resolved release version}"
 
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          if [ -n "${R2_ENDPOINT:-}" ]; then
+            endpoint="${R2_ENDPOINT}"
+          else
+            : "${R2_ACCOUNT_ID:?Missing secret R2_ACCOUNT_ID when R2_S3_API/R2_ENPOINT is not set}"
+            endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          fi
 
           shopt -s nullglob
           files=(release-assets/*)
