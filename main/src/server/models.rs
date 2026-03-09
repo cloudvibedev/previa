@@ -31,7 +31,8 @@ pub struct E2eTestRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectE2eTestRequest {
-    pub pipeline: Pipeline,
+    pub pipeline_id: Option<String>,
+    pub pipeline: Option<Pipeline>,
     pub selected_base_url_key: Option<String>,
     pub pipeline_index: Option<i64>,
     #[serde(default)]
@@ -41,7 +42,8 @@ pub struct ProjectE2eTestRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectLoadTestRequest {
-    pub pipeline: Pipeline,
+    pub pipeline_id: Option<String>,
+    pub pipeline: Option<Pipeline>,
     pub config: LoadTestConfig,
     pub selected_base_url_key: Option<String>,
     pub pipeline_index: Option<i64>,

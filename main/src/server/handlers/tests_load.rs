@@ -11,7 +11,9 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
-use crate::server::db::{save_load_history, upsert_load_history};
+use crate::server::db::{
+    load_project_pipeline_for_execution, save_load_history, upsert_load_history,
+};
 use crate::server::errors::{
     bad_request_message_response, bad_request_response, internal_error_response,
     service_unavailable_response,
@@ -413,12 +415,30 @@ pub async fn run_load_test_for_project(
         Err(rejection) => return bad_request_response(rejection),
     };
 
+    let (pipeline, pipeline_index) = match (payload.pipeline_id.clone(), payload.pipeline) {
+        (Some(pipeline_id), _) if !pipeline_id.trim().is_empty() => {
+            match load_project_pipeline_for_execution(&state.db, &project_id, &pipeline_id).await {
+                Ok(Some((pipeline, position))) => (pipeline, Some(position)),
+                Ok(None) => {
+                    return bad_request_message_response("pipelineId not found for project");
+                }
+                Err(err) => {
+                    return internal_error_response(format!(
+                        "failed to load pipeline for execution: {err}"
+                    ));
+                }
+            }
+        }
+        (_, Some(pipeline)) => (pipeline, payload.pipeline_index),
+        _ => return bad_request_message_response("pipelineId is required"),
+    };
+
     let forwarded = LoadTestRequest {
-        pipeline: payload.pipeline,
+        pipeline,
         config: payload.config,
         selected_base_url_key: payload.selected_base_url_key,
         project_id: Some(project_id),
-        pipeline_index: payload.pipeline_index,
+        pipeline_index,
         specs: payload.specs,
     };
     run_load_test_internal(State(state), headers, Ok(Json(forwarded))).await

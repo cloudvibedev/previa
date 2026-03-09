@@ -14,7 +14,7 @@ pub use history::{
 };
 pub use pipelines::{
     delete_pipeline_record, insert_project_pipeline, load_pipelines_for_project,
-    load_project_pipeline_record, update_project_pipeline,
+    load_project_pipeline_for_execution, load_project_pipeline_record, update_project_pipeline,
 };
 pub use projects::{
     list_project_records, load_project_record, upsert_project_metadata,

@@ -48,6 +48,32 @@ pub async fn load_project_pipeline_record(
     Ok(serde_json::from_str::<Pipeline>(&raw).ok())
 }
 
+pub async fn load_project_pipeline_for_execution(
+    db: &SqlitePool,
+    project_id: &str,
+    pipeline_id: &str,
+) -> Result<Option<(Pipeline, i64)>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT position, pipeline_json FROM pipelines WHERE project_id = ? AND id = ? LIMIT 1",
+    )
+    .bind(project_id)
+    .bind(pipeline_id)
+    .fetch_optional(db)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let raw = row
+        .try_get::<String, _>("pipeline_json")
+        .unwrap_or_else(|_| "{}".to_owned());
+    let position = row.try_get::<i64, _>("position").unwrap_or_default();
+    Ok(serde_json::from_str::<Pipeline>(&raw)
+        .ok()
+        .map(|pipeline| (pipeline, position)))
+}
+
 pub async fn insert_project_pipeline(
     db: &SqlitePool,
     project_id: &str,
