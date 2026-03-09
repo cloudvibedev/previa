@@ -11,6 +11,10 @@ use crate::server::state::AppState;
 const MCP_SESSION_HEADER: &str = "mcp-session-id";
 const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";
 
+pub async fn preflight() -> StatusCode {
+    StatusCode::NO_CONTENT
+}
+
 pub async fn handle_http(
     State(state): State<AppState>,
     headers: HeaderMap,

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use axum::Router;
 use axum::middleware::from_fn;
 use axum::routing::{get, post, put};
@@ -26,7 +28,7 @@ use crate::server::handlers::specs::{
 use crate::server::handlers::tests_e2e::run_e2e_test_for_project;
 use crate::server::handlers::tests_load::run_load_test_for_project;
 use crate::server::handlers::transfers::{export_project, import_project};
-use crate::server::mcp::handlers::{delete_http_session, handle_http};
+use crate::server::mcp::handlers::{delete_http_session, handle_http, preflight};
 use crate::server::mcp::models::McpConfig;
 use crate::server::middleware::transaction::propagate_transaction_header;
 use crate::server::state::AppState;
@@ -107,22 +109,26 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
         .route(
             "/api/v1/projects/{projectId}/tests/load/{test_id}",
             get(get_load_test_by_id).delete(delete_load_test_by_id),
-        )
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any)
-                .expose_headers(Any),
-        )
-        .layer(from_fn(propagate_transaction_header));
+        );
 
     if mcp_config.enabled {
         app = app.route(
             &mcp_config.path,
-            post(handle_http).delete(delete_http_session),
+            post(handle_http)
+                .delete(delete_http_session)
+                .options(preflight),
         );
     }
 
-    app.with_state(state)
+    app.layer(
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any)
+            .allow_private_network(true)
+            .expose_headers(Any)
+            .max_age(Duration::from_secs(60 * 60)),
+    )
+    .layer(from_fn(propagate_transaction_header))
+    .with_state(state)
 }
