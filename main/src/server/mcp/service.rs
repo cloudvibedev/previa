@@ -1,17 +1,20 @@
+use previa_runner::Pipeline;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tracing::info;
 
 use crate::server::db::{
-    list_project_records, list_project_spec_records, load_pipelines_for_project,
-    load_project_record, project_exists,
+    delete_pipeline_record, insert_project_pipeline, list_project_records,
+    list_project_spec_records, load_pipelines_for_project, load_project_pipeline_record,
+    load_project_record, project_exists, update_project_pipeline,
 };
 use crate::server::docs::build_openapi_document;
 use crate::server::execution::collect_runner_statuses;
 use crate::server::mcp::models::{
-    InitializeParams, ListProjectsToolArgs, McpPeerInfo, McpRequest, McpResponse, McpSession,
-    ProjectByIdArgs, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult, ToolDefinition,
-    ToolTextContent, ToolsListParams, ValidateOpenApiToolArgs,
+    CreateProjectPipelineArgs, InitializeParams, ListProjectsToolArgs, McpPeerInfo, McpRequest,
+    McpResponse, McpSession, ProjectByIdArgs, ProjectPipelineByIdArgs, SUPPORTED_PROTOCOL_VERSIONS,
+    ToolCallParams, ToolCallResult, ToolDefinition, ToolTextContent, ToolsListParams,
+    UpdateProjectPipelineArgs, ValidateOpenApiToolArgs,
 };
 use crate::server::models::{OrchestratorInfoResponse, ProjectListQuery};
 use crate::server::state::AppState;
@@ -339,6 +342,105 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                 .map_err(|err| format!("failed to load project pipelines: {err}"))?;
             Ok(tool_success(serde_json::to_value(pipelines).unwrap()))
         }
+        "get_project_pipeline" => {
+            let args = parse_tool_arguments::<ProjectPipelineByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            if !project_exists(&state.db, &args.project_id)
+                .await
+                .map_err(|err| format!("failed to load project: {err}"))?
+            {
+                return Ok(tool_error(format!(
+                    "project '{}' not found",
+                    args.project_id
+                )));
+            }
+            let pipeline =
+                load_project_pipeline_record(&state.db, &args.project_id, &args.pipeline_id)
+                    .await
+                    .map_err(|err| format!("failed to load project pipeline: {err}"))?;
+            match pipeline {
+                Some(pipeline) => Ok(tool_success(serde_json::to_value(pipeline).unwrap())),
+                None => Ok(tool_error(format!(
+                    "pipeline '{}' not found in project '{}'",
+                    args.pipeline_id, args.project_id
+                ))),
+            }
+        }
+        "create_project_pipeline" => {
+            let args = parse_tool_arguments::<CreateProjectPipelineArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            validate_pipeline_input(&args.pipeline)?;
+            if !project_exists(&state.db, &args.project_id)
+                .await
+                .map_err(|err| format!("failed to load project: {err}"))?
+            {
+                return Ok(tool_error(format!(
+                    "project '{}' not found",
+                    args.project_id
+                )));
+            }
+            let pipeline = insert_project_pipeline(&state.db, &args.project_id, args.pipeline)
+                .await
+                .map_err(|err| format!("failed to create project pipeline: {err}"))?;
+            Ok(tool_success(serde_json::to_value(pipeline).unwrap()))
+        }
+        "update_project_pipeline" => {
+            let args = parse_tool_arguments::<UpdateProjectPipelineArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            validate_pipeline_input(&args.pipeline)?;
+            if !project_exists(&state.db, &args.project_id)
+                .await
+                .map_err(|err| format!("failed to load project: {err}"))?
+            {
+                return Ok(tool_error(format!(
+                    "project '{}' not found",
+                    args.project_id
+                )));
+            }
+            let pipeline = update_project_pipeline(
+                &state.db,
+                &args.project_id,
+                &args.pipeline_id,
+                args.pipeline,
+            )
+            .await
+            .map_err(|err| format!("failed to update project pipeline: {err}"))?;
+            match pipeline {
+                Some(pipeline) => Ok(tool_success(serde_json::to_value(pipeline).unwrap())),
+                None => Ok(tool_error(format!(
+                    "pipeline '{}' not found in project '{}'",
+                    args.pipeline_id, args.project_id
+                ))),
+            }
+        }
+        "delete_project_pipeline" => {
+            let args = parse_tool_arguments::<ProjectPipelineByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            if !project_exists(&state.db, &args.project_id)
+                .await
+                .map_err(|err| format!("failed to load project: {err}"))?
+            {
+                return Ok(tool_error(format!(
+                    "project '{}' not found",
+                    args.project_id
+                )));
+            }
+            let deleted = delete_pipeline_record(&state.db, &args.project_id, &args.pipeline_id)
+                .await
+                .map_err(|err| format!("failed to delete project pipeline: {err}"))?;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "pipelineId": args.pipeline_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "pipeline '{}' not found in project '{}'",
+                    args.pipeline_id, args.project_id
+                )))
+            }
+        }
         "list_project_specs" => {
             let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
@@ -463,6 +565,59 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "get_project_pipeline".to_owned(),
+            title: Some("Get Pipeline".to_owned()),
+            description: "Returns a single pipeline from a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "pipelineId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "create_project_pipeline".to_owned(),
+            title: Some("Create Pipeline".to_owned()),
+            description: "Creates a pipeline inside a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "pipeline"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipeline": pipeline_schema()
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "update_project_pipeline".to_owned(),
+            title: Some("Update Pipeline".to_owned()),
+            description: "Updates an existing pipeline in a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "pipelineId", "pipeline"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineId": { "type": "string", "minLength": 1 },
+                    "pipeline": pipeline_schema()
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_project_pipeline".to_owned(),
+            title: Some("Delete Pipeline".to_owned()),
+            description: "Deletes a pipeline from a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "pipelineId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "list_project_specs".to_owned(),
             title: Some("List Specs".to_owned()),
             description: "Lists OpenAPI specs associated with a project.".to_owned(),
@@ -511,12 +666,78 @@ fn tool_error(message: String) -> ToolCallResult {
     }
 }
 
+fn validate_pipeline_input(pipeline: &Pipeline) -> Result<(), String> {
+    if pipeline.name.trim().is_empty() {
+        return Err("pipeline name is required".to_owned());
+    }
+    if pipeline.steps.is_empty() {
+        return Err("pipeline must contain at least one step".to_owned());
+    }
+    Ok(())
+}
+
+fn pipeline_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["name", "steps"],
+        "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string", "minLength": 1 },
+            "description": { "type": ["string", "null"] },
+            "steps": {
+                "type": "array",
+                "minItems": 1,
+                "items": pipeline_step_schema()
+            }
+        }
+    })
+}
+
+fn pipeline_step_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id", "name", "method", "url"],
+        "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "minLength": 1 },
+            "description": { "type": ["string", "null"] },
+            "method": { "type": "string", "minLength": 1 },
+            "url": { "type": "string", "minLength": 1 },
+            "headers": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+            },
+            "body": {},
+            "operationId": { "type": ["string", "null"] },
+            "delay": { "type": ["integer", "null"], "minimum": 0 },
+            "retry": { "type": ["integer", "null"], "minimum": 0 },
+            "asserts": {
+                "type": "array",
+                "items": assertion_schema()
+            }
+        }
+    })
+}
+
+fn assertion_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["field", "operator"],
+        "properties": {
+            "field": { "type": "string", "minLength": 1 },
+            "operator": { "type": "string", "minLength": 1 },
+            "expected": { "type": ["string", "null"] }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use previa_runner::{Pipeline, PipelineStep};
     use serde_json::json;
 
-    use super::{parse_tool_arguments, tool_definitions};
-    use crate::server::mcp::models::ProjectByIdArgs;
+    use super::{parse_tool_arguments, tool_definitions, validate_pipeline_input};
+    use crate::server::mcp::models::{CreateProjectPipelineArgs, ProjectByIdArgs};
 
     #[test]
     fn project_tools_require_project_id() {
@@ -545,5 +766,57 @@ mod tests {
 
         assert_eq!(args.project_id, "abc");
         assert_eq!(args.meta, Some(json!({ "source": "client" })));
+    }
+
+    #[test]
+    fn parse_create_pipeline_arguments() {
+        let args = parse_tool_arguments::<CreateProjectPipelineArgs>(json!({
+            "projectId": "project-1",
+            "pipeline": {
+                "name": "Pipeline A",
+                "description": null,
+                "steps": [
+                    {
+                        "id": "step-1",
+                        "name": "Step 1",
+                        "method": "GET",
+                        "url": "https://example.com",
+                        "headers": {},
+                        "asserts": []
+                    }
+                ]
+            }
+        }))
+        .expect("valid create pipeline args");
+
+        assert_eq!(args.project_id, "project-1");
+        assert_eq!(args.pipeline.name, "Pipeline A");
+    }
+
+    #[test]
+    fn validate_pipeline_requires_name() {
+        let pipeline = Pipeline {
+            id: None,
+            name: "   ".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "step-1".to_owned(),
+                name: "Step 1".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: "https://example.com".to_owned(),
+                headers: Default::default(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            validate_pipeline_input(&pipeline).expect_err("pipeline name should be validated"),
+            "pipeline name is required"
+        );
     }
 }

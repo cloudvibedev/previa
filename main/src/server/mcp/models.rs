@@ -1,3 +1,4 @@
+use previa_runner::Pipeline;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -176,6 +177,34 @@ pub struct ListProjectsToolArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectByIdArgs {
     pub project_id: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectPipelineByIdArgs {
+    pub project_id: String,
+    pub pipeline_id: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateProjectPipelineArgs {
+    pub project_id: String,
+    pub pipeline: Pipeline,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateProjectPipelineArgs {
+    pub project_id: String,
+    pub pipeline_id: String,
+    pub pipeline: Pipeline,
     #[serde(default, rename = "_meta")]
     pub meta: Option<Value>,
 }
