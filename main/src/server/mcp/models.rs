@@ -104,6 +104,8 @@ pub struct InitializeParams {
     pub capabilities: Value,
     #[serde(default)]
     pub client_info: Option<McpPeerInfo>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -119,6 +121,8 @@ pub struct McpPeerInfo {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolsListParams {
     pub cursor: Option<String>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,6 +131,8 @@ pub struct ToolCallParams {
     pub name: String,
     #[serde(default)]
     pub arguments: Value,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,16 +168,22 @@ pub struct ListProjectsToolArgs {
     pub limit: Option<u32>,
     pub offset: Option<u32>,
     pub order: Option<HistoryOrder>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectByIdArgs {
     pub project_id: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ValidateOpenApiToolArgs {
     pub source: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
 }

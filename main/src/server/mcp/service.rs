@@ -87,6 +87,7 @@ pub async fn process_request(
                     };
                 }
             };
+            let _ = params.meta.as_ref();
             if params.cursor.is_some() {
                 return McpHttpOutcome::Response {
                     response: McpResponse::error(
@@ -126,6 +127,7 @@ pub async fn process_request(
                     };
                 }
             };
+            let _ = params.meta.as_ref();
 
             match execute_tool(state, params).await {
                 Ok(result) => McpHttpOutcome::Response {
@@ -203,6 +205,7 @@ async fn handle_initialize(
             "mcp client initialized"
         );
     }
+    let _ = params.meta.as_ref();
     if !params.capabilities.is_null() {
         info!(capabilities = %params.capabilities, "mcp client capabilities received");
     }
@@ -292,6 +295,7 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
         )),
         "list_projects" => {
             let args = parse_tool_arguments::<ListProjectsToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
             let projects = list_project_records(
                 &state.db,
                 ProjectListQuery {
@@ -306,6 +310,7 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
         }
         "get_project" => {
             let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
             let project = load_project_record(&state.db, &args.project_id)
                 .await
                 .map_err(|err| format!("failed to load project: {err}"))?;
@@ -319,6 +324,7 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
         }
         "list_project_pipelines" => {
             let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
             if !project_exists(&state.db, &args.project_id)
                 .await
                 .map_err(|err| format!("failed to load project: {err}"))?
@@ -335,6 +341,7 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
         }
         "list_project_specs" => {
             let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
             if !project_exists(&state.db, &args.project_id)
                 .await
                 .map_err(|err| format!("failed to load project: {err}"))?
@@ -351,6 +358,7 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
         }
         "validate_openapi" => {
             let args = parse_tool_arguments::<ValidateOpenApiToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
             let payload = validate_openapi_source(&args.source);
             Ok(tool_success(serde_json::to_value(payload).unwrap()))
         }
@@ -526,5 +534,16 @@ mod tests {
             .expect("valid project args");
 
         assert_eq!(args.project_id, "abc");
+    }
+
+    #[test]
+    fn parse_project_argument_payload_with_meta() {
+        let args = parse_tool_arguments::<ProjectByIdArgs>(
+            json!({ "projectId": "abc", "_meta": { "source": "client" } }),
+        )
+        .expect("valid project args with meta");
+
+        assert_eq!(args.project_id, "abc");
+        assert_eq!(args.meta, Some(json!({ "source": "client" })));
     }
 }
