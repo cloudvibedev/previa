@@ -126,9 +126,27 @@ pub struct ToolsListParams {
     pub meta: Option<Value>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PromptsListParams {
+    pub cursor: Option<String>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolCallParams {
+    pub name: String,
+    #[serde(default)]
+    pub arguments: Value,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PromptGetParams {
     pub name: String,
     #[serde(default)]
     pub arguments: Value,
@@ -144,6 +162,51 @@ pub struct ToolDefinition {
     pub title: Option<String>,
     pub description: String,
     pub input_schema: Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptDefinition {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub arguments: Vec<PromptArgument>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptArgument {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub required: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptGetResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub messages: Vec<PromptMessage>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PromptMessage {
+    pub role: String,
+    pub content: PromptTextContent,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PromptTextContent {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub text: String,
 }
 
 #[derive(Debug, Serialize)]

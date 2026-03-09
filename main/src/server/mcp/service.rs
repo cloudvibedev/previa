@@ -15,8 +15,9 @@ use crate::server::execution::resolve_runtime_specs_for_execution;
 use crate::server::mcp::models::{
     CreateProjectPipelineArgs, InitializeParams, ListProjectsToolArgs, McpPeerInfo, McpRequest,
     McpResponse, McpSession, ProjectByIdArgs, ProjectHistoryToolArgs, ProjectPipelineByIdArgs,
-    ProjectTestByIdArgs, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult,
-    ToolDefinition, ToolTextContent, ToolsListParams, UpdateProjectPipelineArgs,
+    ProjectTestByIdArgs, PromptDefinition, PromptGetParams, PromptGetResult, PromptMessage,
+    PromptTextContent, PromptsListParams, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams,
+    ToolCallResult, ToolDefinition, ToolTextContent, ToolsListParams, UpdateProjectPipelineArgs,
     ValidateOpenApiToolArgs,
 };
 use crate::server::models::{HistoryQuery, OrchestratorInfoResponse, ProjectListQuery};
@@ -111,6 +112,93 @@ pub async fn process_request(
                 response: McpResponse::success(request_id, json!({ "tools": tool_definitions() })),
                 session_id: session_id.map(str::to_owned),
                 protocol_version: Some(session.protocol_version),
+            }
+        }
+        "prompts/list" => {
+            let session = match require_session(state, session_id, protocol_version_header).await {
+                Ok(session) => session,
+                Err(response) => {
+                    return McpHttpOutcome::Response {
+                        response,
+                        session_id: None,
+                        protocol_version: None,
+                    };
+                }
+            };
+            let params = match parse_optional_params::<PromptsListParams>(request.params) {
+                Ok(params) => params,
+                Err(response) => {
+                    return McpHttpOutcome::Response {
+                        response: McpResponse::error(Some(request_id), INVALID_PARAMS, response),
+                        session_id: session_id.map(str::to_owned),
+                        protocol_version: Some(session.protocol_version),
+                    };
+                }
+            };
+            let _ = params.meta.as_ref();
+            if params.cursor.is_some() {
+                return McpHttpOutcome::Response {
+                    response: McpResponse::error(
+                        Some(request_id),
+                        INVALID_PARAMS,
+                        "cursor pagination is not supported",
+                    ),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                };
+            }
+
+            McpHttpOutcome::Response {
+                response: McpResponse::success(
+                    request_id,
+                    json!({ "prompts": prompt_definitions() }),
+                ),
+                session_id: session_id.map(str::to_owned),
+                protocol_version: Some(session.protocol_version),
+            }
+        }
+        "prompts/get" => {
+            let session = match require_session(state, session_id, protocol_version_header).await {
+                Ok(session) => session,
+                Err(response) => {
+                    return McpHttpOutcome::Response {
+                        response,
+                        session_id: None,
+                        protocol_version: None,
+                    };
+                }
+            };
+            let params = match parse_params::<PromptGetParams>(request.params) {
+                Ok(params) => params,
+                Err(message) => {
+                    return McpHttpOutcome::Response {
+                        response: McpResponse::error(Some(request_id), INVALID_PARAMS, message),
+                        session_id: session_id.map(str::to_owned),
+                        protocol_version: Some(session.protocol_version),
+                    };
+                }
+            };
+            let _ = &params.arguments;
+            let _ = params.meta.as_ref();
+
+            match prompt_result(&params.name) {
+                Some(result) => McpHttpOutcome::Response {
+                    response: McpResponse::success(
+                        request_id,
+                        serde_json::to_value(result).unwrap(),
+                    ),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                },
+                None => McpHttpOutcome::Response {
+                    response: McpResponse::error(
+                        Some(request_id),
+                        INVALID_PARAMS,
+                        format!("prompt '{}' is not available", params.name),
+                    ),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                },
             }
         }
         "tools/call" => {
@@ -231,6 +319,9 @@ async fn handle_initialize(
             json!({
                 "protocolVersion": params.protocol_version,
                 "capabilities": {
+                    "prompts": {
+                        "listChanged": false
+                    },
                     "tools": {
                         "listChanged": false
                     }
@@ -240,7 +331,7 @@ async fn handle_initialize(
                     title: Some("Previa Main MCP".to_owned()),
                     version: env!("CARGO_PKG_VERSION").to_owned(),
                 },
-                "instructions": "Use the available tools to inspect orchestrator health, projects, pipelines, OpenAPI specs, and to validate OpenAPI source content."
+                "instructions": "Use the available tools to inspect orchestrator health, projects, pipelines, OpenAPI specs, and to validate OpenAPI source content. Use the available prompts when you need operational guidance for creating pipelines, reviewing executed tests, and proposing step fixes."
             }),
         ),
         session_id: Some(session_id),
@@ -818,6 +909,37 @@ fn tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+fn prompt_definitions() -> Vec<PromptDefinition> {
+    vec![PromptDefinition {
+        name: "pipeline_test_assistant".to_owned(),
+        title: Some("Pipeline Test Assistant".to_owned()),
+        description: Some(
+            "Guides the LLM to create pipelines, evaluate executed tests and steps, and propose safe fixes before applying any change."
+                .to_owned(),
+        ),
+        arguments: Vec::new(),
+    }]
+}
+
+fn prompt_result(name: &str) -> Option<PromptGetResult> {
+    match name {
+        "pipeline_test_assistant" => Some(PromptGetResult {
+            description: Some(
+                "Operational prompt for pipeline authoring, test analysis, and step repair."
+                    .to_owned(),
+            ),
+            messages: vec![PromptMessage {
+                role: "user".to_owned(),
+                content: PromptTextContent {
+                    kind: "text",
+                    text: pipeline_test_assistant_prompt(),
+                },
+            }],
+        }),
+        _ => None,
+    }
+}
+
 fn tool_success(value: Value) -> ToolCallResult {
     ToolCallResult {
         content: vec![ToolTextContent {
@@ -1005,13 +1127,31 @@ fn pipeline_creation_guide() -> Value {
     })
 }
 
+fn pipeline_test_assistant_prompt() -> String {
+    [
+        "You are responsible for operating Previa pipelines through the MCP server.",
+        "Your job has three parts: create pipelines, evaluate executed tests and step results, and fix broken steps when needed.",
+        "When creating pipelines, prefer this workflow: inspect the project, inspect project specs, call get_pipeline_creation_guide, build the pipeline, then call create_project_pipeline or update_project_pipeline.",
+        "Use only supported template variables. Valid roots are steps.<stepId>.*, specs.<slug>.url.<name>, and helpers.*. Do not invent variables such as run.id, project.id, pipeline.id, or env.*.",
+        "When evaluating tests, inspect list_e2e_history or list_load_history first, then use get_e2e_test or get_load_test to analyze the exact execution details, including request, response, body, asserts, and step-level failures when available.",
+        "When a step fails, identify the most likely root cause from the execution data before suggesting any change. Consider status assertions, request body mistakes, wrong URLs, missing headers, invalid template references, and downstream dependency errors.",
+        "When you find a problem, always propose a concrete solution first and then ask the user if they want you to apply it. Do not silently modify a pipeline without explicit user confirmation.",
+        "Your proposed solution should be specific. Name the failing step, explain the issue, show the exact change you want to make, and mention which MCP tool you will use to apply it.",
+        "If the current data is insufficient to justify a fix, say what is missing and which MCP tool should be called next.",
+        "When the user approves a change, update the saved pipeline with update_project_pipeline instead of inventing a non-existent tool name.",
+        "When discussing a new pipeline, provide a valid example that matches the input schema accepted by create_project_pipeline.",
+    ]
+    .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use previa_runner::{Pipeline, PipelineStep};
     use serde_json::json;
 
     use super::{
-        parse_tool_arguments, pipeline_creation_guide, tool_definitions, validate_pipeline_input,
+        parse_tool_arguments, pipeline_creation_guide, pipeline_test_assistant_prompt,
+        prompt_definitions, prompt_result, tool_definitions, validate_pipeline_input,
     };
     use crate::server::mcp::models::{
         CreateProjectPipelineArgs, ProjectByIdArgs, ProjectHistoryToolArgs,
@@ -1119,6 +1259,34 @@ mod tests {
                 .iter()
                 .any(|value| value == "{{run.id}}")
         );
+    }
+
+    #[test]
+    fn pipeline_prompt_is_available() {
+        let prompt = prompt_definitions()
+            .into_iter()
+            .find(|prompt| prompt.name == "pipeline_test_assistant")
+            .expect("pipeline prompt definition");
+
+        assert_eq!(prompt.arguments.len(), 0);
+    }
+
+    #[test]
+    fn pipeline_prompt_mentions_pipeline_creation_tool_and_confirmation() {
+        let prompt = prompt_result("pipeline_test_assistant").expect("pipeline prompt");
+        let text = &prompt.messages[0].content.text;
+
+        assert!(text.contains("create_project_pipeline"));
+        assert!(text.contains("ask the user if they want you to apply it"));
+    }
+
+    #[test]
+    fn pipeline_prompt_mentions_execution_analysis_tools() {
+        let text = pipeline_test_assistant_prompt();
+
+        assert!(text.contains("get_e2e_test"));
+        assert!(text.contains("get_load_test"));
+        assert!(text.contains("update_project_pipeline"));
     }
 
     #[test]
