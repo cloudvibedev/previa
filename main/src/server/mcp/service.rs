@@ -21,7 +21,7 @@ use crate::server::models::{OrchestratorInfoResponse, ProjectListQuery};
 use crate::server::state::AppState;
 use crate::server::utils::new_uuid_v7;
 use crate::server::validation::openapi::validate_openapi_source;
-use crate::server::validation::pipelines::validate_pipeline_templates;
+use crate::server::validation::pipelines::{KNOWN_TEMPLATE_HELPERS, validate_pipeline_templates};
 
 const INVALID_REQUEST: i32 = -32600;
 const METHOD_NOT_FOUND: i32 = -32601;
@@ -298,6 +298,7 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
         "get_openapi_document" => Ok(tool_success(
             serde_json::to_value(build_openapi_document()).unwrap(),
         )),
+        "get_pipeline_creation_guide" => Ok(tool_success(pipeline_creation_guide())),
         "list_projects" => {
             let args = parse_tool_arguments::<ListProjectsToolArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
@@ -548,6 +549,17 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "get_pipeline_creation_guide".to_owned(),
+            title: Some("Pipeline Guide".to_owned()),
+            description:
+                "Explains how to create a pipeline, with examples and supported template variables."
+                    .to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        ToolDefinition {
             name: "list_projects".to_owned(),
             title: Some("List Projects".to_owned()),
             description: "Lists projects stored in the orchestrator database.".to_owned(),
@@ -751,12 +763,114 @@ fn assertion_schema() -> Value {
     })
 }
 
+fn pipeline_creation_guide() -> Value {
+    json!({
+        "workflow": [
+            "1. Call list_projects or get_project to choose the target project.",
+            "2. Optionally call list_project_specs to inspect available spec slugs and base URL names for template usage.",
+            "3. Build a pipeline object with name, optional description, and at least one step.",
+            "4. Use create_project_pipeline with projectId + pipeline.",
+            "5. Before execution, templates are validated. Unknown variables like {{run.id}} are rejected."
+        ],
+        "createTool": "create_project_pipeline",
+        "updateTool": "update_project_pipeline",
+        "pipelineRules": [
+            "pipeline.name is required",
+            "pipeline.steps must contain at least one step",
+            "each step requires id, name, method, and url",
+            "steps.<stepId> references can only target steps that already ran earlier in the same pipeline",
+            "specs.<slug>.url.<name> references only work when the project has matching runtime specs configured",
+            "supported template locations include step url, headers, body, and assertion expected values"
+        ],
+        "supportedTemplateVariables": {
+            "steps": {
+                "pattern": "{{steps.<stepId>.<fieldPath>}}",
+                "description": "Reads values from the response body of a previous step.",
+                "example": "{{steps.login.token}}"
+            },
+            "specs": {
+                "pattern": "{{specs.<slug>.url.<name>}}",
+                "description": "Reads base URLs from runtime specs attached to the project or provided for execution.",
+                "example": "{{specs.payments.url.hml}}"
+            },
+            "helpers": KNOWN_TEMPLATE_HELPERS,
+            "helperExamples": [
+                "{{helpers.uuid}}",
+                "{{helpers.email}}",
+                "{{helpers.name}}",
+                "{{helpers.username}}",
+                "{{helpers.number 1 100}}",
+                "{{helpers.date}}",
+                "{{helpers.boolean}}",
+                "{{helpers.cpf}}"
+            ],
+            "unsupportedExamples": [
+                "{{run.id}}",
+                "{{project.id}}",
+                "{{pipeline.id}}",
+                "{{env.API_URL}}"
+            ]
+        },
+        "exampleCreateProjectPipelineArguments": {
+            "projectId": "project_123",
+            "pipeline": {
+                "name": "Create And Fetch User",
+                "description": "Creates a user and then fetches it using the id returned by the first step.",
+                "steps": [
+                    {
+                        "id": "create_user",
+                        "name": "Create user",
+                        "method": "POST",
+                        "url": "{{specs.users.url.hml}}/users",
+                        "headers": {
+                            "content-type": "application/json",
+                            "x-request-id": "{{helpers.uuid}}"
+                        },
+                        "body": {
+                            "name": "{{helpers.name}}",
+                            "email": "{{helpers.email}}"
+                        },
+                        "asserts": [
+                            {
+                                "field": "status",
+                                "operator": "equals",
+                                "expected": "201"
+                            }
+                        ]
+                    },
+                    {
+                        "id": "get_user",
+                        "name": "Get user",
+                        "method": "GET",
+                        "url": "{{specs.users.url.hml}}/users/{{steps.create_user.id}}",
+                        "headers": {},
+                        "asserts": [
+                            {
+                                "field": "status",
+                                "operator": "equals",
+                                "expected": "200"
+                            },
+                            {
+                                "field": "body.email",
+                                "operator": "equals",
+                                "expected": "{{steps.create_user.email}}"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use previa_runner::{Pipeline, PipelineStep};
     use serde_json::json;
 
-    use super::{parse_tool_arguments, tool_definitions, validate_pipeline_input};
+    use super::{
+        parse_tool_arguments, pipeline_creation_guide, tool_definitions, validate_pipeline_input,
+    };
     use crate::server::mcp::models::{CreateProjectPipelineArgs, ProjectByIdArgs};
 
     #[test]
@@ -837,6 +951,29 @@ mod tests {
         assert_eq!(
             validate_pipeline_input(&pipeline).expect_err("pipeline name should be validated"),
             "pipeline name is required"
+        );
+    }
+
+    #[test]
+    fn pipeline_guide_tool_is_available() {
+        let tool = tool_definitions()
+            .into_iter()
+            .find(|tool| tool.name == "get_pipeline_creation_guide")
+            .expect("pipeline guide tool definition");
+
+        assert_eq!(tool.input_schema["type"], json!("object"));
+    }
+
+    #[test]
+    fn pipeline_guide_mentions_unsupported_run_id() {
+        let guide = pipeline_creation_guide();
+
+        assert!(
+            guide["supportedTemplateVariables"]["unsupportedExamples"]
+                .as_array()
+                .expect("unsupported examples array")
+                .iter()
+                .any(|value| value == "{{run.id}}")
         );
     }
 }

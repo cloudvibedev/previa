@@ -5,6 +5,10 @@ use previa_runner::{Pipeline, RuntimeSpec};
 use regex::Regex;
 use serde_json::Value;
 
+pub const KNOWN_TEMPLATE_HELPERS: &[&str] = &[
+    "uuid", "email", "name", "username", "number", "date", "boolean", "cpf",
+];
+
 pub fn validate_pipeline_templates(
     pipeline: &Pipeline,
     specs: Option<&[RuntimeSpec]>,
@@ -217,10 +221,7 @@ fn build_specs_index(specs: Option<&[RuntimeSpec]>) -> HashMap<String, HashSet<S
 }
 
 fn is_known_helper(name: &str) -> bool {
-    matches!(
-        name,
-        "uuid" | "email" | "name" | "username" | "number" | "date" | "boolean" | "cpf"
-    )
+    KNOWN_TEMPLATE_HELPERS.contains(&name)
 }
 
 fn normalize_expression(expression: &str) -> Option<String> {
