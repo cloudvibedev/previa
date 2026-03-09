@@ -4,20 +4,22 @@ use serde_json::{Value, json};
 use tracing::info;
 
 use crate::server::db::{
-    delete_pipeline_record, insert_project_pipeline, list_project_records,
-    list_project_spec_records, load_pipelines_for_project, load_project_pipeline_record,
-    load_project_record, project_exists, update_project_pipeline,
+    delete_pipeline_record, insert_project_pipeline, list_e2e_history_records,
+    list_load_history_records, list_project_records, list_project_spec_records,
+    load_e2e_history_record_by_id, load_load_history_record_by_id, load_pipelines_for_project,
+    load_project_pipeline_record, load_project_record, project_exists, update_project_pipeline,
 };
 use crate::server::docs::build_openapi_document;
 use crate::server::execution::collect_runner_statuses;
 use crate::server::execution::resolve_runtime_specs_for_execution;
 use crate::server::mcp::models::{
     CreateProjectPipelineArgs, InitializeParams, ListProjectsToolArgs, McpPeerInfo, McpRequest,
-    McpResponse, McpSession, ProjectByIdArgs, ProjectPipelineByIdArgs, SUPPORTED_PROTOCOL_VERSIONS,
-    ToolCallParams, ToolCallResult, ToolDefinition, ToolTextContent, ToolsListParams,
-    UpdateProjectPipelineArgs, ValidateOpenApiToolArgs,
+    McpResponse, McpSession, ProjectByIdArgs, ProjectHistoryToolArgs, ProjectPipelineByIdArgs,
+    ProjectTestByIdArgs, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult,
+    ToolDefinition, ToolTextContent, ToolsListParams, UpdateProjectPipelineArgs,
+    ValidateOpenApiToolArgs,
 };
-use crate::server::models::{OrchestratorInfoResponse, ProjectListQuery};
+use crate::server::models::{HistoryQuery, OrchestratorInfoResponse, ProjectListQuery};
 use crate::server::state::AppState;
 use crate::server::utils::new_uuid_v7;
 use crate::server::validation::openapi::validate_openapi_source;
@@ -345,6 +347,86 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                 .map_err(|err| format!("failed to load project pipelines: {err}"))?;
             Ok(tool_success(serde_json::to_value(pipelines).unwrap()))
         }
+        "list_e2e_history" => {
+            let args = parse_tool_arguments::<ProjectHistoryToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            if !project_exists(&state.db, &args.project_id)
+                .await
+                .map_err(|err| format!("failed to load project: {err}"))?
+            {
+                return Ok(tool_error(format!(
+                    "project '{}' not found",
+                    args.project_id
+                )));
+            }
+            let records = list_e2e_history_records(
+                &state.db,
+                &args.project_id,
+                HistoryQuery {
+                    pipeline_index: args.pipeline_index,
+                    limit: args.limit,
+                    offset: args.offset,
+                    order: args.order,
+                },
+            )
+            .await
+            .map_err(|err| format!("failed to list e2e history: {err}"))?;
+            Ok(tool_success(serde_json::to_value(records).unwrap()))
+        }
+        "get_e2e_test" => {
+            let args = parse_tool_arguments::<ProjectTestByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let record = load_e2e_history_record_by_id(&state.db, &args.project_id, &args.test_id)
+                .await
+                .map_err(|err| format!("failed to load e2e test: {err}"))?;
+            match record {
+                Some(record) => Ok(tool_success(serde_json::to_value(record).unwrap())),
+                None => Ok(tool_error(format!(
+                    "e2e test '{}' not found in project '{}'",
+                    args.test_id, args.project_id
+                ))),
+            }
+        }
+        "list_load_history" => {
+            let args = parse_tool_arguments::<ProjectHistoryToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            if !project_exists(&state.db, &args.project_id)
+                .await
+                .map_err(|err| format!("failed to load project: {err}"))?
+            {
+                return Ok(tool_error(format!(
+                    "project '{}' not found",
+                    args.project_id
+                )));
+            }
+            let records = list_load_history_records(
+                &state.db,
+                &args.project_id,
+                HistoryQuery {
+                    pipeline_index: args.pipeline_index,
+                    limit: args.limit,
+                    offset: args.offset,
+                    order: args.order,
+                },
+            )
+            .await
+            .map_err(|err| format!("failed to list load history: {err}"))?;
+            Ok(tool_success(serde_json::to_value(records).unwrap()))
+        }
+        "get_load_test" => {
+            let args = parse_tool_arguments::<ProjectTestByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let record = load_load_history_record_by_id(&state.db, &args.project_id, &args.test_id)
+                .await
+                .map_err(|err| format!("failed to load load test: {err}"))?;
+            match record {
+                Some(record) => Ok(tool_success(serde_json::to_value(record).unwrap())),
+                None => Ok(tool_error(format!(
+                    "load test '{}' not found in project '{}'",
+                    args.test_id, args.project_id
+                ))),
+            }
+        }
         "get_project_pipeline" => {
             let args = parse_tool_arguments::<ProjectPipelineByIdArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
@@ -593,6 +675,66 @@ fn tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["projectId"],
                 "properties": {
                     "projectId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "list_e2e_history".to_owned(),
+            title: Some("List E2E History".to_owned()),
+            description: "Lists executed E2E tests for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineIndex": { "type": "integer" },
+                    "limit": { "type": "integer", "minimum": 1 },
+                    "offset": { "type": "integer", "minimum": 0 },
+                    "order": { "type": "string", "enum": ["asc", "desc"] }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "get_e2e_test".to_owned(),
+            title: Some("Get E2E Test".to_owned()),
+            description: "Returns a single executed E2E test by history id or execution id."
+                .to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "testId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "testId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "list_load_history".to_owned(),
+            title: Some("List Load History".to_owned()),
+            description: "Lists executed load tests for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineIndex": { "type": "integer" },
+                    "limit": { "type": "integer", "minimum": 1 },
+                    "offset": { "type": "integer", "minimum": 0 },
+                    "order": { "type": "string", "enum": ["asc", "desc"] }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "get_load_test".to_owned(),
+            title: Some("Get Load Test".to_owned()),
+            description: "Returns a single executed load test by history id or execution id."
+                .to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "testId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "testId": { "type": "string", "minLength": 1 }
                 }
             }),
         },
@@ -871,7 +1013,9 @@ mod tests {
     use super::{
         parse_tool_arguments, pipeline_creation_guide, tool_definitions, validate_pipeline_input,
     };
-    use crate::server::mcp::models::{CreateProjectPipelineArgs, ProjectByIdArgs};
+    use crate::server::mcp::models::{
+        CreateProjectPipelineArgs, ProjectByIdArgs, ProjectHistoryToolArgs,
+    };
 
     #[test]
     fn project_tools_require_project_id() {
@@ -975,5 +1119,21 @@ mod tests {
                 .iter()
                 .any(|value| value == "{{run.id}}")
         );
+    }
+
+    #[test]
+    fn parse_history_arguments() {
+        let args = parse_tool_arguments::<ProjectHistoryToolArgs>(json!({
+            "projectId": "project-1",
+            "pipelineIndex": 2,
+            "limit": 50,
+            "offset": 0,
+            "order": "desc"
+        }))
+        .expect("valid history args");
+
+        assert_eq!(args.project_id, "project-1");
+        assert_eq!(args.pipeline_index, Some(2));
+        assert_eq!(args.limit, Some(50));
     }
 }

@@ -7,7 +7,11 @@ pub mod specs;
 pub mod transfers;
 
 pub use common::project_exists;
-pub use history::{save_e2e_history, save_load_history, upsert_e2e_history, upsert_load_history};
+pub use history::{
+    list_e2e_history_records, list_load_history_records, load_e2e_history_record_by_id,
+    load_load_history_record_by_id, save_e2e_history, save_load_history, upsert_e2e_history,
+    upsert_load_history,
+};
 pub use pipelines::{
     delete_pipeline_record, insert_project_pipeline, load_pipelines_for_project,
     load_project_pipeline_record, update_project_pipeline,

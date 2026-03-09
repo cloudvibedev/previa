@@ -173,10 +173,31 @@ pub struct ListProjectsToolArgs {
     pub meta: Option<Value>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectHistoryToolArgs {
+    pub project_id: String,
+    pub pipeline_index: Option<i64>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    pub order: Option<HistoryOrder>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectByIdArgs {
     pub project_id: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectTestByIdArgs {
+    pub project_id: String,
+    pub test_id: String,
     #[serde(default, rename = "_meta")]
     pub meta: Option<Value>,
 }
