@@ -910,15 +910,26 @@ fn tool_definitions() -> Vec<ToolDefinition> {
 }
 
 fn prompt_definitions() -> Vec<PromptDefinition> {
-    vec![PromptDefinition {
-        name: "pipeline_test_assistant".to_owned(),
-        title: Some("Pipeline Test Assistant".to_owned()),
-        description: Some(
-            "Guides the LLM to create pipelines, evaluate executed tests and steps, and propose safe fixes before applying any change."
-                .to_owned(),
-        ),
-        arguments: Vec::new(),
-    }]
+    vec![
+        PromptDefinition {
+            name: "pipeline_test_assistant".to_owned(),
+            title: Some("Pipeline Test Assistant".to_owned()),
+            description: Some(
+                "Guides the LLM to create pipelines, evaluate executed tests and steps, and propose safe fixes before applying any change."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "pipeline_creation_specialist".to_owned(),
+            title: Some("Pipeline Creation Specialist".to_owned()),
+            description: Some(
+                "Detailed prompt for creating valid Previa pipelines with schemas, template variables, rules, and examples."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+    ]
 }
 
 fn prompt_result(name: &str) -> Option<PromptGetResult> {
@@ -933,6 +944,18 @@ fn prompt_result(name: &str) -> Option<PromptGetResult> {
                 content: PromptTextContent {
                     kind: "text",
                     text: pipeline_test_assistant_prompt(),
+                },
+            }],
+        }),
+        "pipeline_creation_specialist" => Some(PromptGetResult {
+            description: Some(
+                "Detailed prompt for authoring Previa pipelines through MCP.".to_owned(),
+            ),
+            messages: vec![PromptMessage {
+                role: "user".to_owned(),
+                content: PromptTextContent {
+                    kind: "text",
+                    text: pipeline_creation_specialist_prompt(),
                 },
             }],
         }),
@@ -1144,14 +1167,96 @@ fn pipeline_test_assistant_prompt() -> String {
     .join("\n")
 }
 
+fn pipeline_creation_specialist_prompt() -> String {
+    let pipeline_schema = serde_json::to_string_pretty(&pipeline_schema()).unwrap();
+    let step_schema = serde_json::to_string_pretty(&pipeline_step_schema()).unwrap();
+    let assertion_schema = serde_json::to_string_pretty(&assertion_schema()).unwrap();
+    let example_payload = serde_json::to_string_pretty(
+        &pipeline_creation_guide()["exampleCreateProjectPipelineArguments"],
+    )
+    .unwrap();
+
+    format!(
+        "You are responsible for creating valid Previa pipelines through MCP.\n\
+Your goal is to produce payloads that can be sent directly to create_project_pipeline or update_project_pipeline.\n\
+\n\
+Required workflow:\n\
+1. Identify the target project with list_projects or get_project.\n\
+2. Inspect the project's runtime specs with list_project_specs before using specs.<slug>.url.<name> variables.\n\
+3. Build a pipeline object that matches the schemas below.\n\
+4. Prefer explicit status asserts on every HTTP step.\n\
+5. Return a final payload compatible with create_project_pipeline.\n\
+\n\
+Creation rules:\n\
+- Always use create_project_pipeline to create a new saved pipeline.\n\
+- Always use update_project_pipeline to modify an existing saved pipeline.\n\
+- Do not invent non-existent tools such as save_pipeline.\n\
+- pipeline.name is required.\n\
+- pipeline.steps must contain at least one step.\n\
+- Each step requires id, name, method, and url.\n\
+- steps.<stepId> references can only point to steps that ran earlier in the same pipeline.\n\
+- Supported template locations include url, headers, body, and assertion expected values.\n\
+- Unknown variables like {{{{run.id}}}}, {{{{project.id}}}}, {{{{pipeline.id}}}}, and {{{{env.API_URL}}}} are invalid.\n\
+\n\
+Supported template variables:\n\
+- Previous step response body: {{{{steps.<stepId>.<fieldPath>}}}}\n\
+  Example: {{{{steps.login.token}}}}\n\
+- Runtime spec base URLs: {{{{specs.<slug>.url.<name>}}}}\n\
+  Example: {{{{specs.payments.url.hml}}}}\n\
+- Helpers:\n\
+  - {{{{helpers.uuid}}}}\n\
+  - {{{{helpers.email}}}}\n\
+  - {{{{helpers.name}}}}\n\
+  - {{{{helpers.username}}}}\n\
+  - {{{{helpers.number 1 100}}}}\n\
+  - {{{{helpers.date}}}}\n\
+  - {{{{helpers.boolean}}}}\n\
+  - {{{{helpers.cpf}}}}\n\
+\n\
+Schema for pipeline:\n\
+```json\n\
+{pipeline_schema}\n\
+```\n\
+\n\
+Schema for step:\n\
+```json\n\
+{step_schema}\n\
+```\n\
+\n\
+Schema for assertion:\n\
+```json\n\
+{assertion_schema}\n\
+```\n\
+\n\
+Recommended authoring guidance:\n\
+- Use stable, descriptive step ids because later steps depend on them.\n\
+- Keep request headers explicit, especially content-type when sending JSON.\n\
+- Add status assertions to every step.\n\
+- When validating response bodies, use body.<field> assertions.\n\
+- When chaining steps, reference values from previous response bodies with steps.<stepId>.<fieldPath>.\n\
+- If a pipeline depends on project specs, verify the slug and URL name from list_project_specs before generating the payload.\n\
+\n\
+Example payload for create_project_pipeline:\n\
+```json\n\
+{example_payload}\n\
+```\n\
+\n\
+Output requirements:\n\
+- Return a valid JSON object for create_project_pipeline arguments.\n\
+- Keep the payload directly executable by MCP.\n\
+- If required project or spec information is missing, say exactly which MCP tool should be called next instead of guessing.\n"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use previa_runner::{Pipeline, PipelineStep};
     use serde_json::json;
 
     use super::{
-        parse_tool_arguments, pipeline_creation_guide, pipeline_test_assistant_prompt,
-        prompt_definitions, prompt_result, tool_definitions, validate_pipeline_input,
+        parse_tool_arguments, pipeline_creation_guide, pipeline_creation_specialist_prompt,
+        pipeline_test_assistant_prompt, prompt_definitions, prompt_result, tool_definitions,
+        validate_pipeline_input,
     };
     use crate::server::mcp::models::{
         CreateProjectPipelineArgs, ProjectByIdArgs, ProjectHistoryToolArgs,
@@ -1287,6 +1392,40 @@ mod tests {
         assert!(text.contains("get_e2e_test"));
         assert!(text.contains("get_load_test"));
         assert!(text.contains("update_project_pipeline"));
+    }
+
+    #[test]
+    fn pipeline_creation_prompt_is_available() {
+        let prompt = prompt_definitions()
+            .into_iter()
+            .find(|prompt| prompt.name == "pipeline_creation_specialist")
+            .expect("pipeline creation prompt definition");
+
+        assert_eq!(prompt.arguments.len(), 0);
+    }
+
+    #[test]
+    fn pipeline_creation_prompt_mentions_schema_variables_and_examples() {
+        let text = pipeline_creation_specialist_prompt();
+
+        assert!(text.contains("Schema for pipeline"));
+        assert!(text.contains("{{steps.<stepId>.<fieldPath>}}"));
+        assert!(text.contains("{{specs.<slug>.url.<name>}}"));
+        assert!(text.contains("Example payload for create_project_pipeline"));
+        assert!(text.contains("save_pipeline"));
+    }
+
+    #[test]
+    fn pipeline_creation_prompt_result_is_available() {
+        let prompt =
+            prompt_result("pipeline_creation_specialist").expect("pipeline creation prompt result");
+
+        assert!(
+            prompt.messages[0]
+                .content
+                .text
+                .contains("create_project_pipeline")
+        );
     }
 
     #[test]
