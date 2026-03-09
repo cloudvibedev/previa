@@ -3,7 +3,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::assertions::evaluate_assertions;
+use crate::assertions::{evaluate_assertions, has_status_assertion};
 use crate::core::types::{Pipeline, RuntimeSpec, StepExecutionResult, StepRequest, StepResponse};
 use crate::execution::cancel::await_with_cancel;
 use crate::execution::http::{parse_absolute_http_url, parse_method};
@@ -348,13 +348,11 @@ where
                         Value::String(body_result.unwrap_or_default())
                     };
 
+                    let http_error = (!status.is_success())
+                        .then(|| format!("HTTP {} {}", status.as_u16(), status_text));
                     let mut result = StepExecutionResult {
                         step_id: step.id.clone(),
-                        status: if status.is_success() {
-                            "success".to_owned()
-                        } else {
-                            "error".to_owned()
-                        },
+                        status: "success".to_owned(),
                         request: Some(request),
                         response: Some(StepResponse {
                             status: status.as_u16(),
@@ -362,11 +360,7 @@ where
                             headers,
                             body,
                         }),
-                        error: if status.is_success() {
-                            None
-                        } else {
-                            Some(format!("HTTP {} {}", status.as_u16(), status_text))
-                        },
+                        error: http_error.clone(),
                         duration: Some(start.elapsed().as_millis()),
                         attempts: if max_attempts > 1 {
                             Some(attempt)
@@ -377,8 +371,8 @@ where
                         max_attempts: Some(max_attempts),
                         assert_results: None,
                     };
-                    log_step_response(&step.id, result.response.as_ref(), result.error.as_deref());
 
+                    let has_status_assert = has_status_assertion(step);
                     let assert_results = evaluate_assertions(step, &result, &context, specs);
                     let assertion_failed = assert_results.iter().any(|r| !r.passed);
                     if !assert_results.is_empty() {
@@ -391,9 +385,20 @@ where
                                 }
                                 None => format!("{} assertion(s) failed", failed_count),
                             });
+                        } else if http_error.is_some() {
+                            if has_status_assert {
+                                result.status = "success".to_owned();
+                                result.error = None;
+                            } else {
+                                result.status = "error".to_owned();
+                            }
                         }
                         result.assert_results = Some(assert_results);
+                    } else if http_error.is_some() {
+                        result.status = "error".to_owned();
                     }
+
+                    log_step_response(&step.id, result.response.as_ref(), result.error.as_deref());
 
                     if assertion_failed && attempt < max_attempts {
                         continue;
@@ -879,6 +884,299 @@ mod tests {
         assert_eq!(results[0].status, "error");
         assert_eq!(results[0].attempt, Some(1));
         assert_eq!(results[0].max_attempts, Some(6));
+        call.assert_calls_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn accepts_404_when_status_assert_matches() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/missing");
+                then.status(404)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "message": "not found" }));
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Expected 404".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "missing".to_owned(),
+                name: "Missing".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/missing", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: Some(5),
+                asserts: vec![StepAssertion {
+                    field: "status".to_owned(),
+                    operator: "equals".to_owned(),
+                    expected: Some("404".to_owned()),
+                }],
+            }],
+        };
+
+        let results = execute_pipeline(&pipeline, None).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "success");
+        assert_eq!(results[0].error, None);
+        assert_eq!(results[0].attempt, Some(1));
+        assert_eq!(
+            results[0]
+                .response
+                .as_ref()
+                .and_then(|response| response.body.get("message"))
+                .and_then(|value| value.as_str()),
+            Some("not found")
+        );
+        call.assert_calls_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn accepts_500_when_status_assert_matches() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/boom");
+                then.status(500).body("internal error");
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Expected 500".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "boom".to_owned(),
+                name: "Boom".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/boom", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: vec![StepAssertion {
+                    field: "status".to_owned(),
+                    operator: "equals".to_owned(),
+                    expected: Some("500".to_owned()),
+                }],
+            }],
+        };
+
+        let results = execute_pipeline(&pipeline, None).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "success");
+        assert_eq!(results[0].error, None);
+        assert_eq!(
+            results[0].response.as_ref().map(|response| response.body.clone()),
+            Some(Value::String("internal error".to_owned()))
+        );
+        call.assert_calls_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn retries_when_status_assert_fails_on_http_error() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/missing");
+                then.status(404).body("not found");
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Retry status assert".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "missing".to_owned(),
+                name: "Missing".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/missing", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: Some(2),
+                asserts: vec![StepAssertion {
+                    field: "status".to_owned(),
+                    operator: "equals".to_owned(),
+                    expected: Some("200".to_owned()),
+                }],
+            }],
+        };
+
+        let results = execute_pipeline(&pipeline, None).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "error");
+        assert_eq!(results[0].attempt, Some(3));
+        assert_eq!(results[0].max_attempts, Some(3));
+        assert!(
+            results[0]
+                .error
+                .as_ref()
+                .is_some_and(|err| err.contains("HTTP 404"))
+        );
+        call.assert_calls_async(3).await;
+    }
+
+    #[tokio::test]
+    async fn keeps_http_error_when_status_assert_passes_but_body_assert_fails() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/missing");
+                then.status(404)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "message": "not found" }));
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "HTTP plus body assert failure".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "missing".to_owned(),
+                name: "Missing".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/missing", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: Some(1),
+                asserts: vec![
+                    StepAssertion {
+                        field: "status".to_owned(),
+                        operator: "equals".to_owned(),
+                        expected: Some("404".to_owned()),
+                    },
+                    StepAssertion {
+                        field: "body.code".to_owned(),
+                        operator: "equals".to_owned(),
+                        expected: Some("x".to_owned()),
+                    },
+                ],
+            }],
+        };
+
+        let results = execute_pipeline(&pipeline, None).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "error");
+        assert_eq!(results[0].attempt, Some(2));
+        assert_eq!(results[0].max_attempts, Some(2));
+        assert!(
+            results[0]
+                .error
+                .as_ref()
+                .is_some_and(|err| err.contains("HTTP 404") && err.contains("assertion(s) failed"))
+        );
+        call.assert_calls_async(2).await;
+    }
+
+    #[tokio::test]
+    async fn keeps_http_error_without_status_assert_even_if_body_assert_passes() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/missing");
+                then.status(404)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "message": "not found" }));
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Body assert only".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "missing".to_owned(),
+                name: "Missing".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/missing", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: Some(3),
+                asserts: vec![StepAssertion {
+                    field: "body.message".to_owned(),
+                    operator: "equals".to_owned(),
+                    expected: Some("not found".to_owned()),
+                }],
+            }],
+        };
+
+        let results = execute_pipeline(&pipeline, None).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "error");
+        assert_eq!(results[0].attempt, Some(1));
+        assert_eq!(results[0].max_attempts, Some(4));
+        assert!(
+            results[0]
+                .error
+                .as_ref()
+                .is_some_and(|err| err.contains("HTTP 404"))
+        );
+        call.assert_calls_async(1).await;
+    }
+
+    #[tokio::test]
+    async fn accepts_http_error_when_status_assert_uses_other_operator() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/missing");
+                then.status(404).body("not found");
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Expected non-200".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "missing".to_owned(),
+                name: "Missing".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/missing", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: vec![StepAssertion {
+                    field: "status".to_owned(),
+                    operator: "not_equals".to_owned(),
+                    expected: Some("200".to_owned()),
+                }],
+            }],
+        };
+
+        let results = execute_pipeline(&pipeline, None).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "success");
+        assert_eq!(results[0].error, None);
         call.assert_calls_async(1).await;
     }
 

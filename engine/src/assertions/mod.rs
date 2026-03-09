@@ -4,6 +4,10 @@ use std::collections::HashMap;
 use crate::core::types::{AssertionResult, PipelineStep, RuntimeSpec, StepExecutionResult};
 use crate::template::resolve::{resolve_template_variables, value_to_string};
 
+pub(crate) fn has_status_assertion(step: &PipelineStep) -> bool {
+    step.asserts.iter().any(|assertion| assertion.field == "status")
+}
+
 pub(crate) fn resolve_assert_field(field: &str, result: &StepExecutionResult) -> Option<String> {
     let response = result.response.as_ref()?;
 
