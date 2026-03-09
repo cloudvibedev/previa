@@ -912,8 +912,8 @@ fn tool_definitions() -> Vec<ToolDefinition> {
 fn prompt_definitions() -> Vec<PromptDefinition> {
     vec![
         PromptDefinition {
-            name: "pipeline_test_assistant".to_owned(),
-            title: Some("Pipeline Test Assistant".to_owned()),
+            name: "default".to_owned(),
+            title: Some("Default".to_owned()),
             description: Some(
                 "Guides the LLM to create pipelines, evaluate executed tests and steps, and propose safe fixes before applying any change."
                     .to_owned(),
@@ -934,7 +934,7 @@ fn prompt_definitions() -> Vec<PromptDefinition> {
 
 fn prompt_result(name: &str) -> Option<PromptGetResult> {
     match name {
-        "pipeline_test_assistant" => Some(PromptGetResult {
+        "default" | "pipeline_test_assistant" => Some(PromptGetResult {
             description: Some(
                 "Operational prompt for pipeline authoring, test analysis, and step repair."
                     .to_owned(),
@@ -1370,7 +1370,7 @@ mod tests {
     fn pipeline_prompt_is_available() {
         let prompt = prompt_definitions()
             .into_iter()
-            .find(|prompt| prompt.name == "pipeline_test_assistant")
+            .find(|prompt| prompt.name == "default")
             .expect("pipeline prompt definition");
 
         assert_eq!(prompt.arguments.len(), 0);
@@ -1378,11 +1378,23 @@ mod tests {
 
     #[test]
     fn pipeline_prompt_mentions_pipeline_creation_tool_and_confirmation() {
-        let prompt = prompt_result("pipeline_test_assistant").expect("pipeline prompt");
+        let prompt = prompt_result("default").expect("pipeline prompt");
         let text = &prompt.messages[0].content.text;
 
         assert!(text.contains("create_project_pipeline"));
         assert!(text.contains("ask the user if they want you to apply it"));
+    }
+
+    #[test]
+    fn legacy_pipeline_prompt_alias_is_still_available() {
+        let prompt = prompt_result("pipeline_test_assistant").expect("legacy pipeline prompt");
+
+        assert!(
+            prompt.messages[0]
+                .content
+                .text
+                .contains("create_project_pipeline")
+        );
     }
 
     #[test]
