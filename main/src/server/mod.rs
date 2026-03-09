@@ -1,5 +1,4 @@
 use axum::Router;
-use axum::http::header;
 use axum::middleware::from_fn;
 use axum::routing::{get, post, put};
 use tower_http::cors::{Any, CorsLayer};
@@ -114,7 +113,7 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
                 .allow_origin(Any)
                 .allow_methods(Any)
                 .allow_headers(Any)
-                .expose_headers([header::CONTENT_TYPE]),
+                .expose_headers(Any),
         )
         .layer(from_fn(propagate_transaction_header));
 
