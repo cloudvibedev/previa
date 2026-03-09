@@ -27,6 +27,8 @@ use crate::server::handlers::specs::{
 use crate::server::handlers::tests_e2e::run_e2e_test_for_project;
 use crate::server::handlers::tests_load::run_load_test_for_project;
 use crate::server::handlers::transfers::{export_project, import_project};
+use crate::server::mcp::handlers::{delete_http_session, handle_http};
+use crate::server::mcp::models::McpConfig;
 use crate::server::middleware::transaction::propagate_transaction_header;
 use crate::server::state::AppState;
 
@@ -35,14 +37,15 @@ pub mod docs;
 pub mod errors;
 pub mod execution;
 pub mod handlers;
+pub mod mcp;
 pub mod middleware;
 pub mod models;
 pub mod state;
 pub mod utils;
 pub mod validation;
 
-pub fn build_app(state: AppState) -> Router {
-    Router::new()
+pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
+    let mut app = Router::new()
         .route("/health", get(health))
         .route("/info", get(get_info))
         .route("/openapi.json", get(openapi_json))
@@ -113,6 +116,14 @@ pub fn build_app(state: AppState) -> Router {
                 .allow_headers(Any)
                 .expose_headers([header::CONTENT_TYPE]),
         )
-        .layer(from_fn(propagate_transaction_header))
-        .with_state(state)
+        .layer(from_fn(propagate_transaction_header));
+
+    if mcp_config.enabled {
+        app = app.route(
+            &mcp_config.path,
+            post(handle_http).delete(delete_http_session),
+        );
+    }
+
+    app.with_state(state)
 }

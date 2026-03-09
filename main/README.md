@@ -21,6 +21,7 @@ You can also download prebuilt binaries at: **https://previa.dev/downloads**
 ```bash
 ORCHESTRATOR_DATABASE_URL="sqlite://orchestrator.db" \
 RUNNER_ENDPOINTS="http://127.0.0.1:55880" \
+MCP_ENABLED=true \
 ADDRESS=0.0.0.0 PORT=5588 \
 cargo run -p previa-main
 ```
@@ -44,7 +45,12 @@ http://127.0.0.1:5588
 | `RUNNER_ENDPOINTS` | empty | Runner endpoints CSV |
 | `ADDRESS` | `0.0.0.0` | Bind address |
 | `PORT` | `8383` | Bind port |
+| `MCP_ENABLED` | `false` | Habilita o endpoint MCP HTTP no `main` |
+| `MCP_PATH` | `/mcp` | Caminho HTTP do servidor MCP quando habilitado |
 | `RUST_LOG` | unset | Tracing filter |
+
+Quando `MCP_ENABLED=true`, o `main` expõe um servidor MCP HTTP em `POST /mcp` por padrão.
+Se precisar alterar o caminho, defina `MCP_PATH`.
 
 ## HTTP API Surface
 

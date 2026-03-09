@@ -13,6 +13,7 @@ use tracing::info;
 use crate::server::build_app;
 use crate::server::db::backfill_project_spec_md5_hashes;
 use crate::server::execution::parse_runner_endpoints;
+use crate::server::mcp::models::McpConfig;
 use crate::server::state::{AppState, DB_SCHEMA_VERSION};
 
 #[tokio::main]
@@ -24,6 +25,7 @@ async fn main() {
         .init();
 
     let runner_endpoints = parse_runner_endpoints();
+    let mcp_config = McpConfig::from_env();
     let database_url = std::env::var("ORCHESTRATOR_DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://orchestrator.db".to_owned());
     let rps_per_node = std::env::var("RUNNER_RPS_PER_NODE")
@@ -61,9 +63,10 @@ async fn main() {
         runner_endpoints,
         rps_per_node,
         executions: Arc::new(RwLock::new(HashMap::new())),
+        mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
     };
 
-    let app = build_app(state);
+    let app = build_app(state, &mcp_config);
 
     let listener = TcpListener::bind(&bind_addr)
         .await
@@ -76,6 +79,12 @@ async fn main() {
         "previa-main listening on http://{} (database: {}, schema_version: {})",
         local_addr, database_url, DB_SCHEMA_VERSION
     );
+    if mcp_config.enabled {
+        info!(
+            "mcp server enabled at http://{}{}",
+            local_addr, mcp_config.path
+        );
+    }
     if backfilled_spec_hashes > 0 {
         info!(
             "backfilled {} OpenAPI specs without md5 hash",

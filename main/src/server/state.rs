@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use tokio::sync::{RwLock, broadcast};
 use tokio_util::sync::CancellationToken;
 
+use crate::server::mcp::models::McpSession;
 use crate::server::models::SseMessage;
 
 #[derive(Clone)]
@@ -16,6 +17,7 @@ pub struct AppState {
     pub runner_endpoints: Vec<String>,
     pub rps_per_node: u64,
     pub executions: Arc<RwLock<HashMap<String, Arc<ExecutionCtx>>>>,
+    pub mcp_sessions: Arc<RwLock<HashMap<String, McpSession>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
