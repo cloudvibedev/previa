@@ -1712,6 +1712,7 @@ dependencies = [
  "oas3",
  "previa-runner",
  "rand 0.10.0",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

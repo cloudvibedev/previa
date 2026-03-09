@@ -38,5 +38,6 @@ sqlx = { version = "0.8", features = [
     "sqlite",
     "migrate",
 ] }
+regex = "1"
 
 [dev-dependencies]

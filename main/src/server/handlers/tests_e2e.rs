@@ -28,6 +28,7 @@ use crate::server::models::{
 };
 use crate::server::state::{AppState, EXECUTION_SSE_BUFFER_SIZE, ExecutionCtx, ExecutionKind};
 use crate::server::utils::{new_uuid_v7, now_ms};
+use crate::server::validation::pipelines::validate_pipeline_templates;
 
 pub async fn run_e2e_test_internal(
     State(state): State<AppState>,
@@ -78,6 +79,10 @@ pub async fn run_e2e_test_internal(
             ));
         }
     };
+    let template_errors = validate_pipeline_templates(&payload.pipeline, runtime_specs.as_deref());
+    if !template_errors.is_empty() {
+        return bad_request_message_response(&template_errors.join("; "));
+    }
     let pipeline_for_runner = payload.pipeline.clone();
     let pipeline_id = payload.pipeline.id.clone();
     let pipeline_name = payload.pipeline.name.clone();

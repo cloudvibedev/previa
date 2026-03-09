@@ -32,6 +32,7 @@ use crate::server::state::{
     AppState, EXECUTION_SSE_BUFFER_SIZE, ExecutionCtx, ExecutionKind, LOAD_BATCH_WINDOW_MS,
 };
 use crate::server::utils::{new_uuid_v7, now_ms};
+use crate::server::validation::pipelines::validate_pipeline_templates;
 
 pub async fn run_load_test_internal(
     State(state): State<AppState>,
@@ -101,6 +102,10 @@ pub async fn run_load_test_internal(
             ));
         }
     };
+    let template_errors = validate_pipeline_templates(&payload.pipeline, runtime_specs.as_deref());
+    if !template_errors.is_empty() {
+        return bad_request_message_response(&template_errors.join("; "));
+    }
     let runner_pipeline = payload.pipeline.clone();
     let runner_selected_base_url_key = payload.selected_base_url_key.clone();
     let runner_config = payload.config.clone();

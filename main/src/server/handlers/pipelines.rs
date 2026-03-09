@@ -7,10 +7,14 @@ use crate::server::db::{
     delete_pipeline_record, insert_project_pipeline, load_pipelines_for_project,
     load_project_pipeline_record, project_exists, update_project_pipeline,
 };
-use crate::server::errors::{internal_error_response, not_found_response};
+use crate::server::errors::{
+    bad_request_message_response, internal_error_response, not_found_response,
+};
+use crate::server::execution::resolve_runtime_specs_for_execution;
 use crate::server::models::{ErrorResponse, PipelineInput};
 use crate::server::state::AppState;
 use crate::server::utils::new_uuid_v7;
+use crate::server::validation::pipelines::validate_pipeline_templates;
 
 #[utoipa::path(
     get,
@@ -137,6 +141,19 @@ pub async fn create_project_pipeline(
         description: pipeline.description,
         steps: pipeline.steps,
     };
+    let runtime_specs =
+        match resolve_runtime_specs_for_execution(&state.db, Some(&project_id), &[]).await {
+            Ok(specs) => specs,
+            Err(err) => {
+                return internal_error_response(format!(
+                    "failed to load project specs for pipeline validation: {err}"
+                ));
+            }
+        };
+    let template_errors = validate_pipeline_templates(&pipeline, runtime_specs.as_deref());
+    if !template_errors.is_empty() {
+        return bad_request_message_response(&template_errors.join("; "));
+    }
 
     match insert_project_pipeline(&state.db, &project_id, pipeline).await {
         Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
@@ -198,6 +215,19 @@ pub async fn upsert_project_pipeline(
         description: pipeline.description,
         steps: pipeline.steps,
     };
+    let runtime_specs =
+        match resolve_runtime_specs_for_execution(&state.db, Some(&project_id), &[]).await {
+            Ok(specs) => specs,
+            Err(err) => {
+                return internal_error_response(format!(
+                    "failed to load project specs for pipeline validation: {err}"
+                ));
+            }
+        };
+    let template_errors = validate_pipeline_templates(&pipeline, runtime_specs.as_deref());
+    if !template_errors.is_empty() {
+        return bad_request_message_response(&template_errors.join("; "));
+    }
     match update_project_pipeline(&state.db, &project_id, &pipeline_id, pipeline).await {
         Ok(Some(item)) => Json(item).into_response(),
         Ok(None) => not_found_response("pipeline not found"),

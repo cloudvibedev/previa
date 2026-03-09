@@ -10,6 +10,7 @@ use crate::server::db::{
 };
 use crate::server::docs::build_openapi_document;
 use crate::server::execution::collect_runner_statuses;
+use crate::server::execution::resolve_runtime_specs_for_execution;
 use crate::server::mcp::models::{
     CreateProjectPipelineArgs, InitializeParams, ListProjectsToolArgs, McpPeerInfo, McpRequest,
     McpResponse, McpSession, ProjectByIdArgs, ProjectPipelineByIdArgs, SUPPORTED_PROTOCOL_VERSIONS,
@@ -20,6 +21,7 @@ use crate::server::models::{OrchestratorInfoResponse, ProjectListQuery};
 use crate::server::state::AppState;
 use crate::server::utils::new_uuid_v7;
 use crate::server::validation::openapi::validate_openapi_source;
+use crate::server::validation::pipelines::validate_pipeline_templates;
 
 const INVALID_REQUEST: i32 = -32600;
 const METHOD_NOT_FOUND: i32 = -32601;
@@ -370,6 +372,15 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
             let args = parse_tool_arguments::<CreateProjectPipelineArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
             validate_pipeline_input(&args.pipeline)?;
+            let runtime_specs =
+                resolve_runtime_specs_for_execution(&state.db, Some(&args.project_id), &[])
+                    .await
+                    .map_err(|err| format!("failed to load project specs for validation: {err}"))?;
+            let template_errors =
+                validate_pipeline_templates(&args.pipeline, runtime_specs.as_deref());
+            if !template_errors.is_empty() {
+                return Ok(tool_error(template_errors.join("; ")));
+            }
             if !project_exists(&state.db, &args.project_id)
                 .await
                 .map_err(|err| format!("failed to load project: {err}"))?
@@ -388,6 +399,15 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
             let args = parse_tool_arguments::<UpdateProjectPipelineArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
             validate_pipeline_input(&args.pipeline)?;
+            let runtime_specs =
+                resolve_runtime_specs_for_execution(&state.db, Some(&args.project_id), &[])
+                    .await
+                    .map_err(|err| format!("failed to load project specs for validation: {err}"))?;
+            let template_errors =
+                validate_pipeline_templates(&args.pipeline, runtime_specs.as_deref());
+            if !template_errors.is_empty() {
+                return Ok(tool_error(template_errors.join("; ")));
+            }
             if !project_exists(&state.db, &args.project_id)
                 .await
                 .map_err(|err| format!("failed to load project: {err}"))?
