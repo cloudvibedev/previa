@@ -44,6 +44,7 @@ previactl down [--name <stack-name>] [--runner <address|address:port|port> ...]
 previactl restart [--name <stack-name>]
 previactl status [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--json]
 previactl list [--json]
+previactl ps [--name <stack-name>] [--json]
 previactl logs [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--follow]
 previactl doctor [--name <stack-name>] [--fix]
 previactl version
@@ -58,7 +59,7 @@ No additional v1 commands are required.
 - Bootstraps a local stack on the current host.
 - Executes exactly one `previa-main` process.
 - Accepts `--name <stack-name>` to identify the stack context that `up`,
-  `down`, `restart`, and `status` will manage.
+  `down`, `restart`, `status`, and `ps` will manage.
 - When omitted, `--name` defaults to `default`.
 - `stack-name` must match `[A-Za-z0-9][A-Za-z0-9._-]*`.
 - Optionally accepts a positional `<source>` that points to a
@@ -267,6 +268,33 @@ No additional v1 commands are required.
 - `list --json` must use the exact schema defined in the `List JSON Schema`
   section of this specification.
 
+#### `previactl ps [--name <stack-name>] [--json]`
+
+- Lists the local processes tracked for a detached stack.
+- Accepts `--name <stack-name>` and defaults to `default` when omitted.
+- Reads the runtime file for the selected stack name when it exists.
+- Without `--json`, prints one row per tracked local process.
+- `ps` must include the detached `previa-main` process and all detached local
+  `previa-runner` processes.
+- `ps` must not represent attached runner endpoints as local processes because
+  they are externally managed.
+- Each printed process row must include:
+  - `role`, fixed to `main` or `runner`
+  - `pid`
+  - `address`
+  - `port`
+  - `state`
+  - `health_url`
+  - `log_path`
+- `state` is derived from the same PID liveness and health-probe rules used by
+  `status`.
+- When no detached runtime file exists, `ps` prints no process rows and exits
+  successfully.
+- Accepts `--json` to print a stable machine-readable JSON array instead of
+  human-readable text.
+- `ps --json` must use the exact schema defined in the `PS JSON Schema`
+  section of this specification.
+
 #### `previactl logs [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--follow]`
 
 - Reads detached stack logs from stack-scoped log files.
@@ -391,7 +419,7 @@ Rules:
   file before mutating runtime state or process state for that stack.
 - Locking is per stack name; operations against different stack names may
   proceed concurrently.
-- `status` and `list` do not require an exclusive lock.
+- `status`, `list`, and `ps` do not require an exclusive lock.
 - `previactl down` reads this file, terminates the recorded local processes,
   waits for them to stop, and then removes the file when stopping the full
   stack.
@@ -417,7 +445,7 @@ Rules:
 
 ## Health Model
 
-- `previactl status`, `list`, and `doctor` must probe detached local processes
+- `previactl status`, `list`, `ps`, and `doctor` must probe detached local processes
   using `GET /health`.
 - The `previa-main` health URL is
   `http://<main.address>:<main.port>/health`.
@@ -498,6 +526,42 @@ Rules:
 - Each entry must contain `name`, `state`, and `runtime_file`.
 - `state` values are fixed to `running`, `degraded`, or `stopped`.
 - `runtime_file` must always be an absolute path.
+
+## PS JSON Schema
+
+`previactl ps --json` must emit a JSON array of tracked local process entries
+with this exact shape:
+
+```json
+[
+  {
+    "role": "main",
+    "state": "running",
+    "pid": 41021,
+    "address": "0.0.0.0",
+    "port": 5588,
+    "health_url": "http://0.0.0.0:5588/health",
+    "log_path": "/home/assis/.previa/stacks/default/logs/main.log"
+  },
+  {
+    "role": "runner",
+    "state": "running",
+    "pid": 41022,
+    "address": "127.0.0.1",
+    "port": 55880,
+    "health_url": "http://127.0.0.1:55880/health",
+    "log_path": "/home/assis/.previa/stacks/default/logs/runners/55880.log"
+  }
+]
+```
+
+Rules:
+
+- Each entry must contain `role`, `state`, `pid`, `address`, `port`,
+  `health_url`, and `log_path`.
+- `role` values are fixed to `main` or `runner`.
+- `state` values are fixed to `running`, `degraded`, or `stopped`.
+- When no detached runtime file exists, `ps --json` must emit an empty array.
 
 ## Configuration Model
 
@@ -743,6 +807,7 @@ The implementation must surface explicit user-facing errors for:
 - Missing detached runtime file for the selected stack name during `restart`.
 - Mutually exclusive `status --main` and `status --runner <selector>`.
 - Unknown local runner selector during `status --runner <selector>`.
+- Failure to format or emit `ps --json` according to the documented schema.
 - Mutually exclusive `logs --main` and `logs --runner <selector>`.
 - Unknown local runner selector during `logs --runner <selector>`.
 - Missing detached runtime file for the selected stack name during `logs`.
@@ -851,52 +916,58 @@ The implementation is complete only when these scenarios are covered:
 45. `list` reports all known stack names under `PREVIA_HOME/stacks/` with their
     current states.
 46. `list --json` prints a stable JSON array matching the documented schema.
-47. `logs --name api --main` reads
+47. `ps --name api` prints one row for the detached `previa-main` process and
+    one row per detached local runner process tracked in the runtime file.
+48. `ps --json --name api` prints a stable JSON array matching the documented
+    schema.
+49. `ps` prints no rows and exits successfully when no detached runtime file
+    exists for the selected stack.
+50. `logs --name api --main` reads
     `PREVIA_HOME/stacks/api/logs/main.log`.
-48. `logs --name api --runner 127.0.0.1:55880` reads the matching local runner
+51. `logs --name api --runner 127.0.0.1:55880` reads the matching local runner
     log file.
-49. `logs --name api --follow` streams appended log lines until interrupted.
-50. `logs --main --runner 55880` fails clearly because the filters are mutually
+52. `logs --name api --follow` streams appended log lines until interrupted.
+53. `logs --main --runner 55880` fails clearly because the filters are mutually
     exclusive.
-51. `doctor --name api` reports stale runtime state when recorded local PIDs
+54. `doctor --name api` reports stale runtime state when recorded local PIDs
     are dead.
-52. `doctor --name api` reports unhealthy local processes when `/health`
+55. `doctor --name api` reports unhealthy local processes when `/health`
     probes fail even though PIDs are alive.
-53. `doctor --name api --fix` removes a stale runtime file when no recorded
+56. `doctor --name api --fix` removes a stale runtime file when no recorded
     local PIDs are alive.
-54. `doctor --name api --fix` removes a stale lock file that is not owned by a
+57. `doctor --name api --fix` removes a stale lock file that is not owned by a
     live process.
-55. `down --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
+58. `down --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
     recorded local processes, waits for shutdown, and removes the runtime file.
-56. `down` without `--name` targets the `default` stack.
-57. `down` fails clearly when no detached runtime file exists for the selected
+59. `down` without `--name` targets the `default` stack.
+60. `down` fails clearly when no detached runtime file exists for the selected
     stack name.
-58. `down --runner 55880` stops only the recorded local runner on port `55880`
+61. `down --runner 55880` stops only the recorded local runner on port `55880`
     and rewrites the selected stack runtime file with the remaining runner
     entries.
-59. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
+62. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
     to `127.0.0.1:55880`.
-60. `down --runner 127.0.0.1` stops all recorded local runners bound to
+63. `down --runner 127.0.0.1` stops all recorded local runners bound to
     `127.0.0.1`.
-61. `down --runner 55880 --runner 55881` stops only the selected local runners
+64. `down --runner 55880 --runner 55881` stops only the selected local runners
     and preserves `previa-main` plus any remaining local runners and attached
     runner endpoints.
-62. `down --runner 55880` fails clearly when the selector does not match any
+65. `down --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-63. `down --runner 55880` fails clearly if removing that runner would leave the
+66. `down --runner 55880` fails clearly if removing that runner would leave the
     stack with zero runner sources overall.
-64. `down` does not attempt to terminate attached runner endpoints.
-65. `restart --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
+67. `down` does not attempt to terminate attached runner endpoints.
+68. `restart --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
     detached local processes, starts a new detached stack with the same runner
     topology, and rewrites the runtime file with new PIDs.
-66. `restart` without `--name` targets the `default` stack.
-67. `restart` preserves the recorded main port and runner port range from the
+69. `restart` without `--name` targets the `default` stack.
+70. `restart` preserves the recorded main port and runner port range from the
    runtime file.
-68. `restart` fails clearly when no detached runtime file exists for the
+71. `restart` fails clearly when no detached runtime file exists for the
     selected stack name.
-69. `up --detach` fails clearly when
+72. `up --detach` fails clearly when
     `PREVIA_HOME/stacks/default/run/state.json` already exists.
-70. Any file generated by `previactl` is written under `PREVIA_HOME`.
+73. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 
