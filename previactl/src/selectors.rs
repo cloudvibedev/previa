@@ -72,6 +72,7 @@ impl RunnerSelector {
     }
 }
 
+#[cfg(test)]
 pub fn normalize_attach_runner(value: &str) -> Result<String> {
     match RunnerSelector::parse(value)? {
         RunnerSelector::Port { port, .. } => Ok(format!("http://127.0.0.1:{port}")),

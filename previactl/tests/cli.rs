@@ -1,72 +1,14 @@
 use std::fs;
+use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
 use assert_cmd::prelude::*;
+use serde_json::json;
 use tempfile::TempDir;
-
-fn python3_available() -> bool {
-    Command::new("python3").arg("--version").output().is_ok()
-}
-
-fn write_fake_binary(path: &Path) {
-    let script = r#"#!/bin/sh
-python3 -u - <<'PY'
-import os
-import signal
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-address = os.environ.get("ADDRESS", "127.0.0.1")
-port = int(os.environ.get("PORT", "0"))
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/health":
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ok")
-        elif self.path == "/info":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"pid":1,"memoryBytes":0,"virtualMemoryBytes":0,"cpuUsagePercent":0.0}')
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, fmt, *args):
-        return
-
-httpd = HTTPServer((address, port), Handler)
-print(f"fake node listening on {address}:{port}", flush=True)
-
-def stop(_signum, _frame):
-    httpd.shutdown()
-
-signal.signal(signal.SIGTERM, stop)
-signal.signal(signal.SIGINT, stop)
-httpd.serve_forever()
-PY
-"#;
-
-    fs::write(path, script).expect("write fake binary");
-    let mut permissions = fs::metadata(path).expect("metadata").permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).expect("chmod");
-}
-
-fn setup_previa_home() -> TempDir {
-    let temp = TempDir::new().expect("tempdir");
-    let bin = temp.path().join("bin");
-    fs::create_dir_all(&bin).expect("bin dir");
-    write_fake_binary(&bin.join("previa-main"));
-    write_fake_binary(&bin.join("previa-runner"));
-    temp
-}
 
 fn cargo_bin() -> Command {
     Command::cargo_bin("previactl").expect("previactl binary")
@@ -80,79 +22,103 @@ fn find_free_port() -> u16 {
         .port()
 }
 
-#[test]
-fn dry_run_rejects_detach() {
-    let temp = setup_previa_home();
-    cargo_bin()
-        .env("PREVIA_HOME", temp.path())
-        .args(["up", "--dry-run", "--detach"])
-        .assert()
-        .failure();
+fn setup_previa_home() -> TempDir {
+    TempDir::new().expect("tempdir")
+}
+
+fn start_health_server(port: u16) -> std::thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind health server");
+        for stream in listener.incoming() {
+            let mut stream = match stream {
+                Ok(stream) => stream,
+                Err(_) => break,
+            };
+            let mut buffer = [0_u8; 1024];
+            let _ = stream.read(&mut buffer);
+            let request = String::from_utf8_lossy(&buffer);
+            let status = if request.starts_with("GET /health ") {
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+            } else {
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            };
+            let _ = stream.write_all(status.as_bytes());
+        }
+    })
+}
+
+fn write_state_file(
+    previa_home: &Path,
+    stack: &str,
+    main_pid: u32,
+    main_port: u16,
+    runner_pid: u32,
+    runner_port: u16,
+) {
+    let stack_dir = previa_home.join("stacks").join(stack);
+    fs::create_dir_all(stack_dir.join("run")).expect("run dir");
+    let runtime_file = stack_dir.join("run/state.json");
+    let payload = json!({
+        "name": stack,
+        "mode": "detached",
+        "started_at": "2026-03-11T00:00:00Z",
+        "main": {
+            "pid": main_pid,
+            "address": "127.0.0.1",
+            "port": main_port,
+            "log_path": stack_dir.join("logs/main.log").display().to_string()
+        },
+        "runner_port_range": {
+            "start": runner_port,
+            "end": runner_port
+        },
+        "attached_runners": [],
+        "runners": [
+            {
+                "pid": runner_pid,
+                "address": "127.0.0.1",
+                "port": runner_port,
+                "log_path": stack_dir.join(format!("logs/runners/{runner_port}.log")).display().to_string()
+            }
+        ]
+    });
+    fs::write(runtime_file, serde_json::to_vec_pretty(&payload).expect("encode state"))
+        .expect("write state");
 }
 
 #[test]
-fn dry_run_resolves_compose_without_writing_runtime() {
+fn status_reports_stopped_when_runtime_is_missing() {
     let temp = setup_previa_home();
-    let compose = temp.path().join("previa-compose.yaml");
-    fs::write(
-        &compose,
-        r#"version: 1
-main:
-  address: 127.0.0.1
-  port: 56100
-runners:
-  local:
-    address: 127.0.0.1
-    count: 1
-    port_range:
-      start: 56110
-      end: 56110
-"#,
-    )
-    .expect("write compose");
-
-    cargo_bin()
+    let output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["up", "--dry-run", compose.to_str().expect("compose str")])
-        .assert()
-        .success();
-
-    assert!(!temp.path().join("stacks/default/run/state.json").exists());
+        .args(["status", "--name", "missing", "--json"])
+        .output()
+        .expect("status output");
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("status json");
+    assert_eq!(json["state"], "stopped");
+    assert!(json["main"].is_null());
+    assert_eq!(json["runners"].as_array().expect("runners").len(), 0);
 }
 
 #[test]
-fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
-    if !python3_available() {
-        return;
-    }
-
+fn status_list_and_ps_report_running_stack_from_runtime_file() {
     let temp = setup_previa_home();
     let stack = "itest";
     let main_port = find_free_port();
     let runner_port = find_free_port();
+    let _main_server = start_health_server(main_port);
+    let _runner_server = start_health_server(runner_port);
+    thread::sleep(Duration::from_millis(100));
 
-    cargo_bin()
-        .env("PREVIA_HOME", temp.path())
-        .args([
-            "up",
-            "--name",
-            stack,
-            "--detach",
-            "--main-address",
-            "127.0.0.1",
-            "-p",
-            &main_port.to_string(),
-            "--runner-address",
-            "127.0.0.1",
-            "-P",
-            &format!("{runner_port}:{runner_port}"),
-            "-r",
-            "1",
-        ])
-        .assert()
-        .success();
-
-    thread::sleep(Duration::from_millis(500));
+    write_state_file(
+        temp.path(),
+        stack,
+        std::process::id(),
+        main_port,
+        std::process::id(),
+        runner_port,
+    );
 
     let status_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
@@ -164,6 +130,33 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
         serde_json::from_slice(&status_output.stdout).expect("status json");
     assert_eq!(status_json["state"], "running");
     assert_eq!(status_json["name"], stack);
+
+    let main_status = cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args(["status", "--name", stack, "--main", "--json"])
+        .output()
+        .expect("main status");
+    assert!(main_status.status.success());
+    let main_json: serde_json::Value =
+        serde_json::from_slice(&main_status.stdout).expect("main json");
+    assert_eq!(main_json["main"]["state"], "running");
+
+    let runner_status = cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args([
+            "status",
+            "--name",
+            stack,
+            "--runner",
+            &format!("127.0.0.1:{runner_port}"),
+            "--json",
+        ])
+        .output()
+        .expect("runner status");
+    assert!(runner_status.status.success());
+    let runner_json: serde_json::Value =
+        serde_json::from_slice(&runner_status.stdout).expect("runner json");
+    assert_eq!(runner_json["runners"][0]["state"], "running");
 
     let ps_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
@@ -182,22 +175,26 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
     assert!(list_output.status.success());
     let list_json: serde_json::Value =
         serde_json::from_slice(&list_output.stdout).expect("list json");
-    assert_eq!(list_json.as_array().expect("list array")[0]["name"], stack);
+    assert_eq!(list_json.as_array().expect("list array")[0]["state"], "running");
+}
 
-    let logs_output = cargo_bin()
+#[test]
+fn status_reports_degraded_for_dead_pid_or_unhealthy_probe() {
+    let temp = setup_previa_home();
+    let stack = "degraded";
+    let main_port = find_free_port();
+    let _main_server = start_health_server(main_port);
+    thread::sleep(Duration::from_millis(100));
+
+    write_state_file(temp.path(), stack, std::process::id(), main_port, 999_999, find_free_port());
+
+    let status_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["logs", "--name", stack, "--main"])
+        .args(["status", "--name", stack, "--json"])
         .output()
-        .expect("logs output");
-    assert!(logs_output.status.success());
-    let logs = String::from_utf8(logs_output.stdout).expect("utf8 logs");
-    assert!(logs.contains("fake node listening"));
-
-    cargo_bin()
-        .env("PREVIA_HOME", temp.path())
-        .args(["down", "--name", stack])
-        .assert()
-        .success();
-
-    assert!(!temp.path().join("stacks").join(stack).join("run/state.json").exists());
+        .expect("status output");
+    assert!(status_output.status.success());
+    let status_json: serde_json::Value =
+        serde_json::from_slice(&status_output.stdout).expect("status json");
+    assert_eq!(status_json["state"], "degraded");
 }

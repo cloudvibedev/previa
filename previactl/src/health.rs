@@ -1,6 +1,5 @@
+use nix::unistd::Pid;
 use reqwest::Client;
-
-use crate::process::pid_exists;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DerivedState {
@@ -58,4 +57,8 @@ pub fn state_from_pid_and_health(pid: u32, healthy: bool) -> DerivedState {
     } else {
         DerivedState::Degraded
     }
+}
+
+fn pid_exists(pid: u32) -> bool {
+    nix::sys::signal::kill(Pid::from_raw(pid as i32), None).is_ok()
 }
