@@ -3,7 +3,7 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -147,6 +147,51 @@ runners:
         .success();
 
     assert!(!temp.path().join("stacks/default/run/state.json").exists());
+}
+
+#[test]
+fn up_prompts_and_accepts_shifted_main_port_on_enter() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_previa_home();
+    let occupied_main_port = find_free_port();
+    let runner_port = find_free_port();
+    let _occupied = TcpListener::bind(("127.0.0.1", occupied_main_port)).expect("occupy main port");
+
+    let output = run_command_with_stdin(
+        temp.path(),
+        [
+            "up",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &occupied_main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+        ],
+        "\n",
+    );
+    assert!(output.status.success());
+
+    let output = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(output.contains("Use main port"));
+
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(temp.path().join("stacks/default/run/state.json")).expect("runtime state"),
+    )
+    .expect("runtime json");
+    assert_eq!(state["main"]["port"], occupied_main_port + 100);
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args(["down"])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -363,6 +408,56 @@ fn up_fails_before_spawning_when_runner_port_is_already_in_use() {
     cargo_bin()
         .env("PREVIA_HOME", temp.path())
         .args(["down", "--context", "other"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn up_prompts_and_accepts_shifted_runner_range_on_enter() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_previa_home();
+    let main_port = find_free_port();
+    let occupied_runner_port = find_free_port();
+    let _occupied =
+        TcpListener::bind(("127.0.0.1", occupied_runner_port)).expect("occupy runner port");
+
+    let output = run_command_with_stdin(
+        temp.path(),
+        [
+            "up",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{occupied_runner_port}:{occupied_runner_port}"),
+        ],
+        "\n",
+    );
+    assert!(output.status.success());
+
+    let output = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(output.contains("Use runner ports 100 above instead"));
+
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(temp.path().join("stacks/default/run/state.json")).expect("runtime state"),
+    )
+    .expect("runtime json");
+    assert_eq!(
+        state["runner_port_range"]["start"],
+        occupied_runner_port + 100
+    );
+    assert_eq!(state["runners"][0]["port"], occupied_runner_port + 100);
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args(["down"])
         .assert()
         .success();
 }
@@ -650,4 +745,26 @@ fn process_exists(pid: u32) -> bool {
         return true;
     };
     !status.lines().any(|line| line.starts_with("State:\tZ"))
+}
+
+fn run_command_with_stdin<const N: usize>(
+    previa_home: &Path,
+    args: [&str; N],
+    stdin_input: &str,
+) -> std::process::Output {
+    let mut command = cargo_bin();
+    command
+        .env("PREVIA_HOME", previa_home)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("spawn command");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin pipe")
+        .write_all(stdin_input.as_bytes())
+        .expect("write stdin");
+    child.wait_with_output().expect("wait with output")
 }

@@ -139,6 +139,14 @@ No additional v1 commands are required.
 - Starts `previa-main` after all local runner processes have been spawned.
 - Fails before spawning any child process when the effective local
   `previa-main` or local runner bind target is already in use.
+- Without `--dry-run`, when the effective local `previa-main` port is already
+  in use, `up` must interactively prompt the operator to accept `port + 100`
+  as the replacement main port or rerun with `-p <port>`.
+- Without `--dry-run`, when the effective local runner port range contains an
+  in-use local bind target, `up` must interactively prompt the operator to
+  accept the entire runner range shifted by `+100` ports or rerun with
+  `-P <start:end>`.
+- In those prompts, pressing Enter with no typed value must be treated as `yes`.
 - Starts `previa-main` with `ADDRESS` and `PORT` overridden to the effective
   `--main-address` and `--main-port` / `-p` values when provided.
 - With `--dry-run`, resolves compose input, validates selectors, validates

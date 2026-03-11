@@ -10,6 +10,7 @@ mod process;
 mod runtime;
 mod selectors;
 
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -31,8 +32,9 @@ use crate::output::{
 };
 use crate::paths::{PreviaPaths, StackPaths};
 use crate::process::{
-    SpawnedStack, graceful_shutdown_pids, monitor_foreground_stack, spawn_detached_stack,
-    spawn_foreground_stack, validate_startup_bindings,
+    BindingConflict, BindingConflictKind, SpawnedStack, conflict_message, graceful_shutdown_pids,
+    monitor_foreground_stack, spawn_detached_stack, spawn_foreground_stack,
+    startup_binding_conflicts, validate_startup_bindings,
 };
 use crate::runtime::{
     DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, acquire_lock, read_runtime_state,
@@ -67,13 +69,15 @@ pub async fn run() -> Result<()> {
 async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> {
     let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
-    let resolved = resolve_up_config(paths, &stack_paths, args).await?;
+    let mut resolved = resolve_up_config(paths, &stack_paths, args).await?;
 
     if resolved.dry_run {
         validate_startup_bindings(&resolved)?;
         print_dry_run(&resolved);
         return Ok(());
     }
+
+    resolve_port_conflicts(&mut resolved)?;
 
     if resolved.detach {
         let _lock = acquire_lock(&stack_paths)?;
@@ -296,6 +300,103 @@ fn print_dry_run(resolved: &ResolvedUpConfig) {
     if let Some(source) = &resolved.source {
         println!("source: {}", source.display());
     }
+}
+
+fn resolve_port_conflicts(resolved: &mut ResolvedUpConfig) -> Result<()> {
+    loop {
+        let conflicts = startup_binding_conflicts(resolved);
+        if conflicts.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(conflict) = conflicts
+            .iter()
+            .find(|conflict| conflict.kind == BindingConflictKind::Main)
+        {
+            let next_port = conflict.port.checked_add(100).ok_or_else(|| {
+                anyhow!(
+                    "{}; rerun with -p <port> to choose a free main port",
+                    conflict_message(conflict)
+                )
+            })?;
+            if !prompt_for_suggested_port(
+                conflict,
+                next_port,
+                &format!("-p {next_port}"),
+                &format!("use -p <port> to define the main port explicitly"),
+            )? {
+                bail!(
+                    "{}; rerun with -p <port> to choose a free main port",
+                    conflict_message(conflict)
+                );
+            }
+            resolved.set_main_port(next_port);
+            continue;
+        }
+
+        if let Some(conflict) = conflicts
+            .iter()
+            .find(|conflict| conflict.kind == BindingConflictKind::Runner)
+        {
+            let next_start = resolved.runner_port_range.start.checked_add(100);
+            let next_end = resolved.runner_port_range.end.checked_add(100);
+            let (Some(next_start), Some(next_end)) = (next_start, next_end) else {
+                bail!(
+                    "{}; rerun with -P <start:end> to choose a free runner port range",
+                    conflict_message(conflict)
+                );
+            };
+            if !prompt_for_suggested_port(
+                conflict,
+                next_start,
+                &format!("-P {next_start}:{next_end}"),
+                "use -P <start:end> to define the runner port range explicitly",
+            )? {
+                bail!(
+                    "{}; rerun with -P <start:end> to choose a free runner port range",
+                    conflict_message(conflict)
+                );
+            }
+            resolved.shift_runner_ports(100);
+            continue;
+        }
+    }
+}
+
+fn prompt_for_suggested_port(
+    conflict: &BindingConflict,
+    suggested_port: u16,
+    suggested_flag: &str,
+    override_hint: &str,
+) -> Result<bool> {
+    let prompt = match conflict.kind {
+        BindingConflictKind::Main => format!(
+            "{}. Use main port {suggested_port} instead? [Y/n] \
+Press Enter for yes, or rerun with {suggested_flag}; {override_hint}: ",
+            conflict_message(conflict)
+        ),
+        BindingConflictKind::Runner => format!(
+            "{}. Use runner ports 100 above instead, starting at {suggested_port}? [Y/n] \
+Press Enter for yes, or rerun with {suggested_flag}; {override_hint}: ",
+            conflict_message(conflict)
+        ),
+    };
+
+    eprint!("{prompt}");
+    io::stderr().flush().context("failed to flush prompt")?;
+
+    let mut answer = String::new();
+    let bytes_read = io::stdin()
+        .read_line(&mut answer)
+        .context("failed to read prompt response")?;
+    eprintln!();
+
+    if bytes_read == 0 {
+        return Ok(false);
+    }
+
+    let normalized = answer.trim().to_ascii_lowercase();
+    Ok(normalized.is_empty() || normalized == "y" || normalized == "yes")
 }
 
 fn detached_state_from_spawn(

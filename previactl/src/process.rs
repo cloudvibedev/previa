@@ -15,6 +15,19 @@ use tokio::time::sleep;
 use crate::config::ResolvedUpConfig;
 use crate::health::probe_health;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindingConflictKind {
+    Main,
+    Runner,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindingConflict {
+    pub kind: BindingConflictKind,
+    pub address: String,
+    pub port: u16,
+}
+
 pub struct SpawnedStack {
     pub main: Child,
     pub runners: Vec<Child>,
@@ -27,14 +40,40 @@ pub struct ForegroundStack {
 }
 
 pub fn validate_startup_bindings(config: &ResolvedUpConfig) -> Result<()> {
-    let mut held_listeners = Vec::new();
+    for conflict in startup_binding_conflicts(config) {
+        bail!("{}", conflict_message(&conflict));
+    }
+    Ok(())
+}
 
-    held_listeners.push(bind_target(&config.main.address, config.main.port, "main")?);
+pub fn startup_binding_conflicts(config: &ResolvedUpConfig) -> Vec<BindingConflict> {
+    let mut held_listeners = Vec::new();
+    let mut conflicts = Vec::new();
+
+    if bind_target(&config.main.address, config.main.port)
+        .map(|listener| held_listeners.push(listener))
+        .is_err()
+    {
+        conflicts.push(BindingConflict {
+            kind: BindingConflictKind::Main,
+            address: config.main.address.clone(),
+            port: config.main.port,
+        });
+    }
     for runner in &config.local_runners {
-        held_listeners.push(bind_target(&runner.address, runner.port, "runner")?);
+        if bind_target(&runner.address, runner.port)
+            .map(|listener| held_listeners.push(listener))
+            .is_err()
+        {
+            conflicts.push(BindingConflict {
+                kind: BindingConflictKind::Runner,
+                address: runner.address.clone(),
+                port: runner.port,
+            });
+        }
     }
 
-    Ok(())
+    conflicts
 }
 
 pub async fn spawn_detached_stack(
@@ -278,7 +317,11 @@ fn spawn_foreground_process(
     Ok((child, tasks))
 }
 
-async fn wait_for_startup(mut child: Child, health_url: &str, http: &reqwest::Client) -> Result<Child> {
+async fn wait_for_startup(
+    mut child: Child,
+    health_url: &str,
+    http: &reqwest::Client,
+) -> Result<Child> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(status) = child
@@ -327,11 +370,17 @@ async fn sigterm() {
     std::future::pending::<()>().await;
 }
 
-fn bind_target(address: &str, port: u16, role: &str) -> Result<TcpListener> {
-    let bind_address = format_bind_address(address, port);
-    TcpListener::bind(&bind_address).with_context(|| {
-        format!("requested {role} bind target '{bind_address}' is already in use or unavailable")
-    })
+fn bind_target(address: &str, port: u16) -> Result<TcpListener> {
+    TcpListener::bind(format_bind_address(address, port)).context("bind target unavailable")
+}
+
+pub fn conflict_message(conflict: &BindingConflict) -> String {
+    let bind_address = format_bind_address(&conflict.address, conflict.port);
+    let role = match conflict.kind {
+        BindingConflictKind::Main => "main",
+        BindingConflictKind::Runner => "runner",
+    };
+    format!("requested {role} bind target '{bind_address}' is already in use or unavailable")
 }
 
 fn format_bind_address(address: &str, port: u16) -> String {

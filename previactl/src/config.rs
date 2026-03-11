@@ -112,6 +112,33 @@ impl ResolvedUpConfig {
     pub fn main_health_url(&self) -> String {
         format!("http://{}:{}/health", self.main.address, self.main.port)
     }
+
+    pub fn set_main_port(&mut self, port: u16) {
+        self.main.port = port;
+        self.main_env.insert("PORT".to_owned(), port.to_string());
+    }
+
+    pub fn shift_runner_ports(&mut self, offset: u16) {
+        self.runner_port_range.start += offset;
+        self.runner_port_range.end += offset;
+
+        for (index, runner) in self.local_runners.iter_mut().enumerate() {
+            let port = runner.port + offset;
+            runner.port = port;
+            runner.env.insert("PORT".to_owned(), port.to_string());
+            self.local_runner_ports[index] = (runner.address.clone(), port);
+        }
+
+        self.main_env.insert(
+            "RUNNER_ENDPOINTS".to_owned(),
+            self.local_runners
+                .iter()
+                .map(|runner| format!("http://{}:{}", runner.address, runner.port))
+                .chain(self.attached_runners.clone())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
 }
 
 fn validate_port(port: u16, label: &str) -> Result<u16> {
@@ -168,24 +195,38 @@ pub async fn resolve_up_config(
     let main_address = args
         .main_address
         .clone()
-        .or_else(|| compose.as_ref().and_then(|compose| compose.main.as_ref()?.address.clone()))
+        .or_else(|| {
+            compose
+                .as_ref()
+                .and_then(|compose| compose.main.as_ref()?.address.clone())
+        })
         .or_else(|| main_env_file.get("ADDRESS").cloned())
         .unwrap_or_else(|| "0.0.0.0".to_owned());
     validate_address(&main_address)?;
 
     let main_port = args
         .main_port
-        .or_else(|| compose.as_ref().and_then(|compose| compose.main.as_ref()?.port))
-        .or_else(|| main_env_file.get("PORT").and_then(|value| value.parse::<u16>().ok()))
+        .or_else(|| {
+            compose
+                .as_ref()
+                .and_then(|compose| compose.main.as_ref()?.port)
+        })
+        .or_else(|| {
+            main_env_file
+                .get("PORT")
+                .and_then(|value| value.parse::<u16>().ok())
+        })
         .unwrap_or(5588);
     let main_port = validate_port(main_port, "main port")?;
 
     let runner_address = args
         .runner_address
         .clone()
-        .or_else(|| compose.as_ref().and_then(|compose| {
-            compose.runners.as_ref()?.local.as_ref()?.address.clone()
-        }))
+        .or_else(|| {
+            compose
+                .as_ref()
+                .and_then(|compose| compose.runners.as_ref()?.local.as_ref()?.address.clone())
+        })
         .or_else(|| runner_env_file.get("ADDRESS").cloned())
         .unwrap_or_else(|| "127.0.0.1".to_owned());
     validate_address(&runner_address)?;
@@ -193,10 +234,22 @@ pub async fn resolve_up_config(
     let runner_port_range = if let Some(raw) = args.runner_port_range.as_deref() {
         parse_port_range(raw)?
     } else if let Some(compose) = compose.as_ref() {
-        if let Some(local) = compose.runners.as_ref().and_then(|runners| runners.local.as_ref()) {
+        if let Some(local) = compose
+            .runners
+            .as_ref()
+            .and_then(|runners| runners.local.as_ref())
+        {
             PortRange {
-                start: local.port_range.as_ref().and_then(|value| value.start).unwrap_or(55880),
-                end: local.port_range.as_ref().and_then(|value| value.end).unwrap_or(55979),
+                start: local
+                    .port_range
+                    .as_ref()
+                    .and_then(|value| value.start)
+                    .unwrap_or(55880),
+                end: local
+                    .port_range
+                    .as_ref()
+                    .and_then(|value| value.end)
+                    .unwrap_or(55979),
             }
         } else {
             PortRange {
@@ -372,10 +425,9 @@ fn resolve_compose_source(source: Option<&str>) -> Result<Option<PathBuf>> {
     if !matches!(extension, "json" | "yaml" | "yml") {
         bail!("unsupported compose file extension '{}'", extension);
     }
-    Ok(Some(
-        path.canonicalize()
-            .with_context(|| format!("failed to access '{}'", path.display()))?,
-    ))
+    Ok(Some(path.canonicalize().with_context(|| {
+        format!("failed to access '{}'", path.display())
+    })?))
 }
 
 fn read_compose_file(path: &Path) -> Result<ComposeFile> {
