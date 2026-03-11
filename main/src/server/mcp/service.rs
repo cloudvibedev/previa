@@ -382,6 +382,7 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
         "get_info" => {
             let runners = collect_runner_statuses(&state.client, &state.runner_endpoints).await;
             let payload = OrchestratorInfoResponse {
+                context: state.context_name.clone(),
                 total_runners: runners.len(),
                 active_runners: runners.iter().filter(|runner| runner.active).count(),
                 runners,

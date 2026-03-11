@@ -75,6 +75,7 @@ impl ResolvedUpConfig {
         let mut main_env = merge_env(default_main_env_map(stack_paths), main_env);
         main_env.insert("ADDRESS".to_owned(), state.main.address.clone());
         main_env.insert("PORT".to_owned(), state.main.port.to_string());
+        main_env.insert("PREVIA_CONTEXT".to_owned(), stack_paths.name.clone());
         main_env.insert(
             "RUNNER_ENDPOINTS".to_owned(),
             state
@@ -252,6 +253,7 @@ pub async fn resolve_up_config(
     }
     main_env.insert("ADDRESS".to_owned(), main_address.clone());
     main_env.insert("PORT".to_owned(), main_port.to_string());
+    main_env.insert("PREVIA_CONTEXT".to_owned(), stack_paths.name.clone());
     main_env
         .entry("ORCHESTRATOR_DATABASE_URL".to_owned())
         .or_insert_with(|| sqlite_database_url(&stack_paths.orchestrator_db));

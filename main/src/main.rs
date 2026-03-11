@@ -38,6 +38,7 @@ async fn main() {
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(5588);
+    let context_name = std::env::var("PREVIA_CONTEXT").unwrap_or_else(|_| "default".to_owned());
     let bind_addr = format!("{}:{}", address, port);
 
     let connect_options = SqliteConnectOptions::from_str(&database_url)
@@ -60,6 +61,7 @@ async fn main() {
     let state = AppState {
         client: Client::new(),
         db,
+        context_name: context_name.clone(),
         runner_endpoints,
         rps_per_node,
         executions: Arc::new(RwLock::new(HashMap::new())),
@@ -76,8 +78,8 @@ async fn main() {
         .expect("failed to read local bind address");
 
     info!(
-        "previa-main listening on http://{} (database: {}, schema_version: {})",
-        local_addr, database_url, DB_SCHEMA_VERSION
+        "previa-main listening on http://{} (context: {}, database: {}, schema_version: {})",
+        local_addr, context_name, database_url, DB_SCHEMA_VERSION
     );
     if mcp_config.enabled {
         info!(

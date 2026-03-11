@@ -29,6 +29,7 @@ pub async fn get_info(State(state): State<AppState>) -> Json<OrchestratorInfoRes
     let active_runners = runners.iter().filter(|runner| runner.active).count();
 
     Json(OrchestratorInfoResponse {
+        context: state.context_name.clone(),
         total_runners: runners.len(),
         active_runners,
         runners,
@@ -37,4 +38,43 @@ pub async fn get_info(State(state): State<AppState>) -> Json<OrchestratorInfoRes
 
 pub async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
     Json(build_openapi_document())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use reqwest::Client;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tokio::sync::RwLock;
+
+    use crate::server::state::AppState;
+
+    use super::get_info;
+
+    #[tokio::test]
+    async fn info_includes_context_name() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory db");
+        let state = AppState {
+            client: Client::new(),
+            db,
+            context_name: "other".to_owned(),
+            runner_endpoints: Vec::new(),
+            rps_per_node: 1000,
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+        };
+
+        let response = get_info(axum::extract::State(state)).await;
+        let payload = response.0;
+        assert_eq!(payload.context, "other");
+        assert_eq!(payload.total_runners, 0);
+        assert_eq!(payload.active_runners, 0);
+        assert!(payload.runners.is_empty());
+    }
 }

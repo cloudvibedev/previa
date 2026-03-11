@@ -357,6 +357,7 @@ pub struct RunnerInfo {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OrchestratorInfoResponse {
+    pub context: String,
     pub total_runners: usize,
     pub active_runners: usize,
     pub runners: Vec<RunnerInfo>,
