@@ -36,8 +36,8 @@ impl PreviaPaths {
         };
 
         Ok(Self {
-            main_binary: home.join("bin/previa-main"),
-            runner_binary: home.join("bin/previa-runner"),
+            main_binary: resolve_binary(&home, "previa-main")?,
+            runner_binary: resolve_binary(&home, "previa-runner")?,
             home,
         })
     }
@@ -112,4 +112,73 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
 
 pub fn sqlite_database_url(path: &Path) -> String {
     format!("sqlite://{}", path.display())
+}
+
+fn resolve_binary(home: &Path, binary_name: &str) -> Result<PathBuf> {
+    let candidates = binary_candidates(home, binary_name)?;
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    let searched = candidates
+        .iter()
+        .map(|candidate| format!("'{}'", candidate.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    anyhow::bail!("missing binary '{}'; searched {}", binary_name, searched);
+}
+
+fn binary_candidates(home: &Path, binary_name: &str) -> Result<Vec<PathBuf>> {
+    let mut candidates = vec![home.join("bin").join(binary_name)];
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join(binary_name));
+        }
+    }
+
+    if let Some(workspace_root) = discover_workspace_root()? {
+        candidates.push(workspace_root.join("target/debug").join(binary_name));
+        candidates.push(workspace_root.join("target/release").join(binary_name));
+    }
+
+    candidates.dedup();
+    Ok(candidates)
+}
+
+fn discover_workspace_root() -> Result<Option<PathBuf>> {
+    let current_dir = env::current_dir().context("failed to read current directory")?;
+    Ok(find_workspace_root(&current_dir))
+}
+
+fn find_workspace_root(start: &Path) -> Option<PathBuf> {
+    for dir in start.ancestors() {
+        let manifest = dir.join("Cargo.toml");
+        if !manifest.exists() {
+            continue;
+        }
+        let contents = std::fs::read_to_string(&manifest).ok()?;
+        if contents.contains("[workspace]") {
+            return Some(dir.to_path_buf());
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_workspace_root;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn finds_workspace_root_from_nested_directory() {
+        let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let root = find_workspace_root(&crate_dir);
+        assert_eq!(
+            root,
+            crate_dir.parent().map(Path::to_path_buf)
+        );
+    }
 }

@@ -1,4 +1,5 @@
 use std::fs;
+use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
@@ -71,6 +72,14 @@ fn cargo_bin() -> Command {
     Command::cargo_bin("previactl").expect("previactl binary")
 }
 
+fn find_free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .expect("bind free port")
+        .local_addr()
+        .expect("local addr")
+        .port()
+}
+
 #[test]
 fn dry_run_rejects_detach() {
     let temp = setup_previa_home();
@@ -119,6 +128,8 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
 
     let temp = setup_previa_home();
     let stack = "itest";
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
 
     cargo_bin()
         .env("PREVIA_HOME", temp.path())
@@ -130,11 +141,11 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
             "--main-address",
             "127.0.0.1",
             "-p",
-            "56100",
+            &main_port.to_string(),
             "--runner-address",
             "127.0.0.1",
             "-P",
-            "56110:56110",
+            &format!("{runner_port}:{runner_port}"),
             "-r",
             "1",
         ])
