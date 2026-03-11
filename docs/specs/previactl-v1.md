@@ -85,7 +85,8 @@ The v1 CLI surface is fixed to the commands below:
 previactl install [--force-config]
 previactl update
 previactl uninstall [--purge]
-previactl up --runners <N>
+previactl up --runners <N> [-d, --detach]
+previactl down
 previactl run main
 previactl run runner
 previactl service install main
@@ -150,17 +151,33 @@ No additional v1 commands are required.
 - Executes exactly one `previa-main` process and exactly the number of
   `previa-runner` processes declared by `--runners <N>`.
 - Requires `<N>` to be an integer greater than or equal to `1`.
+- Accepts `-d` and `--detach` to leave the spawned processes running in
+  background.
 - Uses port `55880` for the first runner and increments sequentially for each
   additional runner.
 - Builds `RUNNER_ENDPOINTS` for `previa-main` from the runner processes started
   by the command, for example
   `http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`.
 - Starts `previa-main` after all runner processes have been spawned.
-- Runs all processes in foreground and multiplexes their stdout and stderr to
-  the current terminal session.
-- Stops all child processes when the command receives `SIGINT` or `SIGTERM`.
+- Without `-d` or `--detach`, runs all processes in foreground and multiplexes
+  their stdout and stderr to the current terminal session.
+- Without `-d` or `--detach`, stops all child processes when the command
+  receives `SIGINT` or `SIGTERM`.
+- With `-d` or `--detach`, writes a temporary runtime file containing the PIDs
+  of the spawned processes and then exits successfully.
 - Does not create or modify `systemd` units.
 - Does not rewrite `/etc/previa/main.env` or `/etc/previa/runner.env`.
+
+#### `previactl down`
+
+- Stops a local detached stack started by `previactl up --runners <N> --detach`.
+- Reads the temporary runtime file created by detached `up`.
+- Sends a termination signal to the recorded `previa-main` PID and to every
+  recorded `previa-runner` PID.
+- Waits for the recorded processes to exit.
+- Removes the temporary runtime file after shutdown completes.
+- Fails with a clear error if no detached stack runtime file exists.
+- Does not interact with `systemd` services.
 
 #### `previactl run main`
 
@@ -290,7 +307,7 @@ Notes:
 - If the file already exists, `install` and `update` must leave it unchanged
   unless `install --force-config` is used.
 
-## Foreground Bootstrap Rules
+## Local Bootstrap Rules
 
 `previactl up --runners <N>` is the v1 bootstrap command for local development
 or single-host evaluation.
@@ -311,6 +328,53 @@ Rules:
   v1.
 - If any child process fails during startup, the command must terminate the
   remaining children and exit with a non-zero status.
+
+## Detached Bootstrap Rules
+
+Detached local bootstrap uses a single temporary runtime file:
+
+- Path: `/tmp/previactl-up-state.json`
+- Ownership: the user who launched `previactl up --detach`
+- Multiplicity: only one detached `previactl up` stack is supported per host in
+  v1
+
+Runtime file schema:
+
+```json
+{
+  "mode": "detached",
+  "started_at": "2026-03-11T16:25:00Z",
+  "main": {
+    "pid": 41021,
+    "port": 5588
+  },
+  "runners": [
+    {
+      "pid": 41022,
+      "port": 55880
+    },
+    {
+      "pid": 41023,
+      "port": 55881
+    }
+  ]
+}
+```
+
+Rules:
+
+- `previactl up --detach` must fail if `/tmp/previactl-up-state.json` already
+  exists.
+- The runtime file is written only after all child processes have been spawned
+  successfully.
+- The runtime file must be written atomically by writing a temporary file in
+  `/tmp` and renaming it into place.
+- `previactl down` reads this file, terminates the recorded processes, waits for
+  them to stop, and then removes the file.
+- If one or more recorded PIDs no longer exist, `down` continues shutting down
+  the remaining recorded processes and still removes the runtime file.
+- Detached mode is separate from `systemd` and must not create unit files or
+  call `systemctl`.
 
 ## Linux `systemd` Integration
 
@@ -409,6 +473,8 @@ The implementation must surface explicit user-facing errors for:
 - HTTP download failures.
 - Missing installation state during `update`.
 - Missing installed binary during `run`.
+- Existing detached runtime file during `up --detach`.
+- Missing detached runtime file during `down`.
 - Non-Linux `service` command usage.
 - Permission failures when writing to `/opt`, `/etc`, `/var/lib`, or
   `/etc/systemd/system`.
@@ -439,10 +505,18 @@ The implementation is complete only when these scenarios are covered:
     `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
     into the `previa-main` child process.
 12. `up --runners 0` fails validation before spawning any process.
-13. `uninstall` without `--purge` removes binaries and units but preserves
+13. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
+    `previa-main` PID and the three runner PIDs, then exits without stopping
+    the spawned processes.
+14. `down` reads `/tmp/previactl-up-state.json`, terminates the recorded
+    processes, waits for shutdown, and removes the runtime file.
+15. `down` fails clearly when no detached runtime file exists.
+16. `up --detach` fails clearly when `/tmp/previactl-up-state.json` already
+    exists.
+17. `uninstall` without `--purge` removes binaries and units but preserves
     `/etc/previa` and `/var/lib/previa`.
-14. Reinstall after non-purge uninstall reuses the preserved config files.
-15. `service` commands on macOS or Windows fail with the documented Linux-only
+18. Reinstall after non-purge uninstall reuses the preserved config files.
+19. `service` commands on macOS or Windows fail with the documented Linux-only
     service-management error.
 
 ## Rollback and Recovery
