@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
+use clap::Parser;
 use reqwest::Client;
 
 use crate::cli::{Cli, Commands, DownArgs, LogsArgs, PsArgs, RestartArgs, StatusArgs, UpArgs};
@@ -36,19 +37,14 @@ use crate::runtime::{
 use crate::selectors::{RunnerSelector, parse_stack_name};
 
 pub async fn run() -> Result<()> {
-    let cli = Cli::parse_or_exit();
+    let cli = Cli::parse();
     let paths = PreviaPaths::discover()?;
     let http = Client::builder()
         .timeout(Duration::from_secs(1))
         .build()
         .context("failed to build HTTP client")?;
 
-    if cli.version {
-        println!("{}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
-
-    match cli.command.expect("subcommand required unless --version") {
+    match cli.command {
         Commands::Up(args) => cmd_up(&paths, &http, args).await,
         Commands::Down(args) => cmd_down(&paths, args).await,
         Commands::Restart(args) => cmd_restart(&paths, &http, args).await,

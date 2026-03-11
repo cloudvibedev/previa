@@ -1,4 +1,4 @@
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 fn parse_tail_lines(value: &str) -> Result<usize, String> {
     let parsed = value
@@ -11,29 +11,10 @@ fn parse_tail_lines(value: &str) -> Result<usize, String> {
 }
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "previactl",
-    version,
-    disable_version_flag = true,
-    about = "CLI local para operar stacks do Previa"
-)]
+#[command(name = "previactl", version, about = "CLI local para operar stacks do Previa")]
 pub struct Cli {
-    #[arg(short = 'v', long = "version")]
-    pub version: bool,
     #[command(subcommand)]
-    pub command: Option<Commands>,
-}
-
-impl Cli {
-    pub fn parse_or_exit() -> Self {
-        let cli = Self::parse();
-        if cli.version || cli.command.is_some() {
-            return cli;
-        }
-        Self::command()
-            .error(clap::error::ErrorKind::MissingSubcommand, "a subcommand is required")
-            .exit();
-    }
+    pub command: Commands,
 }
 
 #[derive(Debug, Subcommand)]

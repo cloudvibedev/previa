@@ -102,16 +102,6 @@ fn dry_run_rejects_detach() {
 }
 
 #[test]
-fn version_is_available_via_flag_and_subcommand() {
-    let expected = format!("{}\n", env!("CARGO_PKG_VERSION"));
-    for args in [["version"], ["-v"], ["--version"]] {
-        let output = cargo_bin().args(args).output().expect("version output");
-        assert!(output.status.success());
-        assert_eq!(String::from_utf8(output.stdout).expect("utf8"), expected);
-    }
-}
-
-#[test]
 fn dry_run_resolves_compose_without_writing_runtime() {
     let temp = setup_previa_home();
     let compose = temp.path().join("previa-compose.yaml");

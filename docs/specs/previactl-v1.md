@@ -46,7 +46,7 @@ previactl status [--name <stack-name>] [--main] [--runner <address|address:port|
 previactl list [--json]
 previactl ps [--name <stack-name>] [--json]
 previactl logs [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
-previactl -v | --version | version
+previactl version
 ```
 
 No additional v1 commands are required.
@@ -321,8 +321,6 @@ No additional v1 commands are required.
 #### `previactl version`
 
 - Prints the `previactl` binary version.
-- `previactl -v` and `previactl --version` are accepted as aliases for
-  `previactl version`.
 - Does not inspect running processes.
 
 ## Filesystem Layout
@@ -809,8 +807,7 @@ The implementation must surface explicit user-facing errors for:
 
 The implementation is complete only when these scenarios are covered:
 
-1. `version`, `-v`, and `--version` print the `previactl` binary version
-   without requiring network.
+1. `version` prints the `previactl` binary version without requiring network.
 2. `up --name api .` uses `api` as the stack name.
 3. `up .` resolves `./previa-compose.yaml`, `./previa-compose.yml`, or
    `./previa-compose.json` using the documented lookup order.
