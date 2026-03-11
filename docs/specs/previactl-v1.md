@@ -68,7 +68,7 @@ download or install binaries in v1.
 The v1 CLI surface is fixed to the commands below:
 
 ```text
-previactl up [--main-port <port>] [--runner-port-range <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [-d, --detach]
+previactl up [--main-port, -p <port>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [-d, --detach]
 previactl down [--runner <address|address:port|port> ...]
 previactl restart
 previactl status [--main] [--runner <address|address:port|port>]
@@ -87,16 +87,16 @@ No additional v1 commands are required.
 - Prints the parsed JSON in a human-readable format.
 - Does not write to disk.
 
-#### `previactl up [--main-port <port>] [--runner-port-range <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...]`
+#### `previactl up [--main-port, -p <port>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...]`
 
 - Bootstraps a local stack on the current host.
 - Executes exactly one `previa-main` process.
 - Optionally overrides the `previa-main` listen port through
-  `--main-port <port>`.
+  `--main-port <port>` or `-p <port>`.
 - Optionally spawns the number of local `previa-runner` processes declared by
   `--runners <N>` or `-r <N>`.
 - Optionally overrides the local runner port allocation window through
-  `--runner-port-range <start:end>`.
+  `--runner-port-range <start:end>` or `-P <start:end>`.
 - Optionally attaches one or more existing runner targets provided through
   repeated `--attach-runner <selector>` or `-a <selector>` flags.
 - `--attach-runner <selector>` accepts:
@@ -109,14 +109,15 @@ No additional v1 commands are required.
 - `up` must persist attached runners in normalized full-URL form.
 - Requires at least one runner source overall: either `--runners <N>` greater
   than `0`, at least one `--attach-runner` / `-a`, or both.
-- When omitted, `--main-port` defaults to the effective `PORT` value from
+- When omitted, `--main-port` / `-p` defaults to the effective `PORT` value from
   `PREVIA_HOME/config/main.env`, or `5588` when that file or variable is absent.
-- When present, `--main-port <port>` must be an integer from `1` to `65535`.
+- When present, `--main-port <port>` / `-p <port>` must be an integer from `1`
+  to `65535`.
 - When `--runners` is omitted, it defaults to `1`.
 - When present, `--runners <N>` must be an integer greater than or equal to
   `0`.
-- When omitted, `--runner-port-range` defaults to `55880:55979`.
-- When present, `--runner-port-range <start:end>` must:
+- When omitted, `--runner-port-range` / `-P` defaults to `55880:55979`.
+- When present, `--runner-port-range <start:end>` / `-P <start:end>` must:
   - parse as two integer ports from `1` to `65535`
   - satisfy `start <= end`
   - provide at least as many distinct ports as the requested local runner count
@@ -132,7 +133,7 @@ No additional v1 commands are required.
   `http://127.0.0.1:55880,http://127.0.0.1:55881,http://10.0.0.12:55880`
 - Starts `previa-main` after all local runner processes have been spawned.
 - Starts `previa-main` with `PORT` overridden to the effective `--main-port`
-  value when provided.
+  / `-p` value when provided.
 - Without `-d` or `--detach`, runs all child processes in foreground and
   multiplexes their stdout and stderr to the current terminal session.
 - Without `-d` or `--detach`, stops all child processes when the command
@@ -375,19 +376,19 @@ Rules:
 - It is local-only and does not provision remote hosts.
 - It uses the installed binaries from `PREVIA_HOME/bin`.
 - It always executes one `previa-main`.
-- It accepts `--main-port <port>` to override the `PORT` environment variable
-  passed to the `previa-main` child process.
+- It accepts `--main-port <port>` / `-p <port>` to override the `PORT`
+  environment variable passed to the `previa-main` child process.
 - It executes exactly the local runner count declared by the operator in
   `--runners <N>` or `-r <N>`.
-- It accepts `--runner-port-range <start:end>` to define the inclusive local
-  port interval available for spawned runners.
+- It accepts `--runner-port-range <start:end>` / `-P <start:end>` to define the
+  inclusive local port interval available for spawned runners.
 - It may attach existing runner targets declared through repeated
   `--attach-runner <selector>` or `-a <selector>` flags.
 - It must reject `up` if `--runners 0` / `-r 0` is combined with no
   `--attach-runner` / `-a`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
   `PREVIA_HOME/config/main.env` when present, except that `PORT` is overridden
-  by `--main-port <port>` when provided.
+  by `--main-port <port>` / `-p <port>` when provided.
 - Each local spawned runner binds to `127.0.0.1` and uses ports from the
   effective runner port range in ascending order.
 - The effective runner port range defaults to `55880:55979`.
@@ -408,8 +409,8 @@ The implementation must surface explicit user-facing errors for:
 - Missing `PREVIA_HOME/bin/previa-main`.
 - Missing `PREVIA_HOME/bin/previa-runner` when local runners are requested.
 - Invalid `--attach-runner <selector>` / `-a <selector>` value.
-- Invalid `--main-port <port>` value.
-- Invalid `--runner-port-range <start:end>` value.
+- Invalid `--main-port <port>` / `-p <port>` value.
+- Invalid `--runner-port-range <start:end>` / `-P <start:end>` value.
 - Requested local runner count exceeds the effective runner port range
   capacity.
 - Existing detached runtime file during `up --detach`.
@@ -445,10 +446,10 @@ The implementation is complete only when these scenarios are covered:
 6. `up -r 3` starts one `previa-main`, three local runners, and injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
    into the `previa-main` child process.
-7. `up --main-port 6688 -r 1` starts `previa-main` with `PORT=6688`.
-8. `up --runner-port-range 56000:56002 -r 3` starts local runners on ports
+7. `up -p 6688 -r 1` starts `previa-main` with `PORT=6688`.
+8. `up -P 56000:56002 -r 3` starts local runners on ports
    `56000`, `56001`, and `56002`.
-9. `up --runner-port-range 56000:56001 -r 3` fails validation before spawning
+9. `up -P 56000:56001 -r 3` fails validation before spawning
    any local child process because the range capacity is insufficient.
 10. `up -r 1 -a 10.0.0.12:55880` injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://10.0.0.12:55880`
