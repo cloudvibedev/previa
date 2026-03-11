@@ -19,7 +19,6 @@ scope for v1 and must not be invented during implementation.
 - Bootstrap a local stack in foreground with one `previa-main` and multiple
   `previa-runner` processes.
 - Run `previa-main` and `previa-runner` in foreground for local operations.
-- Manage `previa-main` and `previa-runner` as `systemd` services on Linux.
 - Reuse the current environment-variable contract already supported by the
   binaries.
 
@@ -28,8 +27,8 @@ scope for v1 and must not be invented during implementation.
 - Remote provisioning over SSH.
 - Fleet or cluster management across multiple hosts.
 - Automatic runner registration in external control planes.
-- `launchd` service management on macOS.
-- Windows Service Manager integration.
+- Native service managers such as `systemd`, `launchd`, or Windows Service
+  Manager.
 - Checksum or signature verification before the manifest exposes those fields.
 
 ## External Contract
@@ -87,18 +86,9 @@ previactl update
 previactl uninstall [--purge]
 previactl up --runners <N> [-d, --detach]
 previactl down
+previactl status
 previactl run main
 previactl run runner
-previactl service install main
-previactl service install runner
-previactl service start main
-previactl service start runner
-previactl service stop main
-previactl service stop runner
-previactl service restart main
-previactl service restart runner
-previactl service status main
-previactl service status runner
 previactl manifest show
 ```
 
@@ -132,15 +122,13 @@ No additional v1 commands are required.
 - If versions are equal, prints `already up to date` and exits successfully.
 - If the remote version is newer, downloads both binaries and replaces them
   atomically.
-- If either service is already installed and active, restarts that service after
-  the binary swap completes.
 - Does not overwrite existing config files.
 - Updates `install-state.json` after both binaries are replaced successfully.
+- Does not restart processes that are already running.
 
 #### `previactl uninstall [--purge]`
 
-- Stops and removes `previa-main.service` and `previa-runner.service` if they
-  exist.
+- Stops the detached local stack if `/tmp/previactl-up-state.json` exists.
 - Removes installed binaries and `install-state.json`.
 - Without `--purge`, preserves `/etc/previa` and `/var/lib/previa`.
 - With `--purge`, also removes `/etc/previa` and `/var/lib/previa`.
@@ -165,7 +153,6 @@ No additional v1 commands are required.
   receives `SIGINT` or `SIGTERM`.
 - With `-d` or `--detach`, writes a temporary runtime file containing the PIDs
   of the spawned processes and then exits successfully.
-- Does not create or modify `systemd` units.
 - Does not rewrite `/etc/previa/main.env` or `/etc/previa/runner.env`.
 
 #### `previactl down`
@@ -177,7 +164,19 @@ No additional v1 commands are required.
 - Waits for the recorded processes to exit.
 - Removes the temporary runtime file after shutdown completes.
 - Fails with a clear error if no detached stack runtime file exists.
-- Does not interact with `systemd` services.
+
+#### `previactl status`
+
+- Reports the status of the detached local stack managed by `previactl up`.
+- Reads `/tmp/previactl-up-state.json` when it exists.
+- Checks whether the recorded `previa-main` PID and `previa-runner` PIDs are
+  still alive.
+- Prints `stopped` when the runtime file does not exist.
+- Prints `running` with the recorded PIDs and ports when all recorded processes
+  are alive.
+- Prints `degraded` when the runtime file exists but one or more recorded PIDs
+  are no longer alive.
+- Does not interact with native service managers.
 
 #### `previactl run main`
 
@@ -190,20 +189,6 @@ No additional v1 commands are required.
 - Loads `/etc/previa/runner.env`.
 - Starts `/opt/previa/bin/previa-runner` in foreground.
 - Inherits stdout and stderr in the current terminal session.
-
-#### `previactl service install main|runner`
-
-- Creates the corresponding `systemd` unit file if it does not exist.
-- Rewrites the unit file if it already exists to keep the generated definition
-  authoritative.
-- Runs `systemctl daemon-reload`.
-- Does not start the service automatically.
-
-#### `previactl service start|stop|restart|status main|runner`
-
-- Proxies to `systemctl` for the respective unit name.
-- Fails clearly on non-Linux platforms with `service management is only
-  supported on linux`.
 
 ## Installation Layout
 
@@ -219,9 +204,6 @@ The Linux installation layout is fixed for v1:
   - `/var/lib/previa/install-state.json`
 - Default orchestrator database:
   - `/var/lib/previa/main/orchestrator.db`
-- `systemd` units:
-  - `/etc/systemd/system/previa-main.service`
-  - `/etc/systemd/system/previa-runner.service`
 
 The installer must create parent directories as needed.
 
@@ -285,7 +267,7 @@ RUST_LOG=info
 Notes:
 
 - `ORCHESTRATOR_DATABASE_URL` must use the absolute path shown above.
-- `RUNNER_ENDPOINTS` defaults to the local runner service started by the same
+- `RUNNER_ENDPOINTS` defaults to the local runner process started by the same
   host.
 - If the file already exists, `install` and `update` must leave it unchanged
   unless `install --force-config` is used.
@@ -371,60 +353,11 @@ Rules:
   `/tmp` and renaming it into place.
 - `previactl down` reads this file, terminates the recorded processes, waits for
   them to stop, and then removes the file.
+- `previactl status` reads this file and reports `running`, `degraded`, or
+  `stopped` based on file presence and PID liveness.
 - If one or more recorded PIDs no longer exist, `down` continues shutting down
   the remaining recorded processes and still removes the runtime file.
-- Detached mode is separate from `systemd` and must not create unit files or
-  call `systemctl`.
-
-## Linux `systemd` Integration
-
-`systemd` management is supported only on Linux in v1.
-
-### `previa-main.service`
-
-```ini
-[Unit]
-Description=Previa Main
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/previa/main.env
-ExecStart=/opt/previa/bin/previa-main
-WorkingDirectory=/var/lib/previa/main
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### `previa-runner.service`
-
-```ini
-[Unit]
-Description=Previa Runner
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/previa/runner.env
-ExecStart=/opt/previa/bin/previa-runner
-WorkingDirectory=/var/lib/previa
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Rules:
-
-- `service install` writes these definitions exactly, with the paths above.
-- The CLI must not enable the services automatically in v1.
-- Logs are handled by `journald`; no extra log file configuration is introduced.
+- Detached mode must not create unit files or call native service managers.
 
 ## Installation and Update Flow
 
@@ -448,7 +381,7 @@ Rules:
 6. Create default config files if absent, or rewrite them only with
    `--force-config`.
 7. Write `install-state.json`.
-8. Exit without touching service enabled/active state.
+8. Exit without touching already-running processes.
 
 ### Update Flow
 
@@ -459,8 +392,7 @@ Rules:
 5. Resolve current platform URLs from the remote manifest.
 6. Download and atomically replace both binaries.
 7. Rewrite `install-state.json` with the new version and artifact URLs.
-8. Restart `previa-main.service` and `previa-runner.service` only if each
-   service both exists and is currently active.
+8. Exit without restarting already-running processes.
 
 ## Error Handling
 
@@ -475,9 +407,7 @@ The implementation must surface explicit user-facing errors for:
 - Missing installed binary during `run`.
 - Existing detached runtime file during `up --detach`.
 - Missing detached runtime file during `down`.
-- Non-Linux `service` command usage.
-- Permission failures when writing to `/opt`, `/etc`, `/var/lib`, or
-  `/etc/systemd/system`.
+- Permission failures when writing to `/opt`, `/etc`, `/var/lib`, or `/tmp`.
 
 ## Test Plan
 
@@ -492,39 +422,38 @@ The implementation is complete only when these scenarios are covered:
 5. Missing manifest key for the detected platform fails before any binary is
    replaced.
 6. Failed download of either binary leaves the existing installation untouched.
-7. `service install main` writes the expected unit file with
-   `EnvironmentFile=/etc/previa/main.env`.
-8. `service install runner` writes the expected unit file with
-   `EnvironmentFile=/etc/previa/runner.env`.
-9. `run main` starts `previa-main` with
+7. `run main` starts `previa-main` with
    `ORCHESTRATOR_DATABASE_URL=sqlite:///var/lib/previa/main/orchestrator.db`
    when the default config is used.
-10. `run runner` starts `previa-runner` with default `ADDRESS=0.0.0.0` and
-    `PORT=55880` when the default config is used.
-11. `up --runners 3` starts one `previa-main`, three local runners, and injects
+8. `run runner` starts `previa-runner` with default `ADDRESS=0.0.0.0` and
+   `PORT=55880` when the default config is used.
+9. `up --runners 3` starts one `previa-main`, three local runners, and injects
     `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
     into the `previa-main` child process.
-12. `up --runners 0` fails validation before spawning any process.
-13. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
+10. `up --runners 0` fails validation before spawning any process.
+11. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
     `previa-main` PID and the three runner PIDs, then exits without stopping
     the spawned processes.
-14. `down` reads `/tmp/previactl-up-state.json`, terminates the recorded
+12. `status` reports `running` when all PIDs in
+    `/tmp/previactl-up-state.json` are alive.
+13. `status` reports `degraded` when the runtime file exists but one or more
+    recorded PIDs are no longer alive.
+14. `status` reports `stopped` when no detached runtime file exists.
+15. `down` reads `/tmp/previactl-up-state.json`, terminates the recorded
     processes, waits for shutdown, and removes the runtime file.
-15. `down` fails clearly when no detached runtime file exists.
-16. `up --detach` fails clearly when `/tmp/previactl-up-state.json` already
+16. `down` fails clearly when no detached runtime file exists.
+17. `up --detach` fails clearly when `/tmp/previactl-up-state.json` already
     exists.
-17. `uninstall` without `--purge` removes binaries and units but preserves
+18. `uninstall` without `--purge` removes binaries and runtime state but preserves
     `/etc/previa` and `/var/lib/previa`.
-18. Reinstall after non-purge uninstall reuses the preserved config files.
-19. `service` commands on macOS or Windows fail with the documented Linux-only
-    service-management error.
+19. Reinstall after non-purge uninstall reuses the preserved config files.
 
 ## Rollback and Recovery
 
 - Automatic rollback is out of scope for v1.
 - If `update` fails before atomic rename, the previous installation remains
   authoritative.
-- If `update` fails after one service restart and before the second restart, the
+- If `update` fails after one binary swap but before the second swap, the
   operator must recover manually by rerunning `previactl update` or restoring
   the previous binaries.
 
@@ -542,6 +471,6 @@ The implementation is complete only when these scenarios are covered:
 - The future crate will be named `previactl`.
 - It should remain separate from HTTP transport concerns and reuse dedicated
   modules for manifest fetching, platform detection, installation state,
-  service management, and process execution.
+  detached stack state, and process execution.
 - The CLI must target the existing `previa-main` and `previa-runner` contracts
   without requiring changes to those binaries for v1.
