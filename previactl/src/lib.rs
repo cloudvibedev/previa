@@ -28,7 +28,7 @@ use crate::output::{
 use crate::paths::{PreviaPaths, StackPaths};
 use crate::process::{
     SpawnedStack, graceful_shutdown_pids, monitor_foreground_stack, spawn_detached_stack,
-    spawn_foreground_stack,
+    spawn_foreground_stack, validate_startup_bindings,
 };
 use crate::runtime::{
     DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, acquire_lock, read_runtime_state,
@@ -65,6 +65,7 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
     let resolved = resolve_up_config(paths, &stack_paths, args).await?;
 
     if resolved.dry_run {
+        validate_startup_bindings(&resolved)?;
         print_dry_run(&resolved);
         return Ok(());
     }

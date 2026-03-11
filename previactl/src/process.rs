@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
+use std::net::TcpListener;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
@@ -25,10 +26,22 @@ pub struct ForegroundStack {
     pub _log_tasks: Vec<JoinHandle<()>>,
 }
 
+pub fn validate_startup_bindings(config: &ResolvedUpConfig) -> Result<()> {
+    let mut held_listeners = Vec::new();
+
+    held_listeners.push(bind_target(&config.main.address, config.main.port, "main")?);
+    for runner in &config.local_runners {
+        held_listeners.push(bind_target(&runner.address, runner.port, "runner")?);
+    }
+
+    Ok(())
+}
+
 pub async fn spawn_detached_stack(
     config: &ResolvedUpConfig,
     http: &reqwest::Client,
 ) -> Result<SpawnedStack> {
+    validate_startup_bindings(config)?;
     let mut runners = Vec::new();
     for launch in &config.local_runners {
         let log_path = config.stack_paths.runner_log(launch.port);
@@ -77,6 +90,7 @@ pub async fn spawn_foreground_stack(
     config: &ResolvedUpConfig,
     http: &reqwest::Client,
 ) -> Result<ForegroundStack> {
+    validate_startup_bindings(config)?;
     let mut runners = Vec::new();
     let mut tasks = Vec::new();
     for launch in &config.local_runners {
@@ -311,4 +325,19 @@ async fn sigterm() {
     }
     #[cfg(not(unix))]
     std::future::pending::<()>().await;
+}
+
+fn bind_target(address: &str, port: u16, role: &str) -> Result<TcpListener> {
+    let bind_address = format_bind_address(address, port);
+    TcpListener::bind(&bind_address).with_context(|| {
+        format!("requested {role} bind target '{bind_address}' is already in use or unavailable")
+    })
+}
+
+fn format_bind_address(address: &str, port: u16) -> String {
+    if address.contains(':') && !address.starts_with('[') {
+        format!("[{address}]:{port}")
+    } else {
+        format!("{address}:{port}")
+    }
 }

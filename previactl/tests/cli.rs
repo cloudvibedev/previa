@@ -26,8 +26,11 @@ address = os.environ.get("ADDRESS", "127.0.0.1")
 port = int(os.environ.get("PORT", "0"))
 health_status = int(os.environ.get("HEALTH_STATUS", "200"))
 health_status_file = os.environ.get("HEALTH_STATUS_FILE")
+fail_port = os.environ.get("FAIL_PORT")
 
 if os.environ.get("FAIL_STARTUP") == "1":
+    sys.exit(1)
+if fail_port and fail_port == str(port):
     sys.exit(1)
 
 class Handler(BaseHTTPRequestHandler):
@@ -105,20 +108,24 @@ fn dry_run_rejects_detach() {
 fn dry_run_resolves_compose_without_writing_runtime() {
     let temp = setup_previa_home();
     let compose = temp.path().join("previa-compose.yaml");
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
     fs::write(
         &compose,
-        r#"version: 1
+        format!(
+            r#"version: 1
 main:
   address: 127.0.0.1
-  port: 56100
+  port: {main_port}
 runners:
   local:
     address: 127.0.0.1
     count: 1
     port_range:
-      start: 56110
-      end: 56110
-"#,
+      start: {runner_port}
+      end: {runner_port}
+"#
+        ),
     )
     .expect("write compose");
 
@@ -281,6 +288,68 @@ fn logs_supports_tail_count() {
 }
 
 #[test]
+fn up_fails_before_spawning_when_runner_port_is_already_in_use() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_previa_home();
+    let other_main_port = find_free_port();
+    let default_main_port = find_free_port();
+    let shared_runner_port = find_free_port();
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args([
+            "up",
+            "--name",
+            "other",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &other_main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{shared_runner_port}:{shared_runner_port}"),
+        ])
+        .assert()
+        .success();
+
+    thread::sleep(Duration::from_millis(500));
+
+    let output = cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args([
+            "up",
+            "-p",
+            &default_main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{shared_runner_port}:{shared_runner_port}"),
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stderr.contains(&format!(
+        "requested runner bind target '127.0.0.1:{shared_runner_port}'"
+    )));
+    assert!(!stdout.contains("[main]"));
+    assert!(!stdout.contains("[runner]"));
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args(["down", "--name", "other"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn status_reports_degraded_when_health_is_not_200() {
     if !python3_available() {
         return;
@@ -420,8 +489,14 @@ fn up_cleans_up_started_runners_when_later_startup_fails() {
     let stack = "rollback";
     let main_port = find_free_port();
     let runner_port = find_free_port();
-    let blocked_port = runner_port + 1;
-    let listener = TcpListener::bind(("127.0.0.1", blocked_port)).expect("bind blocked port");
+    let failing_runner_port = runner_port + 1;
+    let stack_config_dir = temp.path().join("stacks").join(stack).join("config");
+    fs::create_dir_all(&stack_config_dir).expect("stack config dir");
+    fs::write(
+        stack_config_dir.join("runner.env"),
+        format!("ADDRESS=127.0.0.1\nPORT=55880\nFAIL_PORT={failing_runner_port}\n"),
+    )
+    .expect("runner env");
 
     let output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
@@ -437,7 +512,7 @@ fn up_cleans_up_started_runners_when_later_startup_fails() {
             "--runner-address",
             "127.0.0.1",
             "-P",
-            &format!("{runner_port}:{blocked_port}"),
+            &format!("{runner_port}:{failing_runner_port}"),
             "-r",
             "2",
         ])
@@ -445,8 +520,6 @@ fn up_cleans_up_started_runners_when_later_startup_fails() {
         .expect("up output");
 
     assert!(!output.status.success());
-
-    drop(listener);
     thread::sleep(Duration::from_millis(500));
 
     let runner_log = temp
