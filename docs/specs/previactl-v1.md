@@ -235,6 +235,11 @@ files.
 Any `previactl` command that writes files must create parent directories as
 needed.
 
+In v1, stack naming isolates runtime state under `PREVIA_HOME/run/stacks/`, but
+does not automatically isolate shared config or data paths such as
+`PREVIA_HOME/config/main.env`, `PREVIA_HOME/config/runner.env`, or
+`PREVIA_HOME/data/main/orchestrator.db`.
+
 ## Runtime State
 
 ### Detached Runtime File
@@ -297,6 +302,8 @@ Rules:
   `stopped` based on file presence and PID liveness.
 - The runtime file must persist attached runner endpoints for status reporting
   and `RUNNER_ENDPOINTS` introspection in normalized full-URL form.
+- Runtime file isolation by stack name does not imply automatic isolation of
+  shared config or data paths outside `PREVIA_HOME/run/stacks/`.
 - If one or more recorded local PIDs no longer exist, `down` continues shutting
   down the remaining recorded local processes and still removes the runtime
   file.
@@ -498,6 +505,10 @@ Rules:
   recording it in runtime state.
 - Detached runtime state for different stack names must be isolated from one
   another by using separate runtime files.
+- Different stack names may still share `PREVIA_HOME/config/main.env`,
+  `PREVIA_HOME/config/runner.env`, and `PREVIA_HOME/data/main/orchestrator.db`
+  unless the operator overrides those values through compose `env` or other
+  supported configuration inputs.
 - If any child process fails during startup, the command must terminate the
   remaining local children and exit with a non-zero status.
 
