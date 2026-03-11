@@ -978,7 +978,10 @@ mod tests {
         assert_eq!(results[0].status, "success");
         assert_eq!(results[0].error, None);
         assert_eq!(
-            results[0].response.as_ref().map(|response| response.body.clone()),
+            results[0]
+                .response
+                .as_ref()
+                .map(|response| response.body.clone()),
             Some(Value::String("internal error".to_owned()))
         );
         call.assert_calls_async(1).await;

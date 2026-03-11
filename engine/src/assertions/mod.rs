@@ -5,7 +5,9 @@ use crate::core::types::{AssertionResult, PipelineStep, RuntimeSpec, StepExecuti
 use crate::template::resolve::{resolve_template_variables, value_to_string};
 
 pub(crate) fn has_status_assertion(step: &PipelineStep) -> bool {
-    step.asserts.iter().any(|assertion| assertion.field == "status")
+    step.asserts
+        .iter()
+        .any(|assertion| assertion.field == "status")
 }
 
 pub(crate) fn resolve_assert_field(field: &str, result: &StepExecutionResult) -> Option<String> {
