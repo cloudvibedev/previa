@@ -203,6 +203,51 @@ jobs:
             aws s3 cp "${file}" "s3://${R2_BUCKET}/${key}" --endpoint-url "${endpoint}" --no-progress
           done
 
+      - name: Publish latest manifest to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${R2_BUCKET:?Missing var/secret R2_BUCKET (or CLOUDFLARE_R2_BUCKET fallback)}"
+          : "${VERSION:?Missing resolved release version}"
+
+          if [ -n "${R2_ENDPOINT:-}" ]; then
+            endpoint="${R2_ENDPOINT}"
+          else
+            : "${R2_ACCOUNT_ID:?Missing secret R2_ACCOUNT_ID when R2_S3_API/R2_ENPOINT is not set}"
+            endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          fi
+
+          shopt -s nullglob
+          files=(release-assets/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No release assets found to generate manifest"
+            exit 1
+          fi
+
+          created_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          links_json=""
+
+          for file in "${files[@]}"; do
+            filename="$(basename "${file}")"
+            link_key="${filename%.exe}"
+            link_key="${link_key//-/_}"
+            link_value="https://files.previa.dev/${VERSION}/files/${filename}"
+
+            if [ -n "${links_json}" ]; then
+              links_json="${links_json},"
+            fi
+
+            links_json="${links_json}\"${link_key}\":\"${link_value}\""
+          done
+
+          cat > manifest.json <<EOF
+          {"name":"previa","version":"${VERSION}","create_at":"${created_at}","links":{${links_json}}}
+          EOF
+
+          echo "Uploading manifest.json to s3://${R2_BUCKET}/manifest.json"
+          aws s3 cp manifest.json "s3://${R2_BUCKET}/manifest.json" --endpoint-url "${endpoint}" --no-progress
+
   tag_release:
     name: Create git tag
     needs: version_check
