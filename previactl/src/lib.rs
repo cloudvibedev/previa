@@ -1,24 +1,39 @@
 mod cli;
+mod config;
+mod envfile;
 mod health;
+mod logs;
 mod output;
 mod paths;
+mod process;
 mod runtime;
 mod selectors;
 
+use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use chrono::Utc;
 use clap::Parser;
 use reqwest::Client;
 
-use crate::cli::{Cli, Commands, PsArgs, StatusArgs};
+use crate::cli::{Cli, Commands, DownArgs, LogsArgs, PsArgs, RestartArgs, StatusArgs, UpArgs};
+use crate::config::{ResolvedUpConfig, resolve_up_config};
 use crate::health::{DerivedState, probe_health, state_from_pid_and_health};
+use crate::logs::{follow_logs, print_logs};
 use crate::output::{
     ListEntryJson, ProcessJson, StatusJson, print_list_human, print_process_rows,
     print_status_human,
 };
 use crate::paths::{PreviaPaths, StackPaths};
-use crate::runtime::{DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, read_runtime_state};
+use crate::process::{
+    SpawnedStack, graceful_shutdown_pids, monitor_foreground_stack, spawn_detached_stack,
+    spawn_foreground_stack,
+};
+use crate::runtime::{
+    DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, acquire_lock, read_runtime_state,
+    remove_runtime_state, write_runtime_state,
+};
 use crate::selectors::{RunnerSelector, parse_stack_name};
 
 pub async fn run() -> Result<()> {
@@ -30,10 +45,108 @@ pub async fn run() -> Result<()> {
         .context("failed to build HTTP client")?;
 
     match cli.command {
+        Commands::Up(args) => cmd_up(&paths, &http, args).await,
+        Commands::Down(args) => cmd_down(&paths, args).await,
+        Commands::Restart(args) => cmd_restart(&paths, &http, args).await,
         Commands::Status(args) => cmd_status(&paths, &http, args).await,
         Commands::List(args) => cmd_list(&paths, &http, args.json).await,
         Commands::Ps(args) => cmd_ps(&paths, &http, args).await,
+        Commands::Logs(args) => cmd_logs(&paths, args).await,
+        Commands::Version => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
     }
+}
+
+async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> {
+    let stack_name = parse_stack_name(&args.name)?;
+    let stack_paths = paths.stack(&stack_name);
+    let resolved = resolve_up_config(paths, &stack_paths, args).await?;
+
+    if resolved.dry_run {
+        print_dry_run(&resolved);
+        return Ok(());
+    }
+
+    if resolved.detach {
+        let _lock = acquire_lock(&stack_paths)?;
+        if stack_paths.runtime_file.exists() {
+            bail!(
+                "detached runtime already exists for stack '{}': {}",
+                stack_name,
+                stack_paths.runtime_file.display()
+            );
+        }
+
+        let spawned = spawn_detached_stack(&resolved, http).await?;
+        let state = detached_state_from_spawn(&resolved, &spawned)?;
+        write_runtime_state(&stack_paths, &state)?;
+        println!(
+            "stack '{}' started in detached mode (main: {}:{})",
+            stack_name, state.main.address, state.main.port
+        );
+        return Ok(());
+    }
+
+    let foreground = spawn_foreground_stack(&resolved, http).await?;
+    monitor_foreground_stack(foreground).await
+}
+
+async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
+    let stack_name = parse_stack_name(&args.name)?;
+    let stack_paths = paths.stack(&stack_name);
+    let _lock = acquire_lock(&stack_paths)?;
+    let mut state = read_required_state(&stack_paths)?;
+
+    let selectors = parse_runner_selectors(&args.runners)?;
+    if selectors.is_empty() {
+        let pids = all_runtime_pids(&state);
+        graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
+        remove_runtime_state(&stack_paths)?;
+        println!("stack '{}' stopped", stack_name);
+        return Ok(());
+    }
+
+    let selected = select_runner_indexes(&state.runners, &selectors)?;
+    let remaining_local = state.runners.len().saturating_sub(selected.len());
+    if remaining_local == 0 && state.attached_runners.is_empty() {
+        bail!("cannot remove the selected runners because the stack would have zero runner sources");
+    }
+
+    let selected_pids = selected
+        .iter()
+        .map(|idx| state.runners[*idx].pid)
+        .collect::<Vec<_>>();
+    graceful_shutdown_pids(&selected_pids, Duration::from_secs(3)).await?;
+
+    state.runners = state
+        .runners
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, runner)| (!selected.contains(&idx)).then_some(runner))
+        .collect();
+    write_runtime_state(&stack_paths, &state)?;
+    println!("stack '{}' updated", stack_name);
+    Ok(())
+}
+
+async fn cmd_restart(paths: &PreviaPaths, http: &Client, args: RestartArgs) -> Result<()> {
+    let stack_name = parse_stack_name(&args.name)?;
+    let stack_paths = paths.stack(&stack_name);
+    let _lock = acquire_lock(&stack_paths)?;
+    let state = read_required_state(&stack_paths)?;
+
+    let pids = all_runtime_pids(&state);
+    graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
+    remove_runtime_state(&stack_paths)?;
+
+    let resolved = ResolvedUpConfig::from_runtime(paths, &stack_paths, &state).await?;
+    let spawned = spawn_detached_stack(&resolved, http).await?;
+    let next_state = detached_state_from_spawn(&resolved, &spawned)?;
+    write_runtime_state(&stack_paths, &next_state)?;
+    println!("stack '{}' restarted", stack_name);
+    Ok(())
 }
 
 async fn cmd_status(paths: &PreviaPaths, http: &Client, args: StatusArgs) -> Result<()> {
@@ -50,8 +163,7 @@ async fn cmd_status(paths: &PreviaPaths, http: &Client, args: StatusArgs) -> Res
         .map(RunnerSelector::parse)
         .transpose()?;
 
-    let status =
-        build_status_json(&stack_paths, state.as_ref(), http, selector.as_ref(), args.main).await?;
+    let status = build_status_json(&stack_paths, state.as_ref(), http, selector.as_ref(), args.main).await?;
     if args.json {
         println!(
             "{}",
@@ -103,6 +215,114 @@ async fn cmd_ps(paths: &PreviaPaths, http: &Client, args: PsArgs) -> Result<()> 
     Ok(())
 }
 
+async fn cmd_logs(paths: &PreviaPaths, args: LogsArgs) -> Result<()> {
+    let stack_name = parse_stack_name(&args.name)?;
+    if args.main && args.runner.is_some() {
+        bail!("--main and --runner are mutually exclusive");
+    }
+
+    let stack_paths = paths.stack(&stack_name);
+    let state = read_required_state(&stack_paths)?;
+    let logs = if args.main {
+        vec![("main".to_owned(), PathBuf::from(&state.main.log_path))]
+    } else if let Some(selector) = args.runner.as_deref() {
+        let selector = RunnerSelector::parse(selector)?;
+        let indexes = select_runner_indexes(&state.runners, &[selector])?;
+        indexes
+            .into_iter()
+            .map(|idx| {
+                let runner = &state.runners[idx];
+                (
+                    format!("runner:{}:{}", runner.address, runner.port),
+                    PathBuf::from(&runner.log_path),
+                )
+            })
+            .collect()
+    } else {
+        let mut files = vec![("main".to_owned(), PathBuf::from(&state.main.log_path))];
+        let mut runners = state.runners.clone();
+        runners.sort_by_key(|runner| runner.port);
+        files.extend(runners.into_iter().map(|runner| {
+            (
+                format!("runner:{}:{}", runner.address, runner.port),
+                PathBuf::from(runner.log_path),
+            )
+        }));
+        files
+    };
+
+    if args.follow {
+        follow_logs(logs).await
+    } else {
+        print_logs(logs).await
+    }
+}
+
+fn print_dry_run(resolved: &ResolvedUpConfig) {
+    println!("stack: {}", resolved.stack_paths.name);
+    println!(
+        "main: {}:{}",
+        resolved.main.address,
+        resolved.main.port
+    );
+    println!(
+        "local runners: {} ({:?}-{:?})",
+        resolved.local_runner_count,
+        resolved.runner_port_range.start,
+        resolved.runner_port_range.end
+    );
+    println!("attached runners: {}", resolved.attached_runners.join(", "));
+    if let Some(source) = &resolved.source {
+        println!("source: {}", source.display());
+    }
+}
+
+fn detached_state_from_spawn(
+    resolved: &ResolvedUpConfig,
+    spawned: &SpawnedStack,
+) -> Result<DetachedRuntimeState> {
+    Ok(DetachedRuntimeState {
+        name: resolved.stack_paths.name.clone(),
+        mode: "detached".to_owned(),
+        started_at: Utc::now().to_rfc3339(),
+        source: resolved
+            .source
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        main: MainRuntime {
+            pid: child_id(&spawned.main)?,
+            address: resolved.main.address.clone(),
+            port: resolved.main.port,
+            log_path: resolved.stack_paths.main_log.display().to_string(),
+        },
+        runner_port_range: resolved.runner_port_range,
+        attached_runners: resolved.attached_runners.clone(),
+        runners: resolved
+            .local_runner_ports
+            .iter()
+            .zip(spawned.runners.iter())
+            .map(|((address, port), child)| {
+                Ok(LocalRunnerRuntime {
+                    pid: child_id(child)?,
+                    address: address.clone(),
+                    port: *port,
+                    log_path: resolved
+                        .stack_paths
+                        .runner_log(*port)
+                        .display()
+                        .to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+    })
+}
+
+fn child_id(child: &tokio::process::Child) -> Result<u32> {
+    child
+        .id()
+        .ok_or_else(|| anyhow!("spawned process has no pid"))
+}
+
 async fn build_status_json(
     stack_paths: &StackPaths,
     state: Option<&DetachedRuntimeState>,
@@ -144,8 +364,7 @@ async fn build_status_json(
     };
 
     let runners = collect_runner_json(&runners, http).await?;
-    let state_name =
-        derive_overall_state(main.as_ref(), &runners, main_only, runner_selector.is_some());
+    let state_name = derive_overall_state(main.as_ref(), &runners, state, main_only, runner_selector.is_some());
 
     Ok(StatusJson {
         name: state.name.clone(),
@@ -153,7 +372,11 @@ async fn build_status_json(
         runtime_file,
         main,
         runners,
-        attached_runners: state.attached_runners.clone(),
+        attached_runners: if runner_selector.is_some() || main_only {
+            state.attached_runners.clone()
+        } else {
+            state.attached_runners.clone()
+        },
     })
 }
 
@@ -217,6 +440,7 @@ async fn overall_stack_state(
     Ok(derive_overall_state(
         Some(&main),
         &runners,
+        state,
         false,
         false,
     ))
@@ -225,21 +449,26 @@ async fn overall_stack_state(
 fn derive_overall_state(
     main: Option<&ProcessJson>,
     runners: &[ProcessJson],
+    _runtime: &DetachedRuntimeState,
     main_only: bool,
     runner_only: bool,
 ) -> DerivedState {
     let mut states = Vec::new();
-    if !runner_only && let Some(main) = main {
-        states.push(DerivedState::from_value(&main.state));
+    if !runner_only {
+        if let Some(main) = main {
+            states.push(DerivedState::from_value(&main.state));
+        }
     }
     if !main_only {
-        states.extend(
-            runners
-                .iter()
-                .map(|runner| DerivedState::from_value(&runner.state)),
-        );
+        states.extend(runners.iter().map(|runner| DerivedState::from_value(&runner.state)));
     }
     DerivedState::collapse(&states)
+}
+
+fn all_runtime_pids(state: &DetachedRuntimeState) -> Vec<u32> {
+    let mut pids = vec![state.main.pid];
+    pids.extend(state.runners.iter().map(|runner| runner.pid));
+    pids
 }
 
 fn select_runner_indexes(
@@ -260,6 +489,15 @@ fn select_runner_indexes(
         }
     }
     Ok(matches)
+}
+
+fn parse_runner_selectors(values: &[String]) -> Result<Vec<RunnerSelector>> {
+    values.iter().map(|value| RunnerSelector::parse(value)).collect()
+}
+
+fn read_required_state(stack_paths: &StackPaths) -> Result<DetachedRuntimeState> {
+    read_runtime_state(stack_paths)?
+        .ok_or_else(|| anyhow!("no detached runtime exists for stack '{}'", stack_paths.name))
 }
 
 #[cfg(test)]

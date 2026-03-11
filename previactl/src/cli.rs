@@ -9,9 +9,51 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    Up(UpArgs),
+    Down(DownArgs),
+    Restart(RestartArgs),
     Status(StatusArgs),
     List(ListArgs),
     Ps(PsArgs),
+    Logs(LogsArgs),
+    Version,
+}
+
+#[derive(Debug, Args)]
+pub struct UpArgs {
+    #[arg(long, default_value = "default")]
+    pub name: String,
+    pub source: Option<String>,
+    #[arg(long)]
+    pub main_address: Option<String>,
+    #[arg(short = 'p', long)]
+    pub main_port: Option<u16>,
+    #[arg(long)]
+    pub runner_address: Option<String>,
+    #[arg(short = 'P', long = "runner-port-range")]
+    pub runner_port_range: Option<String>,
+    #[arg(short = 'r', long)]
+    pub runners: Option<usize>,
+    #[arg(short = 'a', long = "attach-runner")]
+    pub attach_runners: Vec<String>,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(short = 'd', long)]
+    pub detach: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DownArgs {
+    #[arg(long, default_value = "default")]
+    pub name: String,
+    #[arg(long = "runner")]
+    pub runners: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RestartArgs {
+    #[arg(long, default_value = "default")]
+    pub name: String,
 }
 
 #[derive(Debug, Args)]
@@ -38,4 +80,16 @@ pub struct PsArgs {
     pub name: String,
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LogsArgs {
+    #[arg(long, default_value = "default")]
+    pub name: String,
+    #[arg(long)]
+    pub main: bool,
+    #[arg(long)]
+    pub runner: Option<String>,
+    #[arg(long)]
+    pub follow: bool,
 }
