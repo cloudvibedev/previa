@@ -18,7 +18,6 @@ scope for v1 and must not be invented during implementation.
   `previa-runner --version`.
 - Bootstrap a local stack in foreground with one `previa-main` and multiple
   `previa-runner` processes.
-- Run `previa-main` and `previa-runner` in foreground for local operations.
 - Reuse the current environment-variable contract already supported by the
   binaries.
 
@@ -87,8 +86,7 @@ previactl uninstall [--purge]
 previactl up --runners <N> [-d, --detach]
 previactl down
 previactl status
-previactl run main
-previactl run runner
+previactl version
 previactl manifest show
 ```
 
@@ -178,17 +176,12 @@ No additional v1 commands are required.
   are no longer alive.
 - Does not interact with native service managers.
 
-#### `previactl run main`
+#### `previactl version`
 
-- Loads `/etc/previa/main.env`.
-- Starts `/opt/previa/bin/previa-main` in foreground.
-- Inherits stdout and stderr in the current terminal session.
-
-#### `previactl run runner`
-
-- Loads `/etc/previa/runner.env`.
-- Starts `/opt/previa/bin/previa-runner` in foreground.
-- Inherits stdout and stderr in the current terminal session.
+- Prints the `previactl` binary version.
+- Does not fetch the manifest.
+- Does not read `install-state.json`.
+- Does not inspect running processes.
 
 ## Installation Layout
 
@@ -404,7 +397,6 @@ The implementation must surface explicit user-facing errors for:
 - Invalid or incomplete manifest schema.
 - HTTP download failures.
 - Missing installation state during `update`.
-- Missing installed binary during `run`.
 - Existing detached runtime file during `up --detach`.
 - Missing detached runtime file during `down`.
 - Permission failures when writing to `/opt`, `/etc`, `/var/lib`, or `/tmp`.
@@ -422,31 +414,28 @@ The implementation is complete only when these scenarios are covered:
 5. Missing manifest key for the detected platform fails before any binary is
    replaced.
 6. Failed download of either binary leaves the existing installation untouched.
-7. `run main` starts `previa-main` with
-   `ORCHESTRATOR_DATABASE_URL=sqlite:///var/lib/previa/main/orchestrator.db`
-   when the default config is used.
-8. `run runner` starts `previa-runner` with default `ADDRESS=0.0.0.0` and
-   `PORT=55880` when the default config is used.
-9. `up --runners 3` starts one `previa-main`, three local runners, and injects
+7. `version` prints the `previactl` binary version without requiring network or
+   installed Previa binaries.
+8. `up --runners 3` starts one `previa-main`, three local runners, and injects
     `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
     into the `previa-main` child process.
-10. `up --runners 0` fails validation before spawning any process.
-11. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
+9. `up --runners 0` fails validation before spawning any process.
+10. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
     `previa-main` PID and the three runner PIDs, then exits without stopping
     the spawned processes.
-12. `status` reports `running` when all PIDs in
+11. `status` reports `running` when all PIDs in
     `/tmp/previactl-up-state.json` are alive.
-13. `status` reports `degraded` when the runtime file exists but one or more
+12. `status` reports `degraded` when the runtime file exists but one or more
     recorded PIDs are no longer alive.
-14. `status` reports `stopped` when no detached runtime file exists.
-15. `down` reads `/tmp/previactl-up-state.json`, terminates the recorded
+13. `status` reports `stopped` when no detached runtime file exists.
+14. `down` reads `/tmp/previactl-up-state.json`, terminates the recorded
     processes, waits for shutdown, and removes the runtime file.
-16. `down` fails clearly when no detached runtime file exists.
-17. `up --detach` fails clearly when `/tmp/previactl-up-state.json` already
+15. `down` fails clearly when no detached runtime file exists.
+16. `up --detach` fails clearly when `/tmp/previactl-up-state.json` already
     exists.
-18. `uninstall` without `--purge` removes binaries and runtime state but preserves
+17. `uninstall` without `--purge` removes binaries and runtime state but preserves
     `/etc/previa` and `/var/lib/previa`.
-19. Reinstall after non-purge uninstall reuses the preserved config files.
+18. Reinstall after non-purge uninstall reuses the preserved config files.
 
 ## Rollback and Recovery
 
