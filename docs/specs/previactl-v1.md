@@ -3,8 +3,9 @@
 ## Summary
 
 `previactl` is the local operations CLI for Previa. Version 1 is Linux-first and
-local-only: it installs, updates, uninstalls, runs, and manages
-`previa-main` and `previa-runner` on the current host.
+local-only: it installs, updates, uninstalls, and manages `previa-main`,
+`previa-runner`, and the `previactl` binary version lifecycle on the current
+host.
 
 This document is implementation-ready. Anything not defined here is out of
 scope for v1 and must not be invented during implementation.
@@ -16,6 +17,8 @@ scope for v1 and must not be invented during implementation.
   artifact links from the manifest.
 - Persist installation state without depending on `previa-main --version` or
   `previa-runner --version`.
+- Keep `previa-main`, `previa-runner`, and `previactl` aligned with the latest
+  available release during `update`.
 - Bootstrap a local stack in foreground with one `previa-main` and multiple
   `previa-runner` processes.
 - Reuse the current environment-variable contract already supported by the
@@ -50,6 +53,7 @@ Example:
   "version": "0.0.5",
   "create_at": "2026-03-11T15:53:30Z",
   "links": {
+    "previactl_linux_amd64": "https://files.previa.dev/0.0.5/files/previactl-linux-amd64",
     "previa_main_linux_amd64": "https://files.previa.dev/0.0.5/files/previa-main-linux-amd64",
     "previa_runner_linux_amd64": "https://files.previa.dev/0.0.5/files/previa-runner-linux-amd64"
   }
@@ -60,20 +64,31 @@ Example:
 
 The CLI must map the detected platform to manifest keys exactly as follows:
 
-| OS | Architecture | `previa-main` key | `previa-runner` key |
-| --- | --- | --- | --- |
-| `linux` | `x86_64` | `previa_main_linux_amd64` | `previa_runner_linux_amd64` |
-| `linux` | `aarch64` | `previa_main_linux_arm64` | `previa_runner_linux_arm64` |
-| `macos` | `x86_64` | `previa_main_macos_amd64` | `previa_runner_macos_amd64` |
-| `macos` | `aarch64` | `previa_main_macos_arm64` | `previa_runner_macos_arm64` |
-| `windows` | `x86_64` | `previa_main_windows_amd64` | `previa_runner_windows_amd64` |
+| OS | Architecture | `previactl` key | `previa-main` key | `previa-runner` key |
+| --- | --- | --- | --- | --- |
+| `linux` | `x86_64` | `previactl_linux_amd64` | `previa_main_linux_amd64` | `previa_runner_linux_amd64` |
+| `linux` | `aarch64` | `previactl_linux_arm64` | `previa_main_linux_arm64` | `previa_runner_linux_arm64` |
+| `macos` | `x86_64` | `previactl_macos_amd64` | `previa_main_macos_amd64` | `previa_runner_macos_amd64` |
+| `macos` | `aarch64` | `previactl_macos_arm64` | `previa_main_macos_arm64` | `previa_runner_macos_arm64` |
+| `windows` | `x86_64` | `previactl_windows_amd64` | `previa_main_windows_amd64` | `previa_runner_windows_amd64` |
 
 If the current `(os, arch)` pair is not in this table, `previactl` must fail
 with an explicit unsupported-platform error before any download begins.
 
-If the pair exists in the table but either manifest key is missing,
+If the pair exists in the table but any required manifest key is missing,
 `previactl` must fail with an explicit missing-artifact error and print the
 missing key name.
+
+### Versioned Artifact URL Pattern
+
+When `install` needs the release that matches the running `previactl` version,
+it must derive artifact URLs from the canonical release layout:
+
+- `https://files.previa.dev/<version>/files/previactl-<os>-<arch>`
+- `https://files.previa.dev/<version>/files/previa-main-<os>-<arch>`
+- `https://files.previa.dev/<version>/files/previa-runner-<os>-<arch>`
+
+On Windows, `.exe` is appended to the filename.
 
 ## Command Surface
 
@@ -104,24 +119,43 @@ No additional v1 commands are required.
 
 - Fetches the remote manifest.
 - Resolves the current platform.
-- Downloads both `previa-main` and `previa-runner`.
+- Resolves the current `previactl` binary version from compile-time metadata.
+- Installs only `previa-main` and `previa-runner` at the exact same version as
+  the running `previactl`.
+- Does not upgrade or downgrade the running `previactl` binary.
+- Fails if the release matching the running `previactl` version is not
+  available in the remote artifact layout.
+- Resolves release URLs for `previa-main` and `previa-runner` by combining the
+  running `previactl` version with the canonical versioned artifact URL pattern.
 - Installs the binaries into the configured installation paths.
 - Creates base config files only if they do not already exist.
 - If `--force-config` is provided, rewrites base config files even when they
   already exist.
 - Writes installation metadata to `install-state.json`.
-- Does not create or start system services automatically.
 
 #### `previactl update`
 
 - Fetches the remote manifest.
 - Reads `install-state.json`.
-- Compares the remote manifest version to the installed version string.
-- If versions are equal, prints `already up to date` and exits successfully.
-- If the remote version is newer, downloads both binaries and replaces them
-  atomically.
+- Compares the remote manifest version with:
+  - the installed `previa-main` version from `install-state.json`
+  - the installed `previa-runner` version from `install-state.json`
+  - the running `previactl` binary version from compile-time metadata
+- If all three already match the remote manifest version, prints
+  `already up to date` and exits successfully.
+- If one or more components differ, prints a component-by-component summary
+  showing the current version and the target version for each differing binary.
+- Prompts the user for confirmation before downloading anything.
+- Aborts with no changes if the user does not confirm.
+- Downloads and atomically replaces each differing component.
+- Includes the `previactl` binary itself in the update set when its version is
+  behind the remote manifest version.
+- Replaces the running `previactl` binary by downloading a temporary file,
+  marking it executable, and atomically swapping it into place as the final
+  update step.
 - Does not overwrite existing config files.
-- Updates `install-state.json` after both binaries are replaced successfully.
+- Updates `install-state.json` after all selected components are replaced
+  successfully.
 - Does not restart processes that are already running.
 
 #### `previactl uninstall [--purge]`
@@ -182,6 +216,8 @@ No additional v1 commands are required.
 - Does not fetch the manifest.
 - Does not read `install-state.json`.
 - Does not inspect running processes.
+- The printed version is the same value used by `install` and `update` for
+  `previactl` version comparisons.
 
 ## Installation Layout
 
@@ -211,18 +247,19 @@ Schema:
 ```json
 {
   "name": "previa",
-  "version": "0.0.5",
   "platform": {
     "os": "linux",
     "arch": "x86_64"
   },
   "installed_at": "2026-03-11T16:10:00Z",
-  "artifacts": {
+  "components": {
     "main": {
+      "version": "0.0.5",
       "source_url": "https://files.previa.dev/0.0.5/files/previa-main-linux-amd64",
       "path": "/opt/previa/bin/previa-main"
     },
     "runner": {
+      "version": "0.0.5",
       "source_url": "https://files.previa.dev/0.0.5/files/previa-runner-linux-amd64",
       "path": "/opt/previa/bin/previa-runner"
     }
@@ -232,7 +269,10 @@ Schema:
 
 Rules:
 
-- `version` is the source of truth for installed version checks.
+- `components.main.version` and `components.runner.version` are the source of
+  truth for installed binary version checks.
+- `previactl` version is not persisted in `install-state.json`; it is read from
+  the running binary metadata.
 - The file is written only after both binaries are installed successfully.
 - The file is removed by `uninstall`.
 - Partial writes must be avoided by writing to a temporary file in the same
@@ -356,7 +396,10 @@ Rules:
 
 ### Download Rules
 
-- Downloads must use the URLs from the manifest without rewriting them.
+- `update` must use the component URLs resolved from the remote manifest for the
+  target version.
+- `install` must use the canonical versioned artifact URL pattern for the
+  running `previactl` version.
 - Each binary is first downloaded to a temporary file in the destination
   directory.
 - Temporary files are marked executable before the final rename.
@@ -368,24 +411,35 @@ Rules:
 
 1. Fetch and parse the manifest.
 2. Validate `name == "previa"`.
-3. Detect platform and resolve the two artifact URLs.
-4. Create required directories.
-5. Download and atomically install both binaries.
-6. Create default config files if absent, or rewrite them only with
+3. Resolve the running `previactl` version.
+4. Detect platform and resolve the `previa-main` and `previa-runner` artifact
+   URLs for that exact `previactl` version using the canonical versioned
+   artifact URL pattern.
+5. Create required directories.
+6. Download and atomically install both binaries.
+7. Create default config files if absent, or rewrite them only with
    `--force-config`.
-7. Write `install-state.json`.
-8. Exit without touching already-running processes.
+8. Write `install-state.json`.
+9. Exit without touching already-running processes.
 
 ### Update Flow
 
 1. Fetch and parse the manifest.
 2. Read `install-state.json`; if missing, fail with `not installed`.
-3. Compare remote `version` to installed `version`.
-4. If equal, print `already up to date` and exit with code `0`.
-5. Resolve current platform URLs from the remote manifest.
-6. Download and atomically replace both binaries.
-7. Rewrite `install-state.json` with the new version and artifact URLs.
-8. Exit without restarting already-running processes.
+3. Read the running `previactl` version.
+4. Compare the remote manifest version against `main`, `runner`, and
+   `previactl`.
+5. If all three already match, print `already up to date` and exit with code
+   `0`.
+6. Print the list of components with version differences and prompt for user
+   confirmation.
+7. If the user declines, exit with no changes.
+8. Resolve the artifact URLs for each differing component.
+9. Download and atomically replace the selected components, updating
+   `previactl` last.
+10. Rewrite `install-state.json` with the new `main` and `runner` version and
+    artifact URLs.
+11. Exit without restarting already-running processes.
 
 ## Error Handling
 
@@ -396,7 +450,11 @@ The implementation must surface explicit user-facing errors for:
 - Missing manifest keys for the current platform.
 - Invalid or incomplete manifest schema.
 - HTTP download failures.
+- Missing release artifacts for the current `previactl` version during
+  `install`.
 - Missing installation state during `update`.
+- Failed `previactl` self-replacement during `update`.
+- User declined confirmation during `update`.
 - Existing detached runtime file during `up --detach`.
 - Missing detached runtime file during `down`.
 - Permission failures when writing to `/opt`, `/etc`, `/var/lib`, or `/tmp`.
@@ -406,45 +464,56 @@ The implementation must surface explicit user-facing errors for:
 The implementation is complete only when these scenarios are covered:
 
 1. Clean install on Linux `x86_64` with a valid manifest installs both binaries
-   and writes `install-state.json`.
-2. Clean install on Linux `aarch64` resolves the `_arm64` manifest keys.
-3. `update` with equal local and remote versions prints `already up to date`.
-4. `update` with a newer remote version replaces both binaries and updates
+   at the same version as the running `previactl` and writes
    `install-state.json`.
-5. Missing manifest key for the detected platform fails before any binary is
+2. Clean install on Linux `aarch64` resolves the `_arm64` manifest keys.
+3. `install` fails clearly when the release matching the running `previactl`
+   version is not available remotely.
+4. `update` with equal local and remote versions for `main`, `runner`, and
+   `previactl` prints `already up to date`.
+5. `update` with a newer remote version lists the differing components and asks
+   the user for confirmation before downloading anything.
+6. `update` exits without changes when the user declines the confirmation
+   prompt.
+7. `update` with a newer remote version replaces every differing component and
+   updates `install-state.json`.
+8. `update` replaces `previactl` only after updating `main` and `runner`
+   successfully.
+9. Missing manifest key for the detected platform fails before any binary is
    replaced.
-6. Failed download of either binary leaves the existing installation untouched.
-7. `version` prints the `previactl` binary version without requiring network or
-   installed Previa binaries.
-8. `up --runners 3` starts one `previa-main`, three local runners, and injects
+10. Failed download of any selected component leaves the existing installation
+    untouched.
+11. `version` prints the `previactl` binary version without requiring network or
+    installed Previa binaries.
+12. `up --runners 3` starts one `previa-main`, three local runners, and injects
     `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
     into the `previa-main` child process.
-9. `up --runners 0` fails validation before spawning any process.
-10. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
+13. `up --runners 0` fails validation before spawning any process.
+14. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
     `previa-main` PID and the three runner PIDs, then exits without stopping
     the spawned processes.
-11. `status` reports `running` when all PIDs in
+15. `status` reports `running` when all PIDs in
     `/tmp/previactl-up-state.json` are alive.
-12. `status` reports `degraded` when the runtime file exists but one or more
+16. `status` reports `degraded` when the runtime file exists but one or more
     recorded PIDs are no longer alive.
-13. `status` reports `stopped` when no detached runtime file exists.
-14. `down` reads `/tmp/previactl-up-state.json`, terminates the recorded
+17. `status` reports `stopped` when no detached runtime file exists.
+18. `down` reads `/tmp/previactl-up-state.json`, terminates the recorded
     processes, waits for shutdown, and removes the runtime file.
-15. `down` fails clearly when no detached runtime file exists.
-16. `up --detach` fails clearly when `/tmp/previactl-up-state.json` already
+19. `down` fails clearly when no detached runtime file exists.
+20. `up --detach` fails clearly when `/tmp/previactl-up-state.json` already
     exists.
-17. `uninstall` without `--purge` removes binaries and runtime state but preserves
+21. `uninstall` without `--purge` removes binaries and runtime state but preserves
     `/etc/previa` and `/var/lib/previa`.
-18. Reinstall after non-purge uninstall reuses the preserved config files.
+22. Reinstall after non-purge uninstall reuses the preserved config files.
 
 ## Rollback and Recovery
 
 - Automatic rollback is out of scope for v1.
 - If `update` fails before atomic rename, the previous installation remains
   authoritative.
-- If `update` fails after one binary swap but before the second swap, the
-  operator must recover manually by rerunning `previactl update` or restoring
-  the previous binaries.
+- If `update` fails after one component swap but before all selected
+  components are replaced, the operator must recover manually by rerunning
+  `previactl update` or restoring the previous binaries.
 
 ## Security and Known Risks
 
