@@ -46,7 +46,6 @@ previactl status [--name <stack-name>] [--main] [--runner <address|address:port|
 previactl list [--json]
 previactl ps [--name <stack-name>] [--json]
 previactl logs [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--follow]
-previactl doctor [--name <stack-name>] [--fix]
 previactl version
 ```
 
@@ -314,24 +313,6 @@ No additional v1 commands are required.
 - `logs` must fail clearly when no detached runtime file exists for the
   selected stack name.
 
-#### `previactl doctor [--name <stack-name>] [--fix]`
-
-- Inspects stack-scoped runtime health and recoverability for a detached stack.
-- Accepts `--name <stack-name>` and defaults to `default` when omitted.
-- Reports:
-  - missing binaries under `PREVIA_HOME/bin`
-  - missing or unreadable stack-scoped config files when referenced
-  - stale runtime file with dead local PIDs
-  - stale lock file that is not currently held by a live process
-  - missing log files for recorded detached processes
-  - local processes that are alive but unhealthy according to `GET /health`
-- Without `--fix`, `doctor` is read-only.
-- With `--fix`, `doctor` may remove a stale runtime file, remove a stale lock
-  file, and create missing log parent directories.
-- With `--fix`, `doctor` must never kill running processes or rewrite compose
-  files.
-- `doctor` does not mutate attached runner endpoints because they are external.
-
 #### `previactl version`
 
 - Prints the `previactl` binary version.
@@ -445,7 +426,7 @@ Rules:
 
 ## Health Model
 
-- `previactl status`, `list`, `ps`, and `doctor` must probe detached local processes
+- `previactl status`, `list`, and `ps` must probe detached local processes
   using `GET /health`.
 - The `previa-main` health URL is
   `http://<main.address>:<main.port>/health`.
@@ -813,7 +794,6 @@ The implementation must surface explicit user-facing errors for:
 - Missing detached runtime file for the selected stack name during `logs`.
 - Health probe failure due to invalid local status target URL construction.
 - Failure to read or follow a detached log file.
-- Failure to repair stale runtime or lock state during `doctor --fix`.
 - Permission failures when writing inside `PREVIA_HOME`.
 - Failure to spawn `previa-main` or one of the local `previa-runner`
   processes.
@@ -929,45 +909,37 @@ The implementation is complete only when these scenarios are covered:
 52. `logs --name api --follow` streams appended log lines until interrupted.
 53. `logs --main --runner 55880` fails clearly because the filters are mutually
     exclusive.
-54. `doctor --name api` reports stale runtime state when recorded local PIDs
-    are dead.
-55. `doctor --name api` reports unhealthy local processes when `/health`
-    probes fail even though PIDs are alive.
-56. `doctor --name api --fix` removes a stale runtime file when no recorded
-    local PIDs are alive.
-57. `doctor --name api --fix` removes a stale lock file that is not owned by a
-    live process.
-58. `down --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
+54. `down --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
     recorded local processes, waits for shutdown, and removes the runtime file.
-59. `down` without `--name` targets the `default` stack.
-60. `down` fails clearly when no detached runtime file exists for the selected
+55. `down` without `--name` targets the `default` stack.
+56. `down` fails clearly when no detached runtime file exists for the selected
     stack name.
-61. `down --runner 55880` stops only the recorded local runner on port `55880`
+57. `down --runner 55880` stops only the recorded local runner on port `55880`
     and rewrites the selected stack runtime file with the remaining runner
     entries.
-62. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
+58. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
     to `127.0.0.1:55880`.
-63. `down --runner 127.0.0.1` stops all recorded local runners bound to
+59. `down --runner 127.0.0.1` stops all recorded local runners bound to
     `127.0.0.1`.
-64. `down --runner 55880 --runner 55881` stops only the selected local runners
+60. `down --runner 55880 --runner 55881` stops only the selected local runners
     and preserves `previa-main` plus any remaining local runners and attached
     runner endpoints.
-65. `down --runner 55880` fails clearly when the selector does not match any
+61. `down --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-66. `down --runner 55880` fails clearly if removing that runner would leave the
+62. `down --runner 55880` fails clearly if removing that runner would leave the
     stack with zero runner sources overall.
-67. `down` does not attempt to terminate attached runner endpoints.
-68. `restart --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
+63. `down` does not attempt to terminate attached runner endpoints.
+64. `restart --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
     detached local processes, starts a new detached stack with the same runner
     topology, and rewrites the runtime file with new PIDs.
-69. `restart` without `--name` targets the `default` stack.
-70. `restart` preserves the recorded main port and runner port range from the
+65. `restart` without `--name` targets the `default` stack.
+66. `restart` preserves the recorded main port and runner port range from the
    runtime file.
-71. `restart` fails clearly when no detached runtime file exists for the
+67. `restart` fails clearly when no detached runtime file exists for the
     selected stack name.
-72. `up --detach` fails clearly when
+68. `up --detach` fails clearly when
     `PREVIA_HOME/stacks/default/run/state.json` already exists.
-73. Any file generated by `previactl` is written under `PREVIA_HOME`.
+69. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 
@@ -983,9 +955,6 @@ The implementation is complete only when these scenarios are covered:
 - If `restart` fails after stopping the previous detached stack but before the
   new detached stack is fully ready, the operator must rerun `previactl up` or
   `previactl restart` manually.
-- If `doctor --fix` removes stale runtime metadata, the operator must rerun
-  `previactl up` manually before detached stack control becomes available
-  again.
 
 ## Security and Known Risks
 
