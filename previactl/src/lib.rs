@@ -74,7 +74,7 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
         let _lock = acquire_lock(&stack_paths)?;
         if stack_paths.runtime_file.exists() {
             bail!(
-                "detached runtime already exists for stack '{}': {}",
+                "detached runtime already exists for context '{}': {}",
                 stack_name,
                 stack_paths.runtime_file.display()
             );
@@ -84,7 +84,7 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
         let state = detached_state_from_spawn(&resolved, &spawned)?;
         write_runtime_state(&stack_paths, &state)?;
         println!(
-            "stack '{}' started in detached mode (main: {}:{})",
+            "context '{}' started in detached mode (main: {}:{})",
             stack_name, state.main.address, state.main.port
         );
         return Ok(());
@@ -105,14 +105,14 @@ async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
         let pids = all_runtime_pids(&state);
         graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
         remove_runtime_state(&stack_paths)?;
-        println!("stack '{}' stopped", stack_name);
+        println!("context '{}' stopped", stack_name);
         return Ok(());
     }
 
     let selected = select_runner_indexes(&state.runners, &selectors)?;
     let remaining_local = state.runners.len().saturating_sub(selected.len());
     if remaining_local == 0 && state.attached_runners.is_empty() {
-        bail!("cannot remove the selected runners because the stack would have zero runner sources");
+        bail!("cannot remove the selected runners because the context would have zero runner sources");
     }
 
     let selected_pids = selected
@@ -128,7 +128,7 @@ async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
         .filter_map(|(idx, runner)| (!selected.contains(&idx)).then_some(runner))
         .collect();
     write_runtime_state(&stack_paths, &state)?;
-    println!("stack '{}' updated", stack_name);
+    println!("context '{}' updated", stack_name);
     Ok(())
 }
 
@@ -146,7 +146,7 @@ async fn cmd_restart(paths: &PreviaPaths, http: &Client, args: RestartArgs) -> R
     let spawned = spawn_detached_stack(&resolved, http).await?;
     let next_state = detached_state_from_spawn(&resolved, &spawned)?;
     write_runtime_state(&stack_paths, &next_state)?;
-    println!("stack '{}' restarted", stack_name);
+    println!("context '{}' restarted", stack_name);
     Ok(())
 }
 
@@ -260,7 +260,7 @@ async fn cmd_logs(paths: &PreviaPaths, args: LogsArgs) -> Result<()> {
 }
 
 fn print_dry_run(resolved: &ResolvedUpConfig) {
-    println!("stack: {}", resolved.stack_paths.name);
+    println!("context: {}", resolved.stack_paths.name);
     println!(
         "main: {}:{}",
         resolved.main.address,
@@ -332,9 +332,9 @@ async fn build_status_json(
     main_only: bool,
 ) -> Result<StatusJson> {
     let runtime_file = stack_paths.runtime_file.display().to_string();
-    let Some(state) = state else {
+        let Some(state) = state else {
         if runner_selector.is_some() {
-            bail!("no detached runtime exists for stack '{}'", stack_paths.name);
+            bail!("no detached runtime exists for context '{}'", stack_paths.name);
         }
         return Ok(StatusJson {
             name: stack_paths.name.clone(),
@@ -546,7 +546,7 @@ fn parse_runner_selectors(values: &[String]) -> Result<Vec<RunnerSelector>> {
 
 fn read_required_state(stack_paths: &StackPaths) -> Result<DetachedRuntimeState> {
     read_runtime_state(stack_paths)?
-        .ok_or_else(|| anyhow!("no detached runtime exists for stack '{}'", stack_paths.name))
+        .ok_or_else(|| anyhow!("no detached runtime exists for context '{}'", stack_paths.name))
 }
 
 #[cfg(test)]

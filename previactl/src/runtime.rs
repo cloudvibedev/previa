@@ -55,7 +55,7 @@ pub fn acquire_lock(stack_paths: &StackPaths) -> Result<StackLock> {
         .with_context(|| format!("failed to open '{}'", stack_paths.lock_file.display()))?;
     file.try_lock_exclusive().map_err(|_| {
         anyhow!(
-            "stack '{}' is locked by another mutating operation",
+            "context '{}' is locked by another mutating operation",
             stack_paths.name
         )
     })?;

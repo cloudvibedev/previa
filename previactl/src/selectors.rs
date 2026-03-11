@@ -84,17 +84,17 @@ pub fn normalize_attach_runner(value: &str) -> Result<String> {
 
 pub fn parse_stack_name(value: &str) -> Result<String> {
     if value.is_empty() {
-        bail!("stack name cannot be empty");
+        bail!("context name cannot be empty");
     }
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
-        bail!("stack name cannot be empty");
+        bail!("context name cannot be empty");
     };
     if !first.is_ascii_alphanumeric() {
-        bail!("invalid stack name '{}'", value);
+        bail!("invalid context name '{}'", value);
     }
     if !chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-')) {
-        bail!("invalid stack name '{}'", value);
+        bail!("invalid context name '{}'", value);
     }
     Ok(value.to_owned())
 }
