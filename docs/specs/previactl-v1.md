@@ -39,13 +39,13 @@ scope for v1 and must not be invented during implementation.
 The v1 CLI surface is fixed to the commands below:
 
 ```text
-previactl up [--name <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach]
-previactl down [--name <context-name>] [--runner <address|address:port|port> ...]
-previactl restart [--name <context-name>]
-previactl status [--name <context-name>] [--main] [--runner <address|address:port|port>] [--json]
+previactl up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach]
+previactl down [--context <context-name>] [--runner <address|address:port|port> ...]
+previactl restart [--context <context-name>]
+previactl status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]
 previactl list [--json]
-previactl ps [--name <context-name>] [--json]
-previactl logs [--name <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
+previactl ps [--context <context-name>] [--json]
+previactl logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
 previactl version
 ```
 
@@ -53,13 +53,13 @@ No additional v1 commands are required.
 
 ### Command Semantics
 
-#### `previactl up [--name <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run]`
+#### `previactl up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run]`
 
 - Bootstraps a local context on the current host.
 - Executes exactly one `previa-main` process.
-- Accepts `--name <context-name>` to identify the local execution context that `up`,
+- Accepts `--context <context-name>` to identify the local execution context that `up`,
   `down`, `restart`, `status`, and `ps` will manage.
-- When omitted, `--name` defaults to `default`.
+- When omitted, `--context` defaults to `default`.
 - `context-name` must match `[A-Za-z0-9][A-Za-z0-9._-]*`.
 - Optionally accepts a positional `<source>` that points to a
   `previa-compose.json`, `previa-compose.yaml`, or `previa-compose.yml`
@@ -158,10 +158,10 @@ No additional v1 commands are required.
   `PREVIA_HOME/stacks/<context-name>/logs/runners/<port>.log`.
 - Does not rewrite the context-scoped `main.env` or `runner.env`.
 
-#### `previactl down [--name <context-name>] [--runner <address|address:port|port> ...]`
+#### `previactl down [--context <context-name>] [--runner <address|address:port|port> ...]`
 
 - Stops a local detached context started by `previactl up --detach`.
-- Accepts `--name <context-name>` and defaults to `default` when omitted.
+- Accepts `--context <context-name>` and defaults to `default` when omitted.
 - Reads the runtime file for the selected context name.
 - Without `--runner`, sends a termination signal to the recorded
   `previa-main` PID and to every recorded local `previa-runner` PID.
@@ -193,10 +193,10 @@ No additional v1 commands are required.
 - Does not send termination signals to attached runner endpoints because they
   are not child processes of `previactl`.
 
-#### `previactl restart [--name <context-name>]`
+#### `previactl restart [--context <context-name>]`
 
 - Restarts a detached local context previously started by `previactl up --detach`.
-- Accepts `--name <context-name>` and defaults to `default` when omitted.
+- Accepts `--context <context-name>` and defaults to `default` when omitted.
 - Reads the runtime file for the selected context name.
 - Stops the recorded local processes using the same behavior as `previactl down`.
 - Starts a new detached context using the same effective configuration recorded in
@@ -213,10 +213,10 @@ No additional v1 commands are required.
 - Fails with a clear error if no detached runtime file exists.
 - Does not send termination signals to attached runner endpoints.
 
-#### `previactl status [--name <context-name>] [--main] [--runner <address|address:port|port>] [--json]`
+#### `previactl status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]`
 
 - Reports the status of the detached local context managed by `previactl up`.
-- Accepts `--name <context-name>` and defaults to `default` when omitted.
+- Accepts `--context <context-name>` and defaults to `default` when omitted.
 - Reads the runtime file for the selected context name when it exists.
 - Without filters, checks both PID liveness and HTTP health for the recorded
   `previa-main` and local `previa-runner` processes and reports the overall
@@ -270,10 +270,10 @@ No additional v1 commands are required.
 - `list --json` must use the exact schema defined in the `List JSON Schema`
   section of this specification.
 
-#### `previactl ps [--name <context-name>] [--json]`
+#### `previactl ps [--context <context-name>] [--json]`
 
 - Lists the local processes tracked for a detached context.
-- Accepts `--name <context-name>` and defaults to `default` when omitted.
+- Accepts `--context <context-name>` and defaults to `default` when omitted.
 - Reads the runtime file for the selected context name when it exists.
 - Without `--json`, prints one row per tracked local process.
 - `ps` must include the detached `previa-main` process and all detached local
@@ -297,10 +297,10 @@ No additional v1 commands are required.
 - `ps --json` must use the exact schema defined in the `PS JSON Schema`
   section of this specification.
 
-#### `previactl logs [--name <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]`
+#### `previactl logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]`
 
 - Reads detached context logs from context-scoped log files.
-- Accepts `--name <context-name>` and defaults to `default` when omitted.
+- Accepts `--context <context-name>` and defaults to `default` when omitted.
 - With no selector, prints the `previa-main` log followed by all local runner
   logs in ascending local runner port order.
 - With `--main`, prints only `PREVIA_HOME/stacks/<context-name>/logs/main.log`.
@@ -338,13 +338,13 @@ files.
 - Directory layout:
   - `PREVIA_HOME/bin/previa-main`
   - `PREVIA_HOME/bin/previa-runner`
-  - `PREVIA_HOME/stacks/<stack-name>/config/main.env`
-  - `PREVIA_HOME/stacks/<stack-name>/config/runner.env`
-  - `PREVIA_HOME/stacks/<stack-name>/data/main/orchestrator.db`
-  - `PREVIA_HOME/stacks/<stack-name>/logs/main.log`
-  - `PREVIA_HOME/stacks/<stack-name>/logs/runners/<port>.log`
-  - `PREVIA_HOME/stacks/<stack-name>/run/state.json`
-  - `PREVIA_HOME/stacks/<stack-name>/run/lock`
+  - `PREVIA_HOME/stacks/<context-name>/config/main.env`
+  - `PREVIA_HOME/stacks/<context-name>/config/runner.env`
+  - `PREVIA_HOME/stacks/<context-name>/data/main/orchestrator.db`
+  - `PREVIA_HOME/stacks/<context-name>/logs/main.log`
+  - `PREVIA_HOME/stacks/<context-name>/logs/runners/<port>.log`
+  - `PREVIA_HOME/stacks/<context-name>/run/state.json`
+  - `PREVIA_HOME/stacks/<context-name>/run/lock`
 
 Any `previactl` command that writes files must create parent directories as
 needed.
@@ -356,9 +356,9 @@ under `PREVIA_HOME/stacks/<context-name>/`.
 
 ### Detached Runtime File
 
-Path pattern: `PREVIA_HOME/stacks/<stack-name>/run/state.json`
+Path pattern: `PREVIA_HOME/stacks/<context-name>/run/state.json`
 
-Lock path pattern: `PREVIA_HOME/stacks/<stack-name>/run/lock`
+Lock path pattern: `PREVIA_HOME/stacks/<context-name>/run/lock`
 
 Schema:
 
@@ -398,7 +398,7 @@ Schema:
 
 Rules:
 
-- `previactl up --detach --name <context-name>` must fail if the runtime file for
+- `previactl up --detach --context <context-name>` must fail if the runtime file for
   that context already exists.
 - The runtime file is written only after all child processes have been spawned
   successfully.
@@ -665,14 +665,14 @@ Rules:
 
 ### `main.env`
 
-Path pattern: `PREVIA_HOME/stacks/<stack-name>/config/main.env`
+Path pattern: `PREVIA_HOME/stacks/<context-name>/config/main.env`
 
 Default content:
 
 ```dotenv
 ADDRESS=0.0.0.0
 PORT=5588
-ORCHESTRATOR_DATABASE_URL=sqlite://$HOME/.previa/stacks/<stack-name>/data/main/orchestrator.db
+ORCHESTRATOR_DATABASE_URL=sqlite://$HOME/.previa/stacks/<context-name>/data/main/orchestrator.db
 RUNNER_ENDPOINTS=http://127.0.0.1:55880
 RUST_LOG=info
 ```
@@ -680,12 +680,12 @@ RUST_LOG=info
 Notes:
 
 - `ORCHESTRATOR_DATABASE_URL` must use an absolute path inside
-  `PREVIA_HOME/stacks/<stack-name>/data/main/orchestrator.db`.
+  `PREVIA_HOME/stacks/<context-name>/data/main/orchestrator.db`.
 - `up` reads this file when present and must not rewrite it.
 
 ### `runner.env`
 
-Path pattern: `PREVIA_HOME/stacks/<stack-name>/config/runner.env`
+Path pattern: `PREVIA_HOME/stacks/<context-name>/config/runner.env`
 
 Default content:
 
@@ -710,7 +710,7 @@ Rules:
 - It uses the installed binaries from `PREVIA_HOME/bin`.
 - It may resolve a `previa-compose` document from `.`, a directory path, or an
   explicit file path passed as the positional `<source>`.
-- It accepts `--name <context-name>` to scope runtime state and detached context
+- It accepts `--context <context-name>` to scope runtime state and detached context
   control.
 - The effective context name defaults to `default`.
 - It must resolve context-scoped generated paths under
@@ -771,7 +771,7 @@ The implementation must surface explicit user-facing errors for:
 - Missing `PREVIA_HOME/bin/previa-main`.
 - Missing `PREVIA_HOME/bin/previa-runner` when local runners are requested.
 - Invalid `--attach-runner <selector>` / `-a <selector>` value.
-- Invalid `--name <context-name>` value.
+- Invalid `--context <context-name>` value.
 - Invalid `--main-address <address>` value.
 - Invalid `--runner-address <address>` value.
 - Missing compose file when `<source>` is provided.
@@ -812,7 +812,7 @@ The implementation must surface explicit user-facing errors for:
 The implementation is complete only when these scenarios are covered:
 
 1. `version` prints the `previactl` binary version without requiring network.
-2. `up --name api .` uses `api` as the context name.
+2. `up --context api .` uses `api` as the context name.
 3. `up .` resolves `./previa-compose.yaml`, `./previa-compose.yml`, or
    `./previa-compose.json` using the documented lookup order.
 4. `up /workspace/demo` resolves a compose file from that directory using the
@@ -855,10 +855,10 @@ The implementation is complete only when these scenarios are covered:
    `http://10.0.0.12:55880`.
 22. `up -a bad:value:123` fails clearly because the attached runner selector is
     invalid.
-23. `up --dry-run --name api /workspace/demo/previa-compose.yaml` prints the
+23. `up --dry-run --context api /workspace/demo/previa-compose.yaml` prints the
     resolved effective stack plan and writes no runtime, lock, or log files.
 24. `up --dry-run --detach` fails clearly because dry-run cannot detach.
-25. `up /workspace/demo/previa-compose.yaml --detach --name api` writes the
+25. `up /workspace/demo/previa-compose.yaml --detach --context api` writes the
     resolved absolute compose file path to
     `PREVIA_HOME/stacks/api/run/state.json`.
 26. `up -r 3 --detach` writes
@@ -873,21 +873,21 @@ The implementation is complete only when these scenarios are covered:
     `PREVIA_HOME/stacks/default/logs/main.log`.
 29. `up --detach` redirects a local runner on port `55880` to
     `PREVIA_HOME/stacks/default/logs/runners/55880.log`.
-30. `up --name api --detach` and `up --name jobs --detach` can coexist because
+30. `up --context api --detach` and `up --context jobs --detach` can coexist because
     they use different runtime files.
-31. `up --name api --detach` fails clearly when
+31. `up --context api --detach` fails clearly when
     `PREVIA_HOME/stacks/api/run/state.json` already exists.
 32. Concurrent mutating operations against the same context name fail clearly on
     lock contention through `PREVIA_HOME/stacks/api/run/lock`.
-33. `status --name api` reports `running` when all PIDs in
+33. `status --context api` reports `running` when all PIDs in
     `PREVIA_HOME/stacks/api/run/state.json` are alive.
-34. `status --name api` reports `degraded` when the `previa-main` PID is alive
+34. `status --context api` reports `degraded` when the `previa-main` PID is alive
     but `GET /health` does not return `200 OK`.
-35. `status --name api` reports `degraded` when a local runner PID is alive
+35. `status --context api` reports `degraded` when a local runner PID is alive
     but its `GET /health` does not return `200 OK`.
-36. `status --json --name api` prints a stable JSON document for stack `api`
+36. `status --json --context api` prints a stable JSON document for context `api`
     matching the documented schema.
-37. `status` without `--name` targets the `default` context.
+37. `status` without `--context` targets the `default` context.
 38. `status` reports `degraded` when the runtime file exists but one or more
     recorded local PIDs are no longer alive.
 39. `status` reports `stopped` when no detached runtime file exists for the
@@ -907,24 +907,24 @@ The implementation is complete only when these scenarios are covered:
 46. `list` reports all known context names under `PREVIA_HOME/stacks/` with their
     current states.
 47. `list --json` prints a stable JSON array matching the documented schema.
-48. `ps --name api` prints one row for the detached `previa-main` process and
+48. `ps --context api` prints one row for the detached `previa-main` process and
     one row per detached local runner process tracked in the runtime file.
-49. `ps --json --name api` prints a stable JSON array matching the documented
+49. `ps --json --context api` prints a stable JSON array matching the documented
     schema.
 50. `ps` prints no rows and exits successfully when no detached runtime file
     exists for the selected context.
-51. `logs --name api --main` reads
+51. `logs --context api --main` reads
     `PREVIA_HOME/stacks/api/logs/main.log`.
-52. `logs --name api --runner 127.0.0.1:55880` reads the matching local runner
+52. `logs --context api --runner 127.0.0.1:55880` reads the matching local runner
     log file.
-53. `logs --name api --tail 20` prints only the last 20 lines of the selected
+53. `logs --context api --tail 20` prints only the last 20 lines of the selected
     log file or files.
-54. `logs --name api --follow` streams appended log lines until interrupted.
+54. `logs --context api --follow` streams appended log lines until interrupted.
 55. `logs --main --runner 55880` fails clearly because the filters are mutually
     exclusive.
-56. `down --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
+56. `down --context api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
     recorded local processes, waits for shutdown, and removes the runtime file.
-57. `down` without `--name` targets the `default` context.
+57. `down` without `--context` targets the `default` context.
 58. `down` fails clearly when no detached runtime file exists for the selected
     context name.
 59. `down --runner 55880` stops only the recorded local runner on port `55880`
@@ -942,10 +942,10 @@ The implementation is complete only when these scenarios are covered:
 64. `down --runner 55880` fails clearly if removing that runner would leave the
     context with zero runner sources overall.
 65. `down` does not attempt to terminate attached runner endpoints.
-66. `restart --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
+66. `restart --context api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
     detached local processes, starts a new detached context with the same runner
     topology, and rewrites the runtime file with new PIDs.
-67. `restart` without `--name` targets the `default` context.
+67. `restart` without `--context` targets the `default` context.
 68. `restart` preserves the recorded main port and runner port range from the
    runtime file.
 69. `restart` fails clearly when no detached runtime file exists for the

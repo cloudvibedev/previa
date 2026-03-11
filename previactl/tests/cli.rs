@@ -153,7 +153,7 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
         .env("PREVIA_HOME", temp.path())
         .args([
             "up",
-            "--name",
+            "--context",
             stack,
             "--detach",
             "--main-address",
@@ -174,7 +174,7 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
 
     let status_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["status", "--name", stack, "--json"])
+        .args(["status", "--context", stack, "--json"])
         .output()
         .expect("status output");
     assert!(status_output.status.success());
@@ -187,7 +187,7 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
 
     let ps_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["ps", "--name", stack, "--json"])
+        .args(["ps", "--context", stack, "--json"])
         .output()
         .expect("ps output");
     assert!(ps_output.status.success());
@@ -208,7 +208,7 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
 
     let logs_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["logs", "--name", stack, "--main"])
+        .args(["logs", "--context", stack, "--main"])
         .output()
         .expect("logs output");
     assert!(logs_output.status.success());
@@ -217,7 +217,7 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
 
     cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["down", "--name", stack])
+        .args(["down", "--context", stack])
         .assert()
         .success();
 
@@ -239,7 +239,7 @@ fn logs_supports_tail_count() {
         .env("PREVIA_HOME", temp.path())
         .args([
             "up",
-            "--name",
+            "--context",
             stack,
             "--detach",
             "--main-address",
@@ -273,7 +273,7 @@ fn logs_supports_tail_count() {
 
     let logs_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["logs", "--name", stack, "--main", "-t", "2"])
+        .args(["logs", "--context", stack, "--main", "-t", "2"])
         .output()
         .expect("logs output");
     assert!(logs_output.status.success());
@@ -282,7 +282,7 @@ fn logs_supports_tail_count() {
 
     cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["down", "--name", stack])
+        .args(["down", "--context", stack])
         .assert()
         .success();
 }
@@ -302,7 +302,7 @@ fn up_fails_before_spawning_when_runner_port_is_already_in_use() {
         .env("PREVIA_HOME", temp.path())
         .args([
             "up",
-            "--name",
+            "--context",
             "other",
             "--detach",
             "--main-address",
@@ -344,7 +344,7 @@ fn up_fails_before_spawning_when_runner_port_is_already_in_use() {
 
     cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["down", "--name", "other"])
+        .args(["down", "--context", "other"])
         .assert()
         .success();
 }
@@ -376,7 +376,7 @@ fn status_reports_degraded_when_health_is_not_200() {
         .env("PREVIA_HOME", temp.path())
         .args([
             "up",
-            "--name",
+            "--context",
             stack,
             "--detach",
             "--main-address",
@@ -398,7 +398,7 @@ fn status_reports_degraded_when_health_is_not_200() {
 
     let status_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["status", "--name", stack, "--json"])
+        .args(["status", "--context", stack, "--json"])
         .output()
         .expect("status output");
     assert!(status_output.status.success());
@@ -410,7 +410,7 @@ fn status_reports_degraded_when_health_is_not_200() {
 
     cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["down", "--name", stack])
+        .args(["down", "--context", stack])
         .assert()
         .success();
 }
@@ -502,7 +502,7 @@ fn up_cleans_up_started_runners_when_later_startup_fails() {
         .env("PREVIA_HOME", temp.path())
         .args([
             "up",
-            "--name",
+            "--context",
             stack,
             "--detach",
             "--main-address",
@@ -534,7 +534,7 @@ fn up_cleans_up_started_runners_when_later_startup_fails() {
 
     let status_output = cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["status", "--name", stack, "--json"])
+        .args(["status", "--context", stack, "--json"])
         .output()
         .expect("status output");
     assert!(status_output.status.success());

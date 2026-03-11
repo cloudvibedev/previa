@@ -60,7 +60,7 @@ pub async fn run() -> Result<()> {
 }
 
 async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> {
-    let stack_name = parse_stack_name(&args.name)?;
+    let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
     let resolved = resolve_up_config(paths, &stack_paths, args).await?;
 
@@ -95,7 +95,7 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
 }
 
 async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
-    let stack_name = parse_stack_name(&args.name)?;
+    let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
     let _lock = acquire_lock(&stack_paths)?;
     let mut state = read_required_state(&stack_paths)?;
@@ -133,7 +133,7 @@ async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
 }
 
 async fn cmd_restart(paths: &PreviaPaths, http: &Client, args: RestartArgs) -> Result<()> {
-    let stack_name = parse_stack_name(&args.name)?;
+    let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
     let _lock = acquire_lock(&stack_paths)?;
     let state = read_required_state(&stack_paths)?;
@@ -151,7 +151,7 @@ async fn cmd_restart(paths: &PreviaPaths, http: &Client, args: RestartArgs) -> R
 }
 
 async fn cmd_status(paths: &PreviaPaths, http: &Client, args: StatusArgs) -> Result<()> {
-    let stack_name = parse_stack_name(&args.name)?;
+    let stack_name = parse_stack_name(&args.context)?;
     if args.main && args.runner.is_some() {
         bail!("--main and --runner are mutually exclusive");
     }
@@ -201,7 +201,7 @@ async fn cmd_list(paths: &PreviaPaths, http: &Client, json: bool) -> Result<()> 
 }
 
 async fn cmd_ps(paths: &PreviaPaths, http: &Client, args: PsArgs) -> Result<()> {
-    let stack_name = parse_stack_name(&args.name)?;
+    let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
     let state = read_runtime_state(&stack_paths)?;
     let rows = process_rows(state.as_ref(), http).await?;
@@ -217,7 +217,7 @@ async fn cmd_ps(paths: &PreviaPaths, http: &Client, args: PsArgs) -> Result<()> 
 }
 
 async fn cmd_logs(paths: &PreviaPaths, args: LogsArgs) -> Result<()> {
-    let stack_name = parse_stack_name(&args.name)?;
+    let stack_name = parse_stack_name(&args.context)?;
     if args.main && args.runner.is_some() {
         bail!("--main and --runner are mutually exclusive");
     }

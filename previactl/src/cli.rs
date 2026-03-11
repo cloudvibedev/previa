@@ -31,8 +31,8 @@ pub enum Commands {
 
 #[derive(Debug, Args)]
 pub struct UpArgs {
-    #[arg(long, default_value = "default", help = "Context name")]
-    pub name: String,
+    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    pub context: String,
     pub source: Option<String>,
     #[arg(long)]
     pub main_address: Option<String>,
@@ -54,22 +54,22 @@ pub struct UpArgs {
 
 #[derive(Debug, Args)]
 pub struct DownArgs {
-    #[arg(long, default_value = "default", help = "Context name")]
-    pub name: String,
+    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    pub context: String,
     #[arg(long = "runner")]
     pub runners: Vec<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct RestartArgs {
-    #[arg(long, default_value = "default", help = "Context name")]
-    pub name: String,
+    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    pub context: String,
 }
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
-    #[arg(long, default_value = "default", help = "Context name")]
-    pub name: String,
+    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    pub context: String,
     #[arg(long)]
     pub main: bool,
     #[arg(long)]
@@ -86,16 +86,16 @@ pub struct ListArgs {
 
 #[derive(Debug, Args)]
 pub struct PsArgs {
-    #[arg(long, default_value = "default", help = "Context name")]
-    pub name: String,
+    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    pub context: String,
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, Args)]
 pub struct LogsArgs {
-    #[arg(long, default_value = "default", help = "Context name")]
-    pub name: String,
+    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    pub context: String,
     #[arg(long)]
     pub main: bool,
     #[arg(long)]
