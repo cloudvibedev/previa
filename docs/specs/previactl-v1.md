@@ -98,7 +98,7 @@ The v1 CLI surface is fixed to the commands below:
 previactl install [--force-config]
 previactl update
 previactl uninstall [--purge]
-previactl up [--runners <N>] [--attach-runner <endpoint> ...] [-d, --detach]
+previactl up [--runners, -r <N>] [--attach-runner, -a <endpoint> ...] [-d, --detach]
 previactl down
 previactl status
 previactl version
@@ -165,18 +165,18 @@ No additional v1 commands are required.
 - Without `--purge`, preserves `/etc/previa` and `/var/lib/previa`.
 - With `--purge`, also removes `/etc/previa` and `/var/lib/previa`.
 
-#### `previactl up [--runners <N>] [--attach-runner <endpoint> ...]`
+#### `previactl up [--runners, -r <N>] [--attach-runner, -a <endpoint> ...]`
 
 - Bootstraps a local stack in foreground on the current host.
 - Executes exactly one `previa-main` process.
 - Optionally spawns the number of local `previa-runner` processes declared by
-  `--runners <N>`.
+  `--runners <N>` or `-r <N>`.
 - Optionally attaches one or more existing runner endpoints provided through
-  repeated `--attach-runner <endpoint>` flags.
+  repeated `--attach-runner <endpoint>` or `-a <endpoint>` flags.
 - Accepts `<endpoint>` values as full HTTP base URLs such as
   `http://10.0.0.12:55880`.
 - Requires at least one runner source overall: either `--runners <N>` greater
-  than `0`, at least one `--attach-runner`, or both.
+  than `0`, at least one `--attach-runner` / `-a`, or both.
 - When `--runners` is omitted, it defaults to `1`.
 - When present, `--runners <N>` must be an integer greater than or equal to
   `0`.
@@ -186,7 +186,8 @@ No additional v1 commands are required.
   additional local runner.
 - Builds `RUNNER_ENDPOINTS` for `previa-main` by concatenating:
   - the local runner processes started by the command, in local port order
-  - the attached runner endpoints provided via `--attach-runner`, in CLI order
+  - the attached runner endpoints provided via `--attach-runner` / `-a`, in
+    CLI order
 - Example:
   `http://127.0.0.1:55880,http://127.0.0.1:55881,http://10.0.0.12:55880`.
 - Starts `previa-main` after all runner processes have been spawned.
@@ -346,10 +347,11 @@ Rules:
 - It uses the installed binaries from `/opt/previa/bin`.
 - It always executes one `previa-main`.
 - It executes exactly the local runner count declared by the operator in
-  `--runners <N>`.
+  `--runners <N>` or `-r <N>`.
 - It may attach existing runner endpoints declared through repeated
-  `--attach-runner <endpoint>` flags.
-- It must reject `up` if `--runners 0` is combined with no `--attach-runner`.
+  `--attach-runner <endpoint>` or `-a <endpoint>` flags.
+- It must reject `up` if `--runners 0` / `-r 0` is combined with no
+  `--attach-runner` / `-a`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
   `/etc/previa/main.env` when present.
 - Each local spawned runner binds to `127.0.0.1` and uses ports starting at
@@ -478,7 +480,7 @@ The implementation must surface explicit user-facing errors for:
 - Missing installation state during `update`.
 - Failed `previactl` self-replacement during `update`.
 - User declined confirmation during `update`.
-- Invalid `--attach-runner <endpoint>` value.
+- Invalid `--attach-runner <endpoint>` / `-a <endpoint>` value.
 - Existing detached runtime file during `up --detach`.
 - Missing detached runtime file during `down`.
 - Permission failures when writing to `/opt`, `/etc`, `/var/lib`, or `/tmp`.
@@ -512,20 +514,20 @@ The implementation is complete only when these scenarios are covered:
 12. `up --runners 3` starts one `previa-main`, three local runners, and injects
     `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
     into the `previa-main` child process.
-13. `up --runners 1 --attach-runner http://10.0.0.12:55880` injects
+13. `up -r 1 -a http://10.0.0.12:55880` injects
     `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://10.0.0.12:55880`
     into the `previa-main` child process.
-14. `up --runners 0 --attach-runner http://10.0.0.12:55880` is valid and starts
+14. `up -r 0 -a http://10.0.0.12:55880` is valid and starts
     only `previa-main` locally while attaching the remote runner endpoint.
-15. `up --runners 0` with no attached runner fails validation before spawning
+15. `up -r 0` with no attached runner fails validation before spawning
     any process.
-16. `up --attach-runner 10.0.0.12:55880` fails clearly because the attached
+16. `up -a 10.0.0.12:55880` fails clearly because the attached
     runner endpoint is not a full HTTP base URL.
 17. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
     `previa-main` PID and the three runner PIDs, then exits without stopping
     the spawned processes.
 18. Detached runtime state persists attached runner endpoints when
-    `--attach-runner` is used.
+    `--attach-runner` or `-a` is used.
 19. `status` reports `running` when all PIDs in
     `/tmp/previactl-up-state.json` are alive.
 20. `status` reports `degraded` when the runtime file exists but one or more
