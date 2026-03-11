@@ -16,6 +16,8 @@ scope for v1 and must not be invented during implementation.
   artifact links from the manifest.
 - Persist installation state without depending on `previa-main --version` or
   `previa-runner --version`.
+- Bootstrap a local stack in foreground with one `previa-main` and multiple
+  `previa-runner` processes.
 - Run `previa-main` and `previa-runner` in foreground for local operations.
 - Manage `previa-main` and `previa-runner` as `systemd` services on Linux.
 - Reuse the current environment-variable contract already supported by the
@@ -83,6 +85,7 @@ The v1 CLI surface is fixed to the commands below:
 previactl install [--force-config]
 previactl update
 previactl uninstall [--purge]
+previactl up --runners <N>
 previactl run main
 previactl run runner
 previactl service install main
@@ -140,6 +143,23 @@ No additional v1 commands are required.
 - Removes installed binaries and `install-state.json`.
 - Without `--purge`, preserves `/etc/previa` and `/var/lib/previa`.
 - With `--purge`, also removes `/etc/previa` and `/var/lib/previa`.
+
+#### `previactl up --runners <N>`
+
+- Bootstraps a local stack in foreground on the current host.
+- Starts exactly one `previa-main` process and `<N>` `previa-runner` processes.
+- Requires `<N>` to be an integer greater than or equal to `1`.
+- Uses port `55880` for the first runner and increments sequentially for each
+  additional runner.
+- Builds `RUNNER_ENDPOINTS` for `previa-main` from the runner processes started
+  by the command, for example
+  `http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`.
+- Starts `previa-main` after all runner processes have been spawned.
+- Runs all processes in foreground and multiplexes their stdout and stderr to
+  the current terminal session.
+- Stops all child processes when the command receives `SIGINT` or `SIGTERM`.
+- Does not create or modify `systemd` units.
+- Does not rewrite `/etc/previa/main.env` or `/etc/previa/runner.env`.
 
 #### `previactl run main`
 
@@ -269,6 +289,25 @@ Notes:
 - If the file already exists, `install` and `update` must leave it unchanged
   unless `install --force-config` is used.
 
+## Foreground Bootstrap Rules
+
+`previactl up --runners <N>` is the v1 bootstrap command for local development
+or single-host evaluation.
+
+Rules:
+
+- It is local-only and does not provision remote hosts.
+- It uses the installed binaries from `/opt/previa/bin`.
+- `previa-main` binds to the configured `ADDRESS` and `PORT` from
+  `/etc/previa/main.env` when present.
+- Each runner binds to `127.0.0.1` and uses ports starting at `55880`.
+- The command must override `RUNNER_ENDPOINTS` for the `previa-main` child
+  process so that it points to the runners spawned by the same command.
+- The runner count is explicit; there is no default implicit runner fan-out in
+  v1.
+- If any child process fails during startup, the command must terminate the
+  remaining children and exit with a non-zero status.
+
 ## Linux `systemd` Integration
 
 `systemd` management is supported only on Linux in v1.
@@ -392,10 +431,14 @@ The implementation is complete only when these scenarios are covered:
    when the default config is used.
 10. `run runner` starts `previa-runner` with default `ADDRESS=0.0.0.0` and
     `PORT=55880` when the default config is used.
-11. `uninstall` without `--purge` removes binaries and units but preserves
+11. `up --runners 3` starts one `previa-main`, three local runners, and injects
+    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
+    into the `previa-main` child process.
+12. `up --runners 0` fails validation before spawning any process.
+13. `uninstall` without `--purge` removes binaries and units but preserves
     `/etc/previa` and `/var/lib/previa`.
-12. Reinstall after non-purge uninstall reuses the preserved config files.
-13. `service` commands on macOS or Windows fail with the documented Linux-only
+14. Reinstall after non-purge uninstall reuses the preserved config files.
+15. `service` commands on macOS or Windows fail with the documented Linux-only
     service-management error.
 
 ## Rollback and Recovery
