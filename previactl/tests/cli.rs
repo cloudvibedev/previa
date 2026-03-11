@@ -288,6 +288,72 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
 }
 
 #[test]
+fn down_all_context_stops_every_detached_context() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_previa_home();
+    let alpha_main_port = find_free_port();
+    let alpha_runner_port = find_free_port();
+    let beta_main_port = find_free_port();
+    let beta_runner_port = find_free_port();
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args([
+            "up",
+            "--context",
+            "alpha",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &alpha_main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{alpha_runner_port}:{alpha_runner_port}"),
+            "-r",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args([
+            "up",
+            "--context",
+            "beta",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &beta_main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{beta_runner_port}:{beta_runner_port}"),
+            "-r",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    thread::sleep(Duration::from_millis(500));
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args(["down", "--all-context"])
+        .assert()
+        .success();
+
+    assert!(!temp.path().join("stacks/alpha/run/state.json").exists());
+    assert!(!temp.path().join("stacks/beta/run/state.json").exists());
+}
+
+#[test]
 fn logs_supports_tail_count() {
     if !python3_available() {
         return;

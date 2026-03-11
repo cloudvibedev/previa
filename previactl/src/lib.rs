@@ -104,42 +104,45 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
 }
 
 async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
+    if args.all_context {
+        if !args.runners.is_empty() {
+            bail!("--all-context and --runner are mutually exclusive");
+        }
+        return cmd_down_all_contexts(paths).await;
+    }
+
     let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
-    let _lock = acquire_lock(&stack_paths)?;
-    let mut state = read_required_state(&stack_paths)?;
-
     let selectors = parse_runner_selectors(&args.runners)?;
     if selectors.is_empty() {
-        let pids = all_runtime_pids(&state);
-        graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
-        remove_runtime_state(&stack_paths)?;
-        println!("context '{}' stopped", stack_name);
-        return Ok(());
+        stop_detached_context(&stack_paths).await?;
+    } else {
+        let _lock = acquire_lock(&stack_paths)?;
+        let mut state = read_required_state(&stack_paths)?;
+
+        let selected = select_runner_indexes(&state.runners, &selectors)?;
+        let remaining_local = state.runners.len().saturating_sub(selected.len());
+        if remaining_local == 0 && state.attached_runners.is_empty() {
+            bail!(
+                "cannot remove the selected runners because the context would have zero runner sources"
+            );
+        }
+
+        let selected_pids = selected
+            .iter()
+            .map(|idx| state.runners[*idx].pid)
+            .collect::<Vec<_>>();
+        graceful_shutdown_pids(&selected_pids, Duration::from_secs(3)).await?;
+
+        state.runners = state
+            .runners
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, runner)| (!selected.contains(&idx)).then_some(runner))
+            .collect();
+        write_runtime_state(&stack_paths, &state)?;
+        println!("context '{}' updated", stack_name);
     }
-
-    let selected = select_runner_indexes(&state.runners, &selectors)?;
-    let remaining_local = state.runners.len().saturating_sub(selected.len());
-    if remaining_local == 0 && state.attached_runners.is_empty() {
-        bail!(
-            "cannot remove the selected runners because the context would have zero runner sources"
-        );
-    }
-
-    let selected_pids = selected
-        .iter()
-        .map(|idx| state.runners[*idx].pid)
-        .collect::<Vec<_>>();
-    graceful_shutdown_pids(&selected_pids, Duration::from_secs(3)).await?;
-
-    state.runners = state
-        .runners
-        .into_iter()
-        .enumerate()
-        .filter_map(|(idx, runner)| (!selected.contains(&idx)).then_some(runner))
-        .collect();
-    write_runtime_state(&stack_paths, &state)?;
-    println!("context '{}' updated", stack_name);
     Ok(())
 }
 
@@ -300,6 +303,33 @@ fn print_dry_run(resolved: &ResolvedUpConfig) {
     if let Some(source) = &resolved.source {
         println!("source: {}", source.display());
     }
+}
+
+async fn cmd_down_all_contexts(paths: &PreviaPaths) -> Result<()> {
+    let mut stack_paths = paths.stack_roots()?;
+    stack_paths.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut stopped = 0usize;
+    for stack_path in stack_paths {
+        if read_runtime_state(&stack_path)?.is_none() {
+            continue;
+        }
+        stop_detached_context(&stack_path).await?;
+        stopped += 1;
+    }
+
+    println!("stopped {stopped} context(s)");
+    Ok(())
+}
+
+async fn stop_detached_context(stack_paths: &StackPaths) -> Result<()> {
+    let _lock = acquire_lock(stack_paths)?;
+    let state = read_required_state(stack_paths)?;
+    let pids = all_runtime_pids(&state);
+    graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
+    remove_runtime_state(stack_paths)?;
+    println!("context '{}' stopped", stack_paths.name);
+    Ok(())
 }
 
 fn resolve_port_conflicts(resolved: &mut ResolvedUpConfig) -> Result<()> {
