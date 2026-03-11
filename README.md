@@ -1,7 +1,5 @@
 # Previa
 
-> Rustdoc-style project guide for the full `previa` workspace.
-
 ## Overview
 
 Previa is a high-speed distributed testing platform built for teams that need confidence before shipping.
