@@ -307,26 +307,38 @@ Supported filenames:
 
 Supported top-level schema:
 
+- `version: integer` required
 - `main.address: string` optional
 - `main.port: integer` optional
-- `runners.address: string` optional
-- `runners.count: integer` optional
-- `runners.port_range.start: integer` optional
-- `runners.port_range.end: integer` optional
+- `main.env: object<string, string>` optional
+- `runners.local.address: string` optional
+- `runners.local.count: integer` optional
+- `runners.local.port_range.start: integer` optional
+- `runners.local.port_range.end: integer` optional
+- `runners.local.env: object<string, string>` optional
 - `runners.attach: string[]` optional
 
 Example YAML:
 
 ```yaml
+version: 1
+
 main:
   address: 0.0.0.0
   port: 6688
+  env:
+    ORCHESTRATOR_DATABASE_URL: sqlite:///home/assis/.previa/data/main/orchestrator.db
+    RUST_LOG: info
+
 runners:
-  address: 127.0.0.1
-  count: 3
-  port_range:
-    start: 56000
-    end: 56009
+  local:
+    address: 127.0.0.1
+    count: 3
+    port_range:
+      start: 56000
+      end: 56009
+    env:
+      RUST_LOG: info
   attach:
     - 10.0.0.12:55880
     - 10.0.0.13
@@ -336,16 +348,26 @@ Example JSON:
 
 ```json
 {
+  "version": 1,
   "main": {
     "address": "0.0.0.0",
-    "port": 6688
+    "port": 6688,
+    "env": {
+      "ORCHESTRATOR_DATABASE_URL": "sqlite:///home/assis/.previa/data/main/orchestrator.db",
+      "RUST_LOG": "info"
+    }
   },
   "runners": {
-    "address": "127.0.0.1",
-    "count": 3,
-    "port_range": {
-      "start": 56000,
-      "end": 56009
+    "local": {
+      "address": "127.0.0.1",
+      "count": 3,
+      "port_range": {
+        "start": 56000,
+        "end": 56009
+      },
+      "env": {
+        "RUST_LOG": "info"
+      }
     },
     "attach": ["10.0.0.12:55880", "10.0.0.13"]
   }
@@ -354,17 +376,31 @@ Example JSON:
 
 Rules:
 
+- `version` is required and must equal `1` in v1.
 - `main.address` maps to the `ADDRESS` environment variable for
   `previa-main`.
 - `main.port` is equivalent to `--main-port` / `-p`.
-- `runners.address` maps to the `ADDRESS` environment variable for spawned
-  local `previa-runner` processes.
-- `runners.count` is equivalent to `--runners` / `-r`.
-- `runners.port_range.start` and `runners.port_range.end` together are
+- `main.env` injects additional environment variables into the `previa-main`
+  child process.
+- `runners.local.address` maps to the `ADDRESS` environment variable for
+  spawned local `previa-runner` processes.
+- `runners.local.count` is equivalent to `--runners` / `-r`.
+- `runners.local.port_range.start` and `runners.local.port_range.end` together are
   equivalent to `--runner-port-range` / `-P`.
+- `runners.local.env` injects additional environment variables into spawned
+  local `previa-runner` child processes.
 - `runners.attach` entries use the same selector grammar as
   `--attach-runner` / `-a`.
+- `runners.local` and `runners.attach` are independent; a compose file may
+  define only local runners, only attached runners, or both.
 - CLI flags always override values loaded from the compose file.
+- Effective environment variable precedence for each child process is:
+  - CLI-derived values that `previactl` must control directly
+  - compose `env`
+  - `PREVIA_HOME/config/main.env` or `PREVIA_HOME/config/runner.env`
+  - built-in defaults from this specification
+- `RUNNER_ENDPOINTS` is always controlled by `previactl` and must not be taken
+  from `main.env` in the compose file.
 - The compose file is read-only input. `previactl` must never rewrite it.
 
 ### `main.env`
@@ -423,19 +459,20 @@ Rules:
   inclusive local port interval available for spawned runners.
 - It may attach existing runner targets declared through repeated
   `--attach-runner <selector>` or `-a <selector>` flags.
-- It may load `main.address`, `main.port`, `runners.address`,
-  `runners.count`, `runners.port_range`, and `runners.attach` from a compose
-  file.
+- It may load `main.address`, `main.port`, `main.env`, `runners.local.address`,
+  `runners.local.count`, `runners.local.port_range`, `runners.local.env`, and
+  `runners.attach` from a compose file.
 - It must reject `up` if `--runners 0` / `-r 0` is combined with no
   `--attach-runner` / `-a`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
   `PREVIA_HOME/config/main.env` when present, except that `PORT` is overridden
   by `--main-port <port>` / `-p <port>` when provided.
 - `previa-main` may also take its effective `ADDRESS` from `main.address` in a
-  compose file.
+  compose file and additional environment variables from `main.env`.
 - Each local spawned runner binds to the effective runner `ADDRESS` from
-  `PREVIA_HOME/config/runner.env` or `runners.address` in a compose file and
-  uses ports from the effective runner port range in ascending order.
+  `PREVIA_HOME/config/runner.env` or `runners.local.address` in a compose file,
+  uses ports from the effective runner port range in ascending order, and may
+  receive additional environment variables from `runners.local.env`.
 - The effective runner `ADDRESS` defaults to `127.0.0.1`.
 - The effective runner port range defaults to `55880:55979`.
 - `up` must fail before spawning any local child process when the requested
@@ -460,6 +497,8 @@ The implementation must surface explicit user-facing errors for:
 - Missing compose file when `<source>` is provided.
 - Unsupported compose file extension when `<source>` is a file path.
 - Invalid YAML or JSON in a compose file.
+- Missing `version` in a compose file.
+- Unsupported compose file `version`.
 - Invalid compose file schema.
 - Invalid `--main-port <port>` / `-p <port>` value.
 - Invalid `--runner-port-range <start:end>` / `-P <start:end>` value.
@@ -487,86 +526,91 @@ The implementation is complete only when these scenarios are covered:
 3. `up /workspace/demo` resolves a compose file from that directory using the
    documented lookup order.
 4. `up /workspace/demo/previa-compose.yaml` reads that exact file.
-5. `up /workspace/demo/previa-compose.yaml` applies compose settings for main
-   address, main port, runner address, runner count, runner port range, and
-   attached runners.
+5. `up /workspace/demo/previa-compose.yaml` applies compose settings for
+   `version`, main address, main port, main `env`, local runner address, local
+   runner count, local runner port range, local runner `env`, and attached
+   runners.
 6. `up /workspace/demo/previa-compose.yaml -p 7788 -r 2` lets the CLI flags
     override the compose file values.
-7. `up -r 3` starts one `previa-main`, three local runners, and injects
+7. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is
+   missing.
+8. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is not
+   `1`.
+9. `up -r 3` starts one `previa-main`, three local runners, and injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
    into the `previa-main` child process.
-8. `up -p 6688 -r 1` starts `previa-main` with `PORT=6688`.
-9. `up -P 56000:56002 -r 3` starts local runners on ports
+10. `up -p 6688 -r 1` starts `previa-main` with `PORT=6688`.
+11. `up -P 56000:56002 -r 3` starts local runners on ports
    `56000`, `56001`, and `56002`.
-10. `up -P 56000:56001 -r 3` fails validation before spawning
+12. `up -P 56000:56001 -r 3` fails validation before spawning
    any local child process because the range capacity is insufficient.
-11. `up -r 1 -a 10.0.0.12:55880` injects
+13. `up -r 1 -a 10.0.0.12:55880` injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://10.0.0.12:55880`
    into the `previa-main` child process.
-12. `up -r 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
+14. `up -r 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
    locally while attaching the remote runner endpoint.
-13. `up -r 0` with no attached runner fails validation before spawning any
+15. `up -r 0` with no attached runner fails validation before spawning any
    process.
-14. `up -a 55880` normalizes the attached runner target to
+16. `up -a 55880` normalizes the attached runner target to
    `http://127.0.0.1:55880`.
-15. `up -a 10.0.0.12` normalizes the attached runner target to
+17. `up -a 10.0.0.12` normalizes the attached runner target to
    `http://10.0.0.12:55880`.
-16. `up -a 10.0.0.12:55880` normalizes the attached runner target to
+18. `up -a 10.0.0.12:55880` normalizes the attached runner target to
    `http://10.0.0.12:55880`.
-17. `up -a bad:value:123` fails clearly because the attached runner selector is
+19. `up -a bad:value:123` fails clearly because the attached runner selector is
     invalid.
-18. `up /workspace/demo/previa-compose.yaml --detach` writes the resolved
+20. `up /workspace/demo/previa-compose.yaml --detach` writes the resolved
     absolute compose file path to `PREVIA_HOME/run/up-state.json`.
-19. `up -r 3 --detach` writes `PREVIA_HOME/run/up-state.json` with the
+21. `up -r 3 --detach` writes `PREVIA_HOME/run/up-state.json` with the
    `previa-main` PID and the three runner PIDs, then exits without stopping the
    spawned processes.
-20. Detached runtime state persists the effective main address, main port,
+22. Detached runtime state persists the effective main address, main port,
    runner addresses, runner port range, and attached runner endpoints when
    `up --detach` is used.
-21. `status` reports `running` when all PIDs in `PREVIA_HOME/run/up-state.json`
+23. `status` reports `running` when all PIDs in `PREVIA_HOME/run/up-state.json`
     are alive.
-22. `status` reports `degraded` when the runtime file exists but one or more
+24. `status` reports `degraded` when the runtime file exists but one or more
     recorded local PIDs are no longer alive.
-23. `status` reports `stopped` when no detached runtime file exists.
-24. `status --main` reports only the status of the recorded `previa-main`
+25. `status` reports `stopped` when no detached runtime file exists.
+26. `status --main` reports only the status of the recorded `previa-main`
     process.
-25. `status --runner 55880` reports the status of the recorded local runner on
+27. `status --runner 55880` reports the status of the recorded local runner on
     port `55880`.
-26. `status --runner 127.0.0.1:55880` reports the status of the recorded local
+28. `status --runner 127.0.0.1:55880` reports the status of the recorded local
     runner bound to `127.0.0.1:55880`.
-27. `status --runner 127.0.0.1` reports the status of all recorded local
+29. `status --runner 127.0.0.1` reports the status of all recorded local
     runners bound to `127.0.0.1`.
-28. `status --runner 55880` fails clearly when the selector does not match any
+30. `status --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-29. `status --main --runner 55880` fails clearly because the filters are
+31. `status --main --runner 55880` fails clearly because the filters are
     mutually exclusive.
-30. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded local
+32. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded local
     processes, waits for shutdown, and removes the runtime file.
-31. `down` fails clearly when no detached runtime file exists.
-32. `down --runner 55880` stops only the recorded local runner on port `55880`
+33. `down` fails clearly when no detached runtime file exists.
+34. `down --runner 55880` stops only the recorded local runner on port `55880`
     and rewrites `PREVIA_HOME/run/up-state.json` with the remaining runner
     entries.
-33. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
+35. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
     to `127.0.0.1:55880`.
-34. `down --runner 127.0.0.1` stops all recorded local runners bound to
+36. `down --runner 127.0.0.1` stops all recorded local runners bound to
     `127.0.0.1`.
-35. `down --runner 55880 --runner 55881` stops only the selected local runners
+37. `down --runner 55880 --runner 55881` stops only the selected local runners
     and preserves `previa-main` plus any remaining local runners and attached
     runner endpoints.
-36. `down --runner 55880` fails clearly when the selector does not match any
+38. `down --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-37. `down --runner 55880` fails clearly if removing that runner would leave the
+39. `down --runner 55880` fails clearly if removing that runner would leave the
     stack with zero runner sources overall.
-38. `down` does not attempt to terminate attached runner endpoints.
-39. `restart` reads `PREVIA_HOME/run/up-state.json`, stops the detached local
+40. `down` does not attempt to terminate attached runner endpoints.
+41. `restart` reads `PREVIA_HOME/run/up-state.json`, stops the detached local
     processes, starts a new detached stack with the same runner topology, and
     rewrites the runtime file with new PIDs.
-40. `restart` preserves the recorded main port and runner port range from the
+42. `restart` preserves the recorded main port and runner port range from the
    runtime file.
-41. `restart` fails clearly when no detached runtime file exists.
-42. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
+43. `restart` fails clearly when no detached runtime file exists.
+44. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
     exists.
-43. Any file generated by `previactl` is written under `PREVIA_HOME`.
+45. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 
