@@ -232,7 +232,7 @@ jobs:
             filename="$(basename "${file}")"
             link_key="${filename%.exe}"
             link_key="${link_key//-/_}"
-            link_value="https://files.previa.dev/${VERSION}/files/${filename}"
+            link_value="https://downloads.previa.dev/${VERSION}/files/${filename}"
 
             if [ -n "${links_json}" ]; then
               links_json="${links_json},"
