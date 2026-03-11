@@ -36,10 +36,10 @@ scope for v1 and must not be invented during implementation.
 The v1 CLI surface is fixed to the commands below:
 
 ```text
-previactl up [<source>] [--main-port, -p <port>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [-d, --detach]
-previactl down [--runner <address|address:port|port> ...]
-previactl restart
-previactl status [--main] [--runner <address|address:port|port>]
+previactl up [--name <stack-name>] [<source>] [--main-port, -p <port>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [-d, --detach]
+previactl down [--name <stack-name>] [--runner <address|address:port|port> ...]
+previactl restart [--name <stack-name>]
+previactl status [--name <stack-name>] [--main] [--runner <address|address:port|port>]
 previactl version
 ```
 
@@ -47,10 +47,14 @@ No additional v1 commands are required.
 
 ### Command Semantics
 
-#### `previactl up [<source>] [--main-port, -p <port>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...]`
+#### `previactl up [--name <stack-name>] [<source>] [--main-port, -p <port>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...]`
 
 - Bootstraps a local stack on the current host.
 - Executes exactly one `previa-main` process.
+- Accepts `--name <stack-name>` to identify the stack context that `up`,
+  `down`, `restart`, and `status` will manage.
+- When omitted, `--name` defaults to `default`.
+- `stack-name` must match `[A-Za-z0-9][A-Za-z0-9._-]*`.
 - Optionally accepts a positional `<source>` that points to a
   `previa-compose.json`, `previa-compose.yaml`, or `previa-compose.yml`
   document.
@@ -122,25 +126,26 @@ No additional v1 commands are required.
   multiplexes their stdout and stderr to the current terminal session.
 - Without `-d` or `--detach`, stops all child processes when the command
   receives `SIGINT` or `SIGTERM`.
-- With `-d` or `--detach`, writes `PREVIA_HOME/run/up-state.json` and then
-  exits successfully.
+- With `-d` or `--detach`, writes the runtime file for the selected stack name
+  under `PREVIA_HOME/run/stacks/` and then exits successfully.
 - Does not rewrite `PREVIA_HOME/config/main.env` or
   `PREVIA_HOME/config/runner.env`.
 
-#### `previactl down [--runner <address|address:port|port> ...]`
+#### `previactl down [--name <stack-name>] [--runner <address|address:port|port> ...]`
 
 - Stops a local detached stack started by `previactl up --detach`.
-- Reads `PREVIA_HOME/run/up-state.json`.
+- Accepts `--name <stack-name>` and defaults to `default` when omitted.
+- Reads the runtime file for the selected stack name.
 - Without `--runner`, sends a termination signal to the recorded
   `previa-main` PID and to every recorded local `previa-runner` PID.
 - Without `--runner`, waits for the recorded local processes to exit and
-  removes `PREVIA_HOME/run/up-state.json` after shutdown completes.
+  removes the selected stack runtime file after shutdown completes.
 - With one or more `--runner <selector>` flags, sends termination signals only
   to the matching recorded local runner PIDs.
-- With one or more `--runner <selector>` flags, rewrites
-  `PREVIA_HOME/run/up-state.json` after removing the stopped local runner
-  entries and preserving the `previa-main` PID plus any remaining local runners
-  and attached runner endpoints.
+- With one or more `--runner <selector>` flags, rewrites the selected stack
+  runtime file after removing the stopped local runner entries and preserving
+  the `previa-main` PID plus any remaining local runners and attached runner
+  endpoints.
 - `--runner <selector>` accepts:
   - `port`, for example `55880`
   - `address:port`, for example `127.0.0.1:55880`
@@ -161,24 +166,26 @@ No additional v1 commands are required.
 - Does not send termination signals to attached runner endpoints because they
   are not child processes of `previactl`.
 
-#### `previactl restart`
+#### `previactl restart [--name <stack-name>]`
 
 - Restarts a detached local stack previously started by `previactl up --detach`.
-- Reads `PREVIA_HOME/run/up-state.json`.
+- Accepts `--name <stack-name>` and defaults to `default` when omitted.
+- Reads the runtime file for the selected stack name.
 - Stops the recorded local processes using the same behavior as `previactl down`.
 - Starts a new detached stack using the same effective configuration recorded in
   the runtime file:
   - the local runner count from the recorded local runner entries
   - the attached runner endpoints from `attached_runners`
-- Rewrites `PREVIA_HOME/run/up-state.json` with the new PIDs after the new stack
-  starts successfully.
+- Rewrites the selected stack runtime file with the new PIDs after the new
+  stack starts successfully.
 - Fails with a clear error if no detached runtime file exists.
 - Does not send termination signals to attached runner endpoints.
 
-#### `previactl status [--main] [--runner <address|address:port|port>]`
+#### `previactl status [--name <stack-name>] [--main] [--runner <address|address:port|port>]`
 
 - Reports the status of the detached local stack managed by `previactl up`.
-- Reads `PREVIA_HOME/run/up-state.json` when it exists.
+- Accepts `--name <stack-name>` and defaults to `default` when omitted.
+- Reads the runtime file for the selected stack name when it exists.
 - Without filters, checks whether the recorded `previa-main` PID and local
   `previa-runner` PIDs are still alive and reports the overall stack status.
 - With `--main`, reports only the status of the recorded `previa-main` PID.
@@ -223,7 +230,7 @@ files.
   - `PREVIA_HOME/config/runner.env`
   - `PREVIA_HOME/data/install-state.json`
   - `PREVIA_HOME/data/main/orchestrator.db`
-  - `PREVIA_HOME/run/up-state.json`
+  - `PREVIA_HOME/run/stacks/`
 
 Any `previactl` command that writes files must create parent directories as
 needed.
@@ -232,12 +239,13 @@ needed.
 
 ### Detached Runtime File
 
-Path: `PREVIA_HOME/run/up-state.json`
+Path pattern: `PREVIA_HOME/run/stacks/<stack-name>.json`
 
 Schema:
 
 ```json
 {
+  "name": "default",
   "mode": "detached",
   "started_at": "2026-03-11T16:25:00Z",
   "source": "/workspace/demo/previa-compose.yaml",
@@ -268,12 +276,12 @@ Schema:
 
 Rules:
 
-- `previactl up --detach` must fail if `PREVIA_HOME/run/up-state.json` already
-  exists.
+- `previactl up --detach --name <stack-name>` must fail if
+  `PREVIA_HOME/run/stacks/<stack-name>.json` already exists.
 - The runtime file is written only after all child processes have been spawned
   successfully.
 - The runtime file must be written atomically by writing a temporary file in
-  `PREVIA_HOME/run` and renaming it into place.
+  `PREVIA_HOME/run/stacks` and renaming it into place.
 - `previactl down` reads this file, terminates the recorded local processes,
   waits for them to stop, and then removes the file when stopping the full
   stack.
@@ -282,6 +290,7 @@ Rules:
 - `previactl restart` reads this file, stops the recorded local processes, and
   uses the recorded local runner count, `runner_port_range`, main port, and
   `attached_runners` to launch a new detached stack.
+- The runtime file must persist the effective stack name in `name`.
 - The runtime file must persist the resolved compose file path in `source` when
   `up` started from a compose file.
 - `previactl status` reads this file and reports `running`, `degraded`, or
@@ -450,6 +459,9 @@ Rules:
 - It uses the installed binaries from `PREVIA_HOME/bin`.
 - It may resolve a `previa-compose` document from `.`, a directory path, or an
   explicit file path passed as the positional `<source>`.
+- It accepts `--name <stack-name>` to scope runtime state and detached stack
+  control.
+- The effective stack name defaults to `default`.
 - It always executes one `previa-main`.
 - It accepts `--main-port <port>` / `-p <port>` to override the `PORT`
   environment variable passed to the `previa-main` child process.
@@ -484,6 +496,8 @@ Rules:
   spawned, restarted, or terminated by `previactl`.
 - If a compose file is used, `up` must resolve it to an absolute path before
   recording it in runtime state.
+- Detached runtime state for different stack names must be isolated from one
+  another by using separate runtime files.
 - If any child process fails during startup, the command must terminate the
   remaining local children and exit with a non-zero status.
 
@@ -494,6 +508,7 @@ The implementation must surface explicit user-facing errors for:
 - Missing `PREVIA_HOME/bin/previa-main`.
 - Missing `PREVIA_HOME/bin/previa-runner` when local runners are requested.
 - Invalid `--attach-runner <selector>` / `-a <selector>` value.
+- Invalid `--name <stack-name>` value.
 - Missing compose file when `<source>` is provided.
 - Unsupported compose file extension when `<source>` is a file path.
 - Invalid YAML or JSON in a compose file.
@@ -504,12 +519,13 @@ The implementation must surface explicit user-facing errors for:
 - Invalid `--runner-port-range <start:end>` / `-P <start:end>` value.
 - Requested local runner count exceeds the effective runner port range
   capacity.
-- Existing detached runtime file during `up --detach`.
-- Missing detached runtime file during `down`.
+- Existing detached runtime file for the selected stack name during
+  `up --detach`.
+- Missing detached runtime file for the selected stack name during `down`.
 - Unknown local runner selector during `down --runner <selector>`.
 - Attempted `down --runner <selector>` that would leave the stack with zero runner
   sources.
-- Missing detached runtime file during `restart`.
+- Missing detached runtime file for the selected stack name during `restart`.
 - Mutually exclusive `status --main` and `status --runner <selector>`.
 - Unknown local runner selector during `status --runner <selector>`.
 - Permission failures when writing inside `PREVIA_HOME`.
@@ -521,96 +537,109 @@ The implementation must surface explicit user-facing errors for:
 The implementation is complete only when these scenarios are covered:
 
 1. `version` prints the `previactl` binary version without requiring network.
-2. `up .` resolves `./previa-compose.yaml`, `./previa-compose.yml`, or
+2. `up --name api .` uses `api` as the stack name.
+3. `up .` resolves `./previa-compose.yaml`, `./previa-compose.yml`, or
    `./previa-compose.json` using the documented lookup order.
-3. `up /workspace/demo` resolves a compose file from that directory using the
+4. `up /workspace/demo` resolves a compose file from that directory using the
    documented lookup order.
-4. `up /workspace/demo/previa-compose.yaml` reads that exact file.
-5. `up /workspace/demo/previa-compose.yaml` applies compose settings for
+5. `up /workspace/demo/previa-compose.yaml` reads that exact file.
+6. `up /workspace/demo/previa-compose.yaml` applies compose settings for
    `version`, main address, main port, main `env`, local runner address, local
    runner count, local runner port range, local runner `env`, and attached
    runners.
-6. `up /workspace/demo/previa-compose.yaml -p 7788 -r 2` lets the CLI flags
+7. `up /workspace/demo/previa-compose.yaml -p 7788 -r 2` lets the CLI flags
     override the compose file values.
-7. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is
+8. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is
    missing.
-8. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is not
+9. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is not
    `1`.
-9. `up -r 3` starts one `previa-main`, three local runners, and injects
+10. `up -r 3` starts one `previa-main`, three local runners, and injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
    into the `previa-main` child process.
-10. `up -p 6688 -r 1` starts `previa-main` with `PORT=6688`.
-11. `up -P 56000:56002 -r 3` starts local runners on ports
+11. `up -p 6688 -r 1` starts `previa-main` with `PORT=6688`.
+12. `up -P 56000:56002 -r 3` starts local runners on ports
    `56000`, `56001`, and `56002`.
-12. `up -P 56000:56001 -r 3` fails validation before spawning
+13. `up -P 56000:56001 -r 3` fails validation before spawning
    any local child process because the range capacity is insufficient.
-13. `up -r 1 -a 10.0.0.12:55880` injects
+14. `up -r 1 -a 10.0.0.12:55880` injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://10.0.0.12:55880`
    into the `previa-main` child process.
-14. `up -r 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
+15. `up -r 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
    locally while attaching the remote runner endpoint.
-15. `up -r 0` with no attached runner fails validation before spawning any
+16. `up -r 0` with no attached runner fails validation before spawning any
    process.
-16. `up -a 55880` normalizes the attached runner target to
+17. `up -a 55880` normalizes the attached runner target to
    `http://127.0.0.1:55880`.
-17. `up -a 10.0.0.12` normalizes the attached runner target to
+18. `up -a 10.0.0.12` normalizes the attached runner target to
    `http://10.0.0.12:55880`.
-18. `up -a 10.0.0.12:55880` normalizes the attached runner target to
+19. `up -a 10.0.0.12:55880` normalizes the attached runner target to
    `http://10.0.0.12:55880`.
-19. `up -a bad:value:123` fails clearly because the attached runner selector is
+20. `up -a bad:value:123` fails clearly because the attached runner selector is
     invalid.
-20. `up /workspace/demo/previa-compose.yaml --detach` writes the resolved
-    absolute compose file path to `PREVIA_HOME/run/up-state.json`.
-21. `up -r 3 --detach` writes `PREVIA_HOME/run/up-state.json` with the
+21. `up /workspace/demo/previa-compose.yaml --detach --name api` writes the
+    resolved absolute compose file path to
+    `PREVIA_HOME/run/stacks/api.json`.
+22. `up -r 3 --detach` writes `PREVIA_HOME/run/stacks/default.json` with the
    `previa-main` PID and the three runner PIDs, then exits without stopping the
    spawned processes.
-22. Detached runtime state persists the effective main address, main port,
+23. Detached runtime state persists the stack name, effective main address,
+   main port,
    runner addresses, runner port range, and attached runner endpoints when
    `up --detach` is used.
-23. `status` reports `running` when all PIDs in `PREVIA_HOME/run/up-state.json`
-    are alive.
-24. `status` reports `degraded` when the runtime file exists but one or more
+24. `up --name api --detach` and `up --name jobs --detach` can coexist because
+    they use different runtime files.
+25. `up --name api --detach` fails clearly when
+    `PREVIA_HOME/run/stacks/api.json` already exists.
+26. `status --name api` reports `running` when all PIDs in
+    `PREVIA_HOME/run/stacks/api.json` are alive.
+27. `status` without `--name` targets the `default` stack.
+28. `status` reports `degraded` when the runtime file exists but one or more
     recorded local PIDs are no longer alive.
-25. `status` reports `stopped` when no detached runtime file exists.
-26. `status --main` reports only the status of the recorded `previa-main`
+29. `status` reports `stopped` when no detached runtime file exists for the
+    selected stack name.
+30. `status --main` reports only the status of the recorded `previa-main`
     process.
-27. `status --runner 55880` reports the status of the recorded local runner on
+31. `status --runner 55880` reports the status of the recorded local runner on
     port `55880`.
-28. `status --runner 127.0.0.1:55880` reports the status of the recorded local
+32. `status --runner 127.0.0.1:55880` reports the status of the recorded local
     runner bound to `127.0.0.1:55880`.
-29. `status --runner 127.0.0.1` reports the status of all recorded local
+33. `status --runner 127.0.0.1` reports the status of all recorded local
     runners bound to `127.0.0.1`.
-30. `status --runner 55880` fails clearly when the selector does not match any
+34. `status --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-31. `status --main --runner 55880` fails clearly because the filters are
+35. `status --main --runner 55880` fails clearly because the filters are
     mutually exclusive.
-32. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded local
-    processes, waits for shutdown, and removes the runtime file.
-33. `down` fails clearly when no detached runtime file exists.
-34. `down --runner 55880` stops only the recorded local runner on port `55880`
-    and rewrites `PREVIA_HOME/run/up-state.json` with the remaining runner
+36. `down --name api` reads `PREVIA_HOME/run/stacks/api.json`, terminates the
+    recorded local processes, waits for shutdown, and removes the runtime file.
+37. `down` without `--name` targets the `default` stack.
+38. `down` fails clearly when no detached runtime file exists for the selected
+    stack name.
+39. `down --runner 55880` stops only the recorded local runner on port `55880`
+    and rewrites the selected stack runtime file with the remaining runner
     entries.
-35. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
+40. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
     to `127.0.0.1:55880`.
-36. `down --runner 127.0.0.1` stops all recorded local runners bound to
+41. `down --runner 127.0.0.1` stops all recorded local runners bound to
     `127.0.0.1`.
-37. `down --runner 55880 --runner 55881` stops only the selected local runners
+42. `down --runner 55880 --runner 55881` stops only the selected local runners
     and preserves `previa-main` plus any remaining local runners and attached
     runner endpoints.
-38. `down --runner 55880` fails clearly when the selector does not match any
+43. `down --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-39. `down --runner 55880` fails clearly if removing that runner would leave the
+44. `down --runner 55880` fails clearly if removing that runner would leave the
     stack with zero runner sources overall.
-40. `down` does not attempt to terminate attached runner endpoints.
-41. `restart` reads `PREVIA_HOME/run/up-state.json`, stops the detached local
-    processes, starts a new detached stack with the same runner topology, and
-    rewrites the runtime file with new PIDs.
-42. `restart` preserves the recorded main port and runner port range from the
+45. `down` does not attempt to terminate attached runner endpoints.
+46. `restart --name api` reads `PREVIA_HOME/run/stacks/api.json`, stops the
+    detached local processes, starts a new detached stack with the same runner
+    topology, and rewrites the runtime file with new PIDs.
+47. `restart` without `--name` targets the `default` stack.
+48. `restart` preserves the recorded main port and runner port range from the
    runtime file.
-43. `restart` fails clearly when no detached runtime file exists.
-44. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
-    exists.
-45. Any file generated by `previactl` is written under `PREVIA_HOME`.
+49. `restart` fails clearly when no detached runtime file exists for the
+    selected stack name.
+50. `up --detach` fails clearly when
+    `PREVIA_HOME/run/stacks/default.json` already exists.
+51. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 
