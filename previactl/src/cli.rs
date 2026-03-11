@@ -11,7 +11,11 @@ fn parse_tail_lines(value: &str) -> Result<usize, String> {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "previactl", version, about = "CLI local para operar contexts do Previa")]
+#[command(
+    name = "previactl",
+    version,
+    about = "CLI local para operar contexts do Previa"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -26,12 +30,18 @@ pub enum Commands {
     List(ListArgs),
     Ps(PsArgs),
     Logs(LogsArgs),
+    Open(OpenArgs),
     Version,
 }
 
 #[derive(Debug, Args)]
 pub struct UpArgs {
-    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
     pub context: String,
     pub source: Option<String>,
     #[arg(long)]
@@ -54,7 +64,12 @@ pub struct UpArgs {
 
 #[derive(Debug, Args)]
 pub struct DownArgs {
-    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
     pub context: String,
     #[arg(long = "runner")]
     pub runners: Vec<String>,
@@ -62,13 +77,23 @@ pub struct DownArgs {
 
 #[derive(Debug, Args)]
 pub struct RestartArgs {
-    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
     pub context: String,
 }
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
-    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
     pub context: String,
     #[arg(long)]
     pub main: bool,
@@ -86,7 +111,12 @@ pub struct ListArgs {
 
 #[derive(Debug, Args)]
 pub struct PsArgs {
-    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
     pub context: String,
     #[arg(long)]
     pub json: bool,
@@ -94,7 +124,12 @@ pub struct PsArgs {
 
 #[derive(Debug, Args)]
 pub struct LogsArgs {
-    #[arg(long = "context", value_name = "CONTEXT", default_value = "default", help = "Context name")]
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
     pub context: String,
     #[arg(long)]
     pub main: bool,
@@ -110,4 +145,15 @@ pub struct LogsArgs {
         value_parser = parse_tail_lines
     )]
     pub tail: Option<usize>,
+}
+
+#[derive(Debug, Args)]
+pub struct OpenArgs {
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
+    pub context: String,
 }

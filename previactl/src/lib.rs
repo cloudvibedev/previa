@@ -1,3 +1,4 @@
+mod browser;
 mod cli;
 mod config;
 mod envfile;
@@ -17,7 +18,10 @@ use chrono::Utc;
 use clap::Parser;
 use reqwest::Client;
 
-use crate::cli::{Cli, Commands, DownArgs, LogsArgs, PsArgs, RestartArgs, StatusArgs, UpArgs};
+use crate::browser::{build_open_url, open_browser};
+use crate::cli::{
+    Cli, Commands, DownArgs, LogsArgs, OpenArgs, PsArgs, RestartArgs, StatusArgs, UpArgs,
+};
 use crate::config::{ResolvedUpConfig, resolve_up_config};
 use crate::health::{DerivedState, probe_health, state_from_pid_and_health};
 use crate::logs::{follow_logs, print_logs};
@@ -52,6 +56,7 @@ pub async fn run() -> Result<()> {
         Commands::List(args) => cmd_list(&paths, &http, args.json).await,
         Commands::Ps(args) => cmd_ps(&paths, &http, args).await,
         Commands::Logs(args) => cmd_logs(&paths, args).await,
+        Commands::Open(args) => cmd_open(&paths, args).await,
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -112,7 +117,9 @@ async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
     let selected = select_runner_indexes(&state.runners, &selectors)?;
     let remaining_local = state.runners.len().saturating_sub(selected.len());
     if remaining_local == 0 && state.attached_runners.is_empty() {
-        bail!("cannot remove the selected runners because the context would have zero runner sources");
+        bail!(
+            "cannot remove the selected runners because the context would have zero runner sources"
+        );
     }
 
     let selected_pids = selected
@@ -164,7 +171,14 @@ async fn cmd_status(paths: &PreviaPaths, http: &Client, args: StatusArgs) -> Res
         .map(RunnerSelector::parse)
         .transpose()?;
 
-    let status = build_status_json(&stack_paths, state.as_ref(), http, selector.as_ref(), args.main).await?;
+    let status = build_status_json(
+        &stack_paths,
+        state.as_ref(),
+        http,
+        selector.as_ref(),
+        args.main,
+    )
+    .await?;
     if args.json {
         println!(
             "{}",
@@ -259,13 +273,19 @@ async fn cmd_logs(paths: &PreviaPaths, args: LogsArgs) -> Result<()> {
     }
 }
 
+async fn cmd_open(paths: &PreviaPaths, args: OpenArgs) -> Result<()> {
+    let stack_name = parse_stack_name(&args.context)?;
+    let stack_paths = paths.stack(&stack_name);
+    let state = read_required_state(&stack_paths)?;
+    let url = build_open_url(&state.main.address, state.main.port)?;
+    open_browser(&url)?;
+    println!("{url}");
+    Ok(())
+}
+
 fn print_dry_run(resolved: &ResolvedUpConfig) {
     println!("context: {}", resolved.stack_paths.name);
-    println!(
-        "main: {}:{}",
-        resolved.main.address,
-        resolved.main.port
-    );
+    println!("main: {}:{}", resolved.main.address, resolved.main.port);
     println!(
         "local runners: {} ({:?}-{:?})",
         resolved.local_runner_count,
@@ -307,11 +327,7 @@ fn detached_state_from_spawn(
                     pid: child_id(child)?,
                     address: address.clone(),
                     port: *port,
-                    log_path: resolved
-                        .stack_paths
-                        .runner_log(*port)
-                        .display()
-                        .to_string(),
+                    log_path: resolved.stack_paths.runner_log(*port).display().to_string(),
                 })
             })
             .collect::<Result<Vec<_>>>()?,
@@ -332,9 +348,12 @@ async fn build_status_json(
     main_only: bool,
 ) -> Result<StatusJson> {
     let runtime_file = stack_paths.runtime_file.display().to_string();
-        let Some(state) = state else {
+    let Some(state) = state else {
         if runner_selector.is_some() {
-            bail!("no detached runtime exists for context '{}'", stack_paths.name);
+            bail!(
+                "no detached runtime exists for context '{}'",
+                stack_paths.name
+            );
         }
         return Ok(StatusJson {
             name: stack_paths.name.clone(),
@@ -365,7 +384,10 @@ async fn build_status_json(
     };
 
     let runners = collect_status_runner_json(&runners, http).await?;
-    let runner_states = runners.iter().map(|runner| runner.state.clone()).collect::<Vec<_>>();
+    let runner_states = runners
+        .iter()
+        .map(|runner| runner.state.clone())
+        .collect::<Vec<_>>();
     let state_name = derive_overall_state(
         main.as_ref().map(|main| main.state.as_str()),
         &runner_states,
@@ -481,7 +503,10 @@ async fn overall_stack_state(
     };
     let main = process_json_from_main(&state.main, http).await?;
     let runners = collect_runner_json(&state.runners, http).await?;
-    let runner_states = runners.iter().map(|runner| runner.state.clone()).collect::<Vec<_>>();
+    let runner_states = runners
+        .iter()
+        .map(|runner| runner.state.clone())
+        .collect::<Vec<_>>();
     Ok(derive_overall_state(
         Some(main.state.as_str()),
         &runner_states,
@@ -534,19 +559,29 @@ fn select_runner_indexes(
             }
         }
         if !found {
-            bail!("runner selector '{}' did not match any local runner", selector.raw());
+            bail!(
+                "runner selector '{}' did not match any local runner",
+                selector.raw()
+            );
         }
     }
     Ok(matches)
 }
 
 fn parse_runner_selectors(values: &[String]) -> Result<Vec<RunnerSelector>> {
-    values.iter().map(|value| RunnerSelector::parse(value)).collect()
+    values
+        .iter()
+        .map(|value| RunnerSelector::parse(value))
+        .collect()
 }
 
 fn read_required_state(stack_paths: &StackPaths) -> Result<DetachedRuntimeState> {
-    read_runtime_state(stack_paths)?
-        .ok_or_else(|| anyhow!("no detached runtime exists for context '{}'", stack_paths.name))
+    read_runtime_state(stack_paths)?.ok_or_else(|| {
+        anyhow!(
+            "no detached runtime exists for context '{}'",
+            stack_paths.name
+        )
+    })
 }
 
 #[cfg(test)]

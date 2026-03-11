@@ -46,6 +46,7 @@ previactl status [--context <context-name>] [--main] [--runner <address|address:
 previactl list [--json]
 previactl ps [--context <context-name>] [--json]
 previactl logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
+previactl open [--context <context-name>]
 previactl version
 ```
 
@@ -320,6 +321,26 @@ No additional v1 commands are required.
   stream directly to the calling terminal.
 - `logs` must fail clearly when no detached runtime file exists for the
   selected context name.
+
+#### `previactl open [--context <context-name>]`
+
+- Opens the Previa UI in the user's default browser for the selected detached
+  context.
+- Accepts `--context <context-name>` and defaults to `default` when omitted.
+- Reads the runtime file for the selected context name.
+- Uses the recorded detached `main.address` and `main.port` to construct the
+  `add_context` query parameter for `https://app.previa.dev`.
+- The opened URL must be:
+  `https://app.previa.dev?add_context=<url-encoded-main-url>`.
+- The `main` URL must use the `http` scheme.
+- When the recorded `main.address` is an unspecified bind address such as
+  `0.0.0.0` or `::`, `open` must normalize it to the local loopback address
+  before encoding it into `add_context`.
+- Example:
+  `https://app.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588`
+- Fails clearly when no detached runtime file exists for the selected context
+  name.
+- Prints the opened UI URL to stdout after the browser launch succeeds.
 
 #### `previactl version`
 
@@ -801,6 +822,7 @@ The implementation must surface explicit user-facing errors for:
 - Mutually exclusive `logs --main` and `logs --runner <selector>`.
 - Unknown local runner selector during `logs --runner <selector>`.
 - Missing detached runtime file for the selected context name during `logs`.
+- Missing detached runtime file for the selected context name during `open`.
 - Health probe failure due to invalid local status target URL construction.
 - Failure to read or follow a detached log file.
 - Permission failures when writing inside `PREVIA_HOME`.
@@ -922,37 +944,40 @@ The implementation is complete only when these scenarios are covered:
 54. `logs --context api --follow` streams appended log lines until interrupted.
 55. `logs --main --runner 55880` fails clearly because the filters are mutually
     exclusive.
-56. `down --context api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
+56. `open --context api` opens
+    `https://app.previa.dev?add_context=<url-encoded-main-url>` for the
+    recorded detached `previa-main`.
+57. `down --context api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
     recorded local processes, waits for shutdown, and removes the runtime file.
-57. `down` without `--context` targets the `default` context.
-58. `down` fails clearly when no detached runtime file exists for the selected
+58. `down` without `--context` targets the `default` context.
+59. `down` fails clearly when no detached runtime file exists for the selected
     context name.
-59. `down --runner 55880` stops only the recorded local runner on port `55880`
+60. `down --runner 55880` stops only the recorded local runner on port `55880`
     and rewrites the selected stack runtime file with the remaining runner
     entries.
-60. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
+61. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
     to `127.0.0.1:55880`.
-61. `down --runner 127.0.0.1` stops all recorded local runners bound to
+62. `down --runner 127.0.0.1` stops all recorded local runners bound to
     `127.0.0.1`.
-62. `down --runner 55880 --runner 55881` stops only the selected local runners
+63. `down --runner 55880 --runner 55881` stops only the selected local runners
     and preserves `previa-main` plus any remaining local runners and attached
     runner endpoints.
-63. `down --runner 55880` fails clearly when the selector does not match any
+64. `down --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-64. `down --runner 55880` fails clearly if removing that runner would leave the
+65. `down --runner 55880` fails clearly if removing that runner would leave the
     context with zero runner sources overall.
-65. `down` does not attempt to terminate attached runner endpoints.
-66. `restart --context api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
+66. `down` does not attempt to terminate attached runner endpoints.
+67. `restart --context api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
     detached local processes, starts a new detached context with the same runner
     topology, and rewrites the runtime file with new PIDs.
-67. `restart` without `--context` targets the `default` context.
-68. `restart` preserves the recorded main port and runner port range from the
+68. `restart` without `--context` targets the `default` context.
+69. `restart` preserves the recorded main port and runner port range from the
    runtime file.
-69. `restart` fails clearly when no detached runtime file exists for the
+70. `restart` fails clearly when no detached runtime file exists for the
     selected context name.
-70. `up --detach` fails clearly when
+71. `up --detach` fails clearly when
     `PREVIA_HOME/stacks/default/run/state.json` already exists.
-71. Any file generated by `previactl` is written under `PREVIA_HOME`.
+72. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 

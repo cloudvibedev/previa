@@ -73,6 +73,17 @@ PY
     fs::set_permissions(path, permissions).expect("chmod");
 }
 
+fn write_browser_capture_script(path: &Path) {
+    let script = r#"#!/bin/sh
+printf '%s' "$1" > "$PREVIACTL_OPEN_CAPTURE"
+"#;
+
+    fs::write(path, script).expect("write browser capture script");
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("chmod");
+}
+
 fn setup_previa_home() -> TempDir {
     let temp = TempDir::new().expect("tempdir");
     let bin = temp.path().join("bin");
@@ -221,7 +232,14 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
         .assert()
         .success();
 
-    assert!(!temp.path().join("stacks").join(stack).join("run/state.json").exists());
+    assert!(
+        !temp
+            .path()
+            .join("stacks")
+            .join(stack)
+            .join("run/state.json")
+            .exists()
+    );
 }
 
 #[test]
@@ -542,8 +560,67 @@ fn up_cleans_up_started_runners_when_later_startup_fails() {
         serde_json::from_slice(&status_output.stdout).expect("status json");
     assert_eq!(status_json["state"], "stopped");
 
-    assert!(!temp.path().join("stacks").join(stack).join("run/state.json").exists());
+    assert!(
+        !temp
+            .path()
+            .join("stacks")
+            .join(stack)
+            .join("run/state.json")
+            .exists()
+    );
     wait_for_logged_process_exit(&runner_log);
+}
+
+#[test]
+fn open_launches_app_with_encoded_main_context_url() {
+    let temp = setup_previa_home();
+    let stack = "other";
+    let stack_dir = temp.path().join("stacks").join(stack);
+    let run_dir = stack_dir.join("run");
+    fs::create_dir_all(&run_dir).expect("run dir");
+    let browser = temp.path().join("capture-browser.sh");
+    let capture = temp.path().join("opened-url.txt");
+    write_browser_capture_script(&browser);
+
+    fs::write(
+        run_dir.join("state.json"),
+        format!(
+            r#"{{
+  "name": "{stack}",
+  "mode": "detached",
+  "started_at": "2026-03-11T00:00:00Z",
+  "main": {{
+    "pid": 1,
+    "address": "0.0.0.0",
+    "port": 5588,
+    "log_path": "{}"
+  }},
+  "runner_port_range": {{
+    "start": 55880,
+    "end": 55979
+  }},
+  "attached_runners": [],
+  "runners": []
+}}"#,
+            stack_dir.join("logs").join("main.log").display()
+        ),
+    )
+    .expect("runtime state");
+
+    let output = cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .env("PREVIACTL_OPEN_BROWSER", &browser)
+        .env("PREVIACTL_OPEN_CAPTURE", &capture)
+        .args(["open", "--context", stack])
+        .output()
+        .expect("open output");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let opened = fs::read_to_string(&capture).expect("captured URL");
+    let expected = "https://app.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588";
+    assert_eq!(opened, expected);
+    assert_eq!(stdout.trim(), expected);
 }
 
 fn wait_for_logged_process_exit(path: &Path) {
