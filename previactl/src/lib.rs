@@ -252,9 +252,9 @@ async fn cmd_logs(paths: &PreviaPaths, args: LogsArgs) -> Result<()> {
     };
 
     if args.follow {
-        follow_logs(logs).await
+        follow_logs(logs, args.tail).await
     } else {
-        print_logs(logs).await
+        print_logs(logs, args.tail).await
     }
 }
 

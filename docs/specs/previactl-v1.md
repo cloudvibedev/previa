@@ -45,7 +45,7 @@ previactl restart [--name <stack-name>]
 previactl status [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--json]
 previactl list [--json]
 previactl ps [--name <stack-name>] [--json]
-previactl logs [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--follow]
+previactl logs [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
 previactl version
 ```
 
@@ -294,7 +294,7 @@ No additional v1 commands are required.
 - `ps --json` must use the exact schema defined in the `PS JSON Schema`
   section of this specification.
 
-#### `previactl logs [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--follow]`
+#### `previactl logs [--name <stack-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]`
 
 - Reads detached stack logs from stack-scoped log files.
 - Accepts `--name <stack-name>` and defaults to `default` when omitted.
@@ -303,11 +303,16 @@ No additional v1 commands are required.
 - With `--main`, prints only `PREVIA_HOME/stacks/<stack-name>/logs/main.log`.
 - With `--runner <selector>`, prints only the matching local runner log file or
   files.
+- Accepts `--tail <lines>` / `-t <lines>` to print only the last `N` lines from
+  each selected log file.
+- Accepts `--tail` / `-t` with no value as a shorthand for the last `10` lines.
 - `--main` and `--runner <selector>` are mutually exclusive in v1.
 - `--runner <selector>` uses the same selector grammar and matching rules as
   `status` and `down`.
 - Accepts `--follow` to stream appended log lines until interrupted by the
   operator.
+- When `--tail` / `-t` is combined with `--follow`, `logs` prints only the
+  tailed suffix first and then streams appended lines.
 - `logs` is only defined for detached stacks because foreground stacks already
   stream directly to the calling terminal.
 - `logs` must fail clearly when no detached runtime file exists for the
@@ -906,40 +911,42 @@ The implementation is complete only when these scenarios are covered:
     `PREVIA_HOME/stacks/api/logs/main.log`.
 51. `logs --name api --runner 127.0.0.1:55880` reads the matching local runner
     log file.
-52. `logs --name api --follow` streams appended log lines until interrupted.
-53. `logs --main --runner 55880` fails clearly because the filters are mutually
+52. `logs --name api --tail 20` prints only the last 20 lines of the selected
+    log file or files.
+53. `logs --name api --follow` streams appended log lines until interrupted.
+54. `logs --main --runner 55880` fails clearly because the filters are mutually
     exclusive.
-54. `down --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
+55. `down --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
     recorded local processes, waits for shutdown, and removes the runtime file.
-55. `down` without `--name` targets the `default` stack.
-56. `down` fails clearly when no detached runtime file exists for the selected
+56. `down` without `--name` targets the `default` stack.
+57. `down` fails clearly when no detached runtime file exists for the selected
     stack name.
-57. `down --runner 55880` stops only the recorded local runner on port `55880`
+58. `down --runner 55880` stops only the recorded local runner on port `55880`
     and rewrites the selected stack runtime file with the remaining runner
     entries.
-58. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
+59. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
     to `127.0.0.1:55880`.
-59. `down --runner 127.0.0.1` stops all recorded local runners bound to
+60. `down --runner 127.0.0.1` stops all recorded local runners bound to
     `127.0.0.1`.
-60. `down --runner 55880 --runner 55881` stops only the selected local runners
+61. `down --runner 55880 --runner 55881` stops only the selected local runners
     and preserves `previa-main` plus any remaining local runners and attached
     runner endpoints.
-61. `down --runner 55880` fails clearly when the selector does not match any
+62. `down --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-62. `down --runner 55880` fails clearly if removing that runner would leave the
+63. `down --runner 55880` fails clearly if removing that runner would leave the
     stack with zero runner sources overall.
-63. `down` does not attempt to terminate attached runner endpoints.
-64. `restart --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
+64. `down` does not attempt to terminate attached runner endpoints.
+65. `restart --name api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
     detached local processes, starts a new detached stack with the same runner
     topology, and rewrites the runtime file with new PIDs.
-65. `restart` without `--name` targets the `default` stack.
-66. `restart` preserves the recorded main port and runner port range from the
+66. `restart` without `--name` targets the `default` stack.
+67. `restart` preserves the recorded main port and runner port range from the
    runtime file.
-67. `restart` fails clearly when no detached runtime file exists for the
+68. `restart` fails clearly when no detached runtime file exists for the
     selected stack name.
-68. `up --detach` fails clearly when
+69. `up --detach` fails clearly when
     `PREVIA_HOME/stacks/default/run/state.json` already exists.
-69. Any file generated by `previactl` is written under `PREVIA_HOME`.
+70. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 

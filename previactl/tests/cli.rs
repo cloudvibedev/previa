@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -214,6 +215,69 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
         .success();
 
     assert!(!temp.path().join("stacks").join(stack).join("run/state.json").exists());
+}
+
+#[test]
+fn logs_supports_tail_count() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_previa_home();
+    let stack = "tailtest";
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args([
+            "up",
+            "--name",
+            stack,
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "-r",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    thread::sleep(Duration::from_millis(500));
+
+    let main_log = temp
+        .path()
+        .join("stacks")
+        .join(stack)
+        .join("logs")
+        .join("main.log");
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&main_log)
+        .expect("open main log")
+        .write_all(b"line-one\nline-two\nline-three\n")
+        .expect("append main log");
+
+    let logs_output = cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args(["logs", "--name", stack, "--main", "-t", "2"])
+        .output()
+        .expect("logs output");
+    assert!(logs_output.status.success());
+    let logs = String::from_utf8(logs_output.stdout).expect("utf8 logs");
+    assert_eq!(logs, "line-two\nline-three\n");
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args(["down", "--name", stack])
+        .assert()
+        .success();
 }
 
 #[test]

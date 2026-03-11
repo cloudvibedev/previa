@@ -1,5 +1,15 @@
 use clap::{Args, Parser, Subcommand};
 
+fn parse_tail_lines(value: &str) -> Result<usize, String> {
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_| format!("invalid tail line count '{value}'"))?;
+    if parsed == 0 {
+        return Err("tail line count must be greater than zero".to_owned());
+    }
+    Ok(parsed)
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "previactl", version, about = "CLI local para operar stacks do Previa")]
 pub struct Cli {
@@ -92,4 +102,12 @@ pub struct LogsArgs {
     pub runner: Option<String>,
     #[arg(long)]
     pub follow: bool,
+    #[arg(
+        short = 't',
+        long,
+        num_args = 0..=1,
+        default_missing_value = "10",
+        value_parser = parse_tail_lines
+    )]
+    pub tail: Option<usize>,
 }
