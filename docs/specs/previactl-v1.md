@@ -68,9 +68,9 @@ The v1 CLI surface is fixed to the commands below:
 
 ```text
 previactl up [--runners, -r <N>] [--attach-runner, -a <endpoint> ...] [-d, --detach]
-previactl down [--runner <port> ...]
+previactl down [--runner <address|address:port|port> ...]
 previactl restart
-previactl status [--main] [--runner <port>]
+previactl status [--main] [--runner <address|address:port|port>]
 previactl version
 previactl manifest show
 ```
@@ -120,27 +120,36 @@ No additional v1 commands are required.
 - Does not rewrite `PREVIA_HOME/config/main.env` or
   `PREVIA_HOME/config/runner.env`.
 
-#### `previactl down [--runner <port> ...]`
+#### `previactl down [--runner <address|address:port|port> ...]`
 
 - Stops a local detached stack started by `previactl up --detach`.
 - Reads `PREVIA_HOME/run/up-state.json`.
-- Without `--runner <port>`, sends a termination signal to the recorded
+- Without `--runner`, sends a termination signal to the recorded
   `previa-main` PID and to every recorded local `previa-runner` PID.
-- Without `--runner <port>`, waits for the recorded local processes to exit and
+- Without `--runner`, waits for the recorded local processes to exit and
   removes `PREVIA_HOME/run/up-state.json` after shutdown completes.
-- With one or more `--runner <port>` flags, sends termination signals only to
-  the matching recorded local runner PIDs.
-- With one or more `--runner <port>` flags, rewrites
+- With one or more `--runner <selector>` flags, sends termination signals only
+  to the matching recorded local runner PIDs.
+- With one or more `--runner <selector>` flags, rewrites
   `PREVIA_HOME/run/up-state.json` after removing the stopped local runner
   entries and preserving the `previa-main` PID plus any remaining local runners
   and attached runner endpoints.
-- `--runner <port>` matches the `port` field of a local runner entry in the
-  runtime file.
-- Partial runner shutdown must fail if none of the requested runner ports exist
-  in the runtime file.
-- Partial runner shutdown must fail if it would leave the stack with zero runner
-  sources overall, meaning no remaining local runners and no attached runner
-  endpoints.
+- `--runner <selector>` accepts:
+  - `port`, for example `55880`
+  - `address:port`, for example `127.0.0.1:55880`
+  - `address`, for example `127.0.0.1`
+- Matching rules:
+  - `port` matches local runner entries with the same `port`
+  - `address:port` matches local runner entries with both the same address and
+    the same port
+  - `address` matches all local runner entries with the same address
+- The runtime file must store the local runner bind address for each runner
+  entry so that selector matching is deterministic.
+- Partial runner shutdown must fail if none of the requested selectors match a
+  local runner entry in the runtime file.
+- Partial runner shutdown must fail if it would leave the stack with zero
+  runner sources overall, meaning no remaining local runners and no attached
+  runner endpoints.
 - Fails with a clear error if no detached runtime file exists.
 - Does not send termination signals to attached runner endpoints because they
   are not child processes of `previactl`.
@@ -159,26 +168,30 @@ No additional v1 commands are required.
 - Fails with a clear error if no detached runtime file exists.
 - Does not send termination signals to attached runner endpoints.
 
-#### `previactl status [--main] [--runner <port>]`
+#### `previactl status [--main] [--runner <address|address:port|port>]`
 
 - Reports the status of the detached local stack managed by `previactl up`.
 - Reads `PREVIA_HOME/run/up-state.json` when it exists.
 - Without filters, checks whether the recorded `previa-main` PID and local
   `previa-runner` PIDs are still alive and reports the overall stack status.
 - With `--main`, reports only the status of the recorded `previa-main` PID.
-- With `--runner <port>`, reports only the status of the recorded local runner
-  that matches the given port.
-- `--main` and `--runner <port>` are mutually exclusive in v1.
+- With `--runner <selector>`, reports only the status of the recorded local
+  runner or local runners that match the given selector.
+- `--main` and `--runner <selector>` are mutually exclusive in v1.
 - Without filters, prints `stopped` when the runtime file does not exist.
 - Without filters, prints `running` with the recorded PIDs, ports, and attached
   runner endpoints when all recorded local processes are alive.
 - Without filters, prints `degraded` when the runtime file exists but one or
   more recorded local PIDs are no longer alive.
 - With `--main`, prints `running` or `stopped` for the `previa-main` process.
-- With `--runner <port>`, prints `running` or `stopped` for the selected local
-  runner process.
-- `status --runner <port>` must fail clearly when the requested local runner
-  port is not present in the runtime file.
+- With `--runner <selector>`, prints `running` or `stopped` for the selected
+  local runner or runners.
+- `--runner <selector>` accepts:
+  - `port`, for example `55880`
+  - `address:port`, for example `127.0.0.1:55880`
+  - `address`, for example `127.0.0.1`
+- `status --runner <selector>` must fail clearly when the requested selector
+  does not match any local runner entry in the runtime file.
 - Does not interact with native service managers.
 
 #### `previactl version`
@@ -230,10 +243,12 @@ Schema:
   ],
   "runners": [
     {
+      "address": "127.0.0.1",
       "pid": 41022,
       "port": 55880
     },
     {
+      "address": "127.0.0.1",
       "pid": 41023,
       "port": 55881
     }
@@ -252,7 +267,7 @@ Rules:
 - `previactl down` reads this file, terminates the recorded local processes,
   waits for them to stop, and then removes the file when stopping the full
   stack.
-- `previactl down --runner <port>` rewrites this file after removing the
+- `previactl down --runner <selector>` rewrites this file after removing the
   selected local runner entries.
 - `previactl restart` reads this file, stops the recorded local processes, and
   uses the recorded local runner count plus `attached_runners` to launch a new
@@ -343,12 +358,12 @@ The implementation must surface explicit user-facing errors for:
 - Invalid `--attach-runner <endpoint>` / `-a <endpoint>` value.
 - Existing detached runtime file during `up --detach`.
 - Missing detached runtime file during `down`.
-- Unknown local runner port during `down --runner <port>`.
-- Attempted `down --runner <port>` that would leave the stack with zero runner
+- Unknown local runner selector during `down --runner <selector>`.
+- Attempted `down --runner <selector>` that would leave the stack with zero runner
   sources.
 - Missing detached runtime file during `restart`.
-- Mutually exclusive `status --main` and `status --runner <port>`.
-- Unknown local runner port during `status --runner <port>`.
+- Mutually exclusive `status --main` and `status --runner <selector>`.
+- Unknown local runner selector during `status --runner <selector>`.
 - Permission failures when writing inside `PREVIA_HOME`.
 - Failure to spawn `previa-main` or one of the local `previa-runner`
   processes.
@@ -383,33 +398,41 @@ The implementation is complete only when these scenarios are covered:
 12. `status` reports `stopped` when no detached runtime file exists.
 13. `status --main` reports only the status of the recorded `previa-main`
     process.
-14. `status --runner 55880` reports only the status of the recorded local
-    runner on port `55880`.
-15. `status --runner 55880` fails clearly when port `55880` is not present in
-    the runtime file.
-16. `status --main --runner 55880` fails clearly because the filters are
+14. `status --runner 55880` reports the status of the recorded local runner on
+    port `55880`.
+15. `status --runner 127.0.0.1:55880` reports the status of the recorded local
+    runner bound to `127.0.0.1:55880`.
+16. `status --runner 127.0.0.1` reports the status of all recorded local
+    runners bound to `127.0.0.1`.
+17. `status --runner 55880` fails clearly when the selector does not match any
+    local runner entry in the runtime file.
+18. `status --main --runner 55880` fails clearly because the filters are
     mutually exclusive.
-17. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded local
+19. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded local
     processes, waits for shutdown, and removes the runtime file.
-18. `down` fails clearly when no detached runtime file exists.
-19. `down --runner 55880` stops only the recorded local runner on port `55880`
+20. `down` fails clearly when no detached runtime file exists.
+21. `down --runner 55880` stops only the recorded local runner on port `55880`
     and rewrites `PREVIA_HOME/run/up-state.json` with the remaining runner
     entries.
-20. `down --runner 55880 --runner 55881` stops only the selected local runners
+22. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
+    to `127.0.0.1:55880`.
+23. `down --runner 127.0.0.1` stops all recorded local runners bound to
+    `127.0.0.1`.
+24. `down --runner 55880 --runner 55881` stops only the selected local runners
     and preserves `previa-main` plus any remaining local runners and attached
     runner endpoints.
-21. `down --runner 55880` fails clearly when port `55880` is not present in the
-    runtime file.
-22. `down --runner 55880` fails clearly if removing that runner would leave the
+25. `down --runner 55880` fails clearly when the selector does not match any
+    local runner entry in the runtime file.
+26. `down --runner 55880` fails clearly if removing that runner would leave the
     stack with zero runner sources overall.
-23. `down` does not attempt to terminate attached runner endpoints.
-24. `restart` reads `PREVIA_HOME/run/up-state.json`, stops the detached local
+27. `down` does not attempt to terminate attached runner endpoints.
+28. `restart` reads `PREVIA_HOME/run/up-state.json`, stops the detached local
     processes, starts a new detached stack with the same runner topology, and
     rewrites the runtime file with new PIDs.
-25. `restart` fails clearly when no detached runtime file exists.
-26. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
+29. `restart` fails clearly when no detached runtime file exists.
+30. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
     exists.
-27. Any file generated by `previactl` is written under `PREVIA_HOME`.
+31. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 
@@ -419,7 +442,7 @@ The implementation is complete only when these scenarios are covered:
 - If `down` encounters one or more missing local PIDs, it must continue
   processing the remaining recorded local processes and then remove the runtime
   file.
-- If `down --runner <port>` stops some requested local runners and then fails
+- If `down --runner <selector>` stops some requested local runners and then fails
   before rewriting the runtime file, the operator must reconcile the runtime
   file manually before the next `status`, `down`, or `restart`.
 - If `restart` fails after stopping the previous detached stack but before the
