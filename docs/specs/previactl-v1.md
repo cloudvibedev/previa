@@ -147,7 +147,8 @@ No additional v1 commands are required.
 #### `previactl up --runners <N>`
 
 - Bootstraps a local stack in foreground on the current host.
-- Starts exactly one `previa-main` process and `<N>` `previa-runner` processes.
+- Executes exactly one `previa-main` process and exactly the number of
+  `previa-runner` processes declared by `--runners <N>`.
 - Requires `<N>` to be an integer greater than or equal to `1`.
 - Uses port `55880` for the first runner and increments sequentially for each
   additional runner.
@@ -298,6 +299,9 @@ Rules:
 
 - It is local-only and does not provision remote hosts.
 - It uses the installed binaries from `/opt/previa/bin`.
+- It always executes one `previa-main`.
+- It always executes exactly the runner count declared by the operator in
+  `--runners <N>`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
   `/etc/previa/main.env` when present.
 - Each runner binds to `127.0.0.1` and uses ports starting at `55880`.
