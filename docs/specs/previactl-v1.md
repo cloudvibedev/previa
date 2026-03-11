@@ -160,10 +160,10 @@ No additional v1 commands are required.
 
 #### `previactl uninstall [--purge]`
 
-- Stops the detached local stack if `/tmp/previactl-up-state.json` exists.
+- Stops the detached local stack if `PREVIA_HOME/run/up-state.json` exists.
 - Removes installed binaries and `install-state.json`.
-- Without `--purge`, preserves `/etc/previa` and `/var/lib/previa`.
-- With `--purge`, also removes `/etc/previa` and `/var/lib/previa`.
+- Without `--purge`, preserves `PREVIA_HOME/config` and `PREVIA_HOME/data`.
+- With `--purge`, removes the entire `PREVIA_HOME` tree.
 
 #### `previactl up [--runners, -r <N>] [--attach-runner, -a <endpoint> ...]`
 
@@ -197,7 +197,8 @@ No additional v1 commands are required.
   receives `SIGINT` or `SIGTERM`.
 - With `-d` or `--detach`, writes a temporary runtime file containing the PIDs
   of the spawned processes and then exits successfully.
-- Does not rewrite `/etc/previa/main.env` or `/etc/previa/runner.env`.
+- Does not rewrite `PREVIA_HOME/config/main.env` or
+  `PREVIA_HOME/config/runner.env`.
 
 #### `previactl down`
 
@@ -214,7 +215,7 @@ No additional v1 commands are required.
 #### `previactl status`
 
 - Reports the status of the detached local stack managed by `previactl up`.
-- Reads `/tmp/previactl-up-state.json` when it exists.
+- Reads `PREVIA_HOME/run/up-state.json` when it exists.
 - Checks whether the recorded `previa-main` PID and `previa-runner` PIDs are
   still alive.
 - Prints `stopped` when the runtime file does not exist.
@@ -235,18 +236,21 @@ No additional v1 commands are required.
 
 ## Installation Layout
 
-The Linux installation layout is fixed for v1:
+v1 uses `PREVIA_HOME` as the installation base directory across supported
+operating systems.
 
-- Binaries:
-  - `/opt/previa/bin/previa-main`
-  - `/opt/previa/bin/previa-runner`
-- Config:
-  - `/etc/previa/main.env`
-  - `/etc/previa/runner.env`
-- State:
-  - `/var/lib/previa/install-state.json`
-- Default orchestrator database:
-  - `/var/lib/previa/main/orchestrator.db`
+- Environment variable:
+  - `PREVIA_HOME`
+- Default value when `PREVIA_HOME` is not set:
+  - `$HOME/.previa`
+- Directory layout:
+  - `PREVIA_HOME/bin/previa-main`
+  - `PREVIA_HOME/bin/previa-runner`
+  - `PREVIA_HOME/config/main.env`
+  - `PREVIA_HOME/config/runner.env`
+  - `PREVIA_HOME/data/install-state.json`
+  - `PREVIA_HOME/data/main/orchestrator.db`
+  - `PREVIA_HOME/run/up-state.json`
 
 The installer must create parent directories as needed.
 
@@ -254,7 +258,7 @@ The installer must create parent directories as needed.
 
 ### Install State File
 
-Path: `/var/lib/previa/install-state.json`
+Path: `PREVIA_HOME/data/install-state.json`
 
 Schema:
 
@@ -270,12 +274,12 @@ Schema:
     "main": {
       "version": "0.0.5",
       "source_url": "https://files.previa.dev/0.0.5/files/previa-main-linux-amd64",
-      "path": "/opt/previa/bin/previa-main"
+      "path": "/home/assis/.previa/bin/previa-main"
     },
     "runner": {
       "version": "0.0.5",
       "source_url": "https://files.previa.dev/0.0.5/files/previa-runner-linux-amd64",
-      "path": "/opt/previa/bin/previa-runner"
+      "path": "/home/assis/.previa/bin/previa-runner"
     }
   }
 }
@@ -299,21 +303,22 @@ existing binaries.
 
 ### `main.env`
 
-Path: `/etc/previa/main.env`
+Path: `PREVIA_HOME/config/main.env`
 
 Default content:
 
 ```dotenv
 ADDRESS=0.0.0.0
 PORT=5588
-ORCHESTRATOR_DATABASE_URL=sqlite:///var/lib/previa/main/orchestrator.db
+ORCHESTRATOR_DATABASE_URL=sqlite://$HOME/.previa/data/main/orchestrator.db
 RUNNER_ENDPOINTS=http://127.0.0.1:55880
 RUST_LOG=info
 ```
 
 Notes:
 
-- `ORCHESTRATOR_DATABASE_URL` must use the absolute path shown above.
+- `ORCHESTRATOR_DATABASE_URL` must use an absolute path inside
+  `PREVIA_HOME/data/main/orchestrator.db`.
 - `RUNNER_ENDPOINTS` defaults to the local runner process started by the same
   host.
 - If the file already exists, `install` and `update` must leave it unchanged
@@ -321,7 +326,7 @@ Notes:
 
 ### `runner.env`
 
-Path: `/etc/previa/runner.env`
+Path: `PREVIA_HOME/config/runner.env`
 
 Default content:
 
@@ -344,7 +349,7 @@ evaluation, and hybrid local-plus-remote runner attachment.
 Rules:
 
 - It is local-only and does not provision remote hosts.
-- It uses the installed binaries from `/opt/previa/bin`.
+- It uses the installed binaries from `PREVIA_HOME/bin`.
 - It always executes one `previa-main`.
 - It executes exactly the local runner count declared by the operator in
   `--runners <N>` or `-r <N>`.
@@ -353,7 +358,7 @@ Rules:
 - It must reject `up` if `--runners 0` / `-r 0` is combined with no
   `--attach-runner` / `-a`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
-  `/etc/previa/main.env` when present.
+  `PREVIA_HOME/config/main.env` when present.
 - Each local spawned runner binds to `127.0.0.1` and uses ports starting at
   `55880`.
 - The command must override `RUNNER_ENDPOINTS` for the `previa-main` child
@@ -368,7 +373,7 @@ Rules:
 
 Detached local bootstrap uses a single temporary runtime file:
 
-- Path: `/tmp/previactl-up-state.json`
+- Path: `PREVIA_HOME/run/up-state.json`
 - Ownership: the user who launched `previactl up --detach`
 - Multiplicity: only one detached `previactl up` stack is supported per host in
   v1
@@ -401,12 +406,12 @@ Runtime file schema:
 
 Rules:
 
-- `previactl up --detach` must fail if `/tmp/previactl-up-state.json` already
+- `previactl up --detach` must fail if `PREVIA_HOME/run/up-state.json` already
   exists.
 - The runtime file is written only after all child processes have been spawned
   successfully.
 - The runtime file must be written atomically by writing a temporary file in
-  `/tmp` and renaming it into place.
+  `PREVIA_HOME/run` and renaming it into place.
 - `previactl down` reads this file, terminates the recorded processes, waits for
   them to stop, and then removes the file.
 - `previactl status` reads this file and reports `running`, `degraded`, or
@@ -483,7 +488,7 @@ The implementation must surface explicit user-facing errors for:
 - Invalid `--attach-runner <endpoint>` / `-a <endpoint>` value.
 - Existing detached runtime file during `up --detach`.
 - Missing detached runtime file during `down`.
-- Permission failures when writing to `/opt`, `/etc`, `/var/lib`, or `/tmp`.
+- Permission failures when writing inside `PREVIA_HOME`.
 
 ## Test Plan
 
@@ -523,24 +528,24 @@ The implementation is complete only when these scenarios are covered:
     any process.
 16. `up -a 10.0.0.12:55880` fails clearly because the attached
     runner endpoint is not a full HTTP base URL.
-17. `up --runners 3 --detach` writes `/tmp/previactl-up-state.json` with the
+17. `up -r 3 --detach` writes `PREVIA_HOME/run/up-state.json` with the
     `previa-main` PID and the three runner PIDs, then exits without stopping
     the spawned processes.
 18. Detached runtime state persists attached runner endpoints when
     `--attach-runner` or `-a` is used.
 19. `status` reports `running` when all PIDs in
-    `/tmp/previactl-up-state.json` are alive.
+    `PREVIA_HOME/run/up-state.json` are alive.
 20. `status` reports `degraded` when the runtime file exists but one or more
     recorded PIDs are no longer alive.
 21. `status` reports `stopped` when no detached runtime file exists.
-22. `down` reads `/tmp/previactl-up-state.json`, terminates the recorded
+22. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded
     processes, waits for shutdown, and removes the runtime file.
 23. `down` fails clearly when no detached runtime file exists.
 24. `down` does not attempt to terminate attached runner endpoints.
-25. `up --detach` fails clearly when `/tmp/previactl-up-state.json` already
+25. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
     exists.
 26. `uninstall` without `--purge` removes binaries and runtime state but preserves
-    `/etc/previa` and `/var/lib/previa`.
+    `PREVIA_HOME/config` and `PREVIA_HOME/data`.
 27. Reinstall after non-purge uninstall reuses the preserved config files.
 
 ## Rollback and Recovery
