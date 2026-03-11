@@ -4,8 +4,8 @@
 
 `previactl` is the local operations CLI for Previa. Version 1 is Linux-first and
 local-only: it runs and manages a local Previa stack, inspects the published
-release manifest, exposes the `previactl` version, and cleans local Previa
-artifacts under `PREVIA_HOME`.
+release manifest, checks whether a newer `previactl` release exists, and
+exposes the local `previactl` version.
 
 This document is implementation-ready. Anything not defined here is out of
 scope for v1 and must not be invented during implementation.
@@ -20,6 +20,7 @@ scope for v1 and must not be invented during implementation.
 - Reuse the current environment-variable contract already supported by the
   binaries.
 - Expose the remote release manifest and the local `previactl` version.
+- Tell the operator when a newer `previactl` version is available.
 
 ## Non-Goals
 
@@ -72,6 +73,7 @@ previactl down [--runner <address|address:port|port> ...]
 previactl restart
 previactl status [--main] [--runner <address|address:port|port>]
 previactl version
+previactl check
 previactl manifest show
 ```
 
@@ -219,6 +221,25 @@ No additional v1 commands are required.
 - Prints the `previactl` binary version.
 - Does not fetch the manifest.
 - Does not read `PREVIA_HOME/data/install-state.json`.
+- Does not inspect running processes.
+
+#### `previactl check`
+
+- Fetches `https://files.previa.dev/manifest.json`.
+- Reads the local `previactl` binary version.
+- Compares the local version against the remote manifest `version` field using
+  semantic version ordering.
+- When the remote version is greater than the local version, prints that a
+  newer `previactl` release is available and must include:
+  - the local version
+  - the remote version
+  - the install URL `https://previa.dev/install`
+- When the remote version is equal to the local version, prints that the local
+  `previactl` is up to date.
+- When the remote version is lower than the local version, prints that the
+  local `previactl` is newer than the published manifest version.
+- Does not download binaries.
+- Does not modify files under `PREVIA_HOME`.
 - Does not inspect running processes.
 
 ## Filesystem Layout
@@ -402,6 +423,11 @@ The implementation must surface explicit user-facing errors for:
 - Permission failures when writing inside `PREVIA_HOME`.
 - Failure to spawn `previa-main` or one of the local `previa-runner`
   processes.
+- Failure to fetch `https://files.previa.dev/manifest.json` for `manifest show`
+  or `check`.
+- Manifest payload missing required fields for `manifest show` or `check`.
+- Non-semantic `version` value in the manifest or in the local `previactl`
+  binary when running `check`.
 
 ## Test Plan
 
@@ -409,78 +435,85 @@ The implementation is complete only when these scenarios are covered:
 
 1. `manifest show` fetches and prints the remote manifest without writing files.
 2. `version` prints the `previactl` binary version without requiring network.
-3. `up -r 3` starts one `previa-main`, three local runners, and injects
+3. `check` prints that a newer version is available and includes
+   `https://previa.dev/install` when the remote manifest version is greater
+   than the local `previactl` version.
+4. `check` prints that the local `previactl` is up to date when the remote
+   manifest version equals the local version.
+5. `check` prints that the local `previactl` is newer when the remote manifest
+   version is lower than the local version.
+6. `up -r 3` starts one `previa-main`, three local runners, and injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
    into the `previa-main` child process.
-4. `up --main-port 6688 -r 1` starts `previa-main` with `PORT=6688`.
-5. `up --runner-port-range 56000:56002 -r 3` starts local runners on ports
+7. `up --main-port 6688 -r 1` starts `previa-main` with `PORT=6688`.
+8. `up --runner-port-range 56000:56002 -r 3` starts local runners on ports
    `56000`, `56001`, and `56002`.
-6. `up --runner-port-range 56000:56001 -r 3` fails validation before spawning
+9. `up --runner-port-range 56000:56001 -r 3` fails validation before spawning
    any local child process because the range capacity is insufficient.
-7. `up -r 1 -a 10.0.0.12:55880` injects
+10. `up -r 1 -a 10.0.0.12:55880` injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://10.0.0.12:55880`
    into the `previa-main` child process.
-8. `up -r 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
+11. `up -r 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
    locally while attaching the remote runner endpoint.
-9. `up -r 0` with no attached runner fails validation before spawning any
+12. `up -r 0` with no attached runner fails validation before spawning any
    process.
-10. `up -a 55880` normalizes the attached runner target to
+13. `up -a 55880` normalizes the attached runner target to
    `http://127.0.0.1:55880`.
-11. `up -a 10.0.0.12` normalizes the attached runner target to
+14. `up -a 10.0.0.12` normalizes the attached runner target to
    `http://10.0.0.12:55880`.
-12. `up -a 10.0.0.12:55880` normalizes the attached runner target to
+15. `up -a 10.0.0.12:55880` normalizes the attached runner target to
    `http://10.0.0.12:55880`.
-13. `up -a bad:value:123` fails clearly because the attached runner selector is
+16. `up -a bad:value:123` fails clearly because the attached runner selector is
     invalid.
-14. `up -r 3 --detach` writes `PREVIA_HOME/run/up-state.json` with the
+17. `up -r 3 --detach` writes `PREVIA_HOME/run/up-state.json` with the
    `previa-main` PID and the three runner PIDs, then exits without stopping the
    spawned processes.
-15. Detached runtime state persists the effective main port, runner port range,
+18. Detached runtime state persists the effective main port, runner port range,
    and attached runner endpoints when `up --detach` is used.
-16. `status` reports `running` when all PIDs in `PREVIA_HOME/run/up-state.json`
+19. `status` reports `running` when all PIDs in `PREVIA_HOME/run/up-state.json`
     are alive.
-17. `status` reports `degraded` when the runtime file exists but one or more
+20. `status` reports `degraded` when the runtime file exists but one or more
     recorded local PIDs are no longer alive.
-18. `status` reports `stopped` when no detached runtime file exists.
-19. `status --main` reports only the status of the recorded `previa-main`
+21. `status` reports `stopped` when no detached runtime file exists.
+22. `status --main` reports only the status of the recorded `previa-main`
     process.
-20. `status --runner 55880` reports the status of the recorded local runner on
+23. `status --runner 55880` reports the status of the recorded local runner on
     port `55880`.
-21. `status --runner 127.0.0.1:55880` reports the status of the recorded local
+24. `status --runner 127.0.0.1:55880` reports the status of the recorded local
     runner bound to `127.0.0.1:55880`.
-22. `status --runner 127.0.0.1` reports the status of all recorded local
+25. `status --runner 127.0.0.1` reports the status of all recorded local
     runners bound to `127.0.0.1`.
-23. `status --runner 55880` fails clearly when the selector does not match any
+26. `status --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-24. `status --main --runner 55880` fails clearly because the filters are
+27. `status --main --runner 55880` fails clearly because the filters are
     mutually exclusive.
-25. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded local
+28. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded local
     processes, waits for shutdown, and removes the runtime file.
-26. `down` fails clearly when no detached runtime file exists.
-27. `down --runner 55880` stops only the recorded local runner on port `55880`
+29. `down` fails clearly when no detached runtime file exists.
+30. `down --runner 55880` stops only the recorded local runner on port `55880`
     and rewrites `PREVIA_HOME/run/up-state.json` with the remaining runner
     entries.
-28. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
+31. `down --runner 127.0.0.1:55880` stops only the recorded local runner bound
     to `127.0.0.1:55880`.
-29. `down --runner 127.0.0.1` stops all recorded local runners bound to
+32. `down --runner 127.0.0.1` stops all recorded local runners bound to
     `127.0.0.1`.
-30. `down --runner 55880 --runner 55881` stops only the selected local runners
+33. `down --runner 55880 --runner 55881` stops only the selected local runners
     and preserves `previa-main` plus any remaining local runners and attached
     runner endpoints.
-31. `down --runner 55880` fails clearly when the selector does not match any
+34. `down --runner 55880` fails clearly when the selector does not match any
     local runner entry in the runtime file.
-32. `down --runner 55880` fails clearly if removing that runner would leave the
+35. `down --runner 55880` fails clearly if removing that runner would leave the
     stack with zero runner sources overall.
-33. `down` does not attempt to terminate attached runner endpoints.
-34. `restart` reads `PREVIA_HOME/run/up-state.json`, stops the detached local
+36. `down` does not attempt to terminate attached runner endpoints.
+37. `restart` reads `PREVIA_HOME/run/up-state.json`, stops the detached local
     processes, starts a new detached stack with the same runner topology, and
     rewrites the runtime file with new PIDs.
-35. `restart` preserves the recorded main port and runner port range from the
+38. `restart` preserves the recorded main port and runner port range from the
    runtime file.
-36. `restart` fails clearly when no detached runtime file exists.
-37. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
+39. `restart` fails clearly when no detached runtime file exists.
+40. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
     exists.
-38. Any file generated by `previactl` is written under `PREVIA_HOME`.
+41. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 
@@ -499,7 +532,8 @@ The implementation is complete only when these scenarios are covered:
 
 ## Security and Known Risks
 
-- The manifest is trusted as the release source of truth for `manifest show`.
+- The manifest is trusted as the release source of truth for `manifest show`
+  and `check`.
 - No checksum verification is available in v1 because the current manifest does
   not expose checksum fields.
 - No signature verification is available in v1.
