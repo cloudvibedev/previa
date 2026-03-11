@@ -306,7 +306,6 @@ Supported top-level schema:
 - `runners.port_range.start: integer` optional
 - `runners.port_range.end: integer` optional
 - `runners.attach: string[]` optional
-- `detach: boolean` optional
 
 Example YAML:
 
@@ -321,7 +320,6 @@ runners:
   attach:
     - 10.0.0.12:55880
     - 10.0.0.13
-detach: true
 ```
 
 Example JSON:
@@ -338,8 +336,7 @@ Example JSON:
       "end": 56009
     },
     "attach": ["10.0.0.12:55880", "10.0.0.13"]
-  },
-  "detach": true
+  }
 }
 ```
 
@@ -351,7 +348,6 @@ Rules:
   equivalent to `--runner-port-range` / `-P`.
 - `runners.attach` entries use the same selector grammar as
   `--attach-runner` / `-a`.
-- `detach: true` is equivalent to `--detach`.
 - CLI flags always override values loaded from the compose file.
 - The compose file is read-only input. `previactl` must never rewrite it.
 
@@ -411,8 +407,8 @@ Rules:
   inclusive local port interval available for spawned runners.
 - It may attach existing runner targets declared through repeated
   `--attach-runner <selector>` or `-a <selector>` flags.
-- It may load `main.port`, `runners.count`, `runners.port_range`,
-  `runners.attach`, and `detach` from a compose file.
+- It may load `main.port`, `runners.count`, `runners.port_range`, and
+  `runners.attach` from a compose file.
 - It must reject `up` if `--runners 0` / `-r 0` is combined with no
   `--attach-runner` / `-a`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
@@ -471,7 +467,7 @@ The implementation is complete only when these scenarios are covered:
    documented lookup order.
 4. `up /workspace/demo/previa-compose.yaml` reads that exact file.
 5. `up /workspace/demo/previa-compose.yaml` applies compose settings for main
-   port, runner count, runner port range, attached runners, and `detach`.
+   port, runner count, runner port range, and attached runners.
 6. `up /workspace/demo/previa-compose.yaml -p 7788 -r 2` lets the CLI flags
     override the compose file values.
 7. `up -r 3` starts one `previa-main`, three local runners, and injects
