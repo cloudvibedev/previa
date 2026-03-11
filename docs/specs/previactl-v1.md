@@ -3,26 +3,28 @@
 ## Summary
 
 `previactl` is the local operations CLI for Previa. Version 1 is Linux-first and
-local-only: it updates, uninstalls, and manages the `previa-main`,
-`previa-runner`, and `previactl` binary version lifecycle on the current host.
+local-only: it runs and manages a local Previa stack, inspects the published
+release manifest, exposes the `previactl` version, and cleans local Previa
+artifacts under `PREVIA_HOME`.
 
 This document is implementation-ready. Anything not defined here is out of
 scope for v1 and must not be invented during implementation.
 
 ## Product Goals
 
-- Detect the current operating system and CPU architecture and pick the correct
-  artifact links from the manifest.
-- Persist installation state without depending on `previa-main --version` or
-  `previa-runner --version`.
-- Keep `previa-main`, `previa-runner`, and `previactl` aligned with the latest
-  available release during `update`.
+- Bootstrap a local stack with one `previa-main` and multiple
+  `previa-runner` processes.
+- Allow attaching existing runner endpoints that are already running.
+- Support foreground and detached execution modes.
 - Persist all `previactl`-generated files under `PREVIA_HOME`.
 - Reuse the current environment-variable contract already supported by the
   binaries.
+- Expose the remote release manifest and the local `previactl` version.
 
 ## Non-Goals
 
+- Installing binaries for Linux, macOS, or Windows in v1.
+- Updating binaries in v1.
 - Remote provisioning over SSH.
 - Fleet or cluster management across multiple hosts.
 - Automatic runner registration in external control planes.
@@ -57,43 +59,18 @@ Example:
 }
 ```
 
-### Platform Mapping
-
-The CLI must map the detected platform to manifest keys exactly as follows:
-
-| OS | Architecture | `previactl` key | `previa-main` key | `previa-runner` key |
-| --- | --- | --- | --- | --- |
-| `linux` | `x86_64` | `previactl_linux_amd64` | `previa_main_linux_amd64` | `previa_runner_linux_amd64` |
-| `linux` | `aarch64` | `previactl_linux_arm64` | `previa_main_linux_arm64` | `previa_runner_linux_arm64` |
-| `macos` | `x86_64` | `previactl_macos_amd64` | `previa_main_macos_amd64` | `previa_runner_macos_amd64` |
-| `macos` | `aarch64` | `previactl_macos_arm64` | `previa_main_macos_arm64` | `previa_runner_macos_arm64` |
-| `windows` | `x86_64` | `previactl_windows_amd64` | `previa_main_windows_amd64` | `previa_runner_windows_amd64` |
-
-If the current `(os, arch)` pair is not in this table, `previactl` must fail
-with an explicit unsupported-platform error before any download begins.
-
-If the pair exists in the table but any required manifest key is missing,
-`previactl` must fail with an explicit missing-artifact error and print the
-missing key name.
-
-### Versioned Artifact URL Pattern
-
-When `update` needs artifact URLs, it must derive them from the canonical
-release layout or the remote manifest:
-
-- `https://files.previa.dev/<version>/files/previactl-<os>-<arch>`
-- `https://files.previa.dev/<version>/files/previa-main-<os>-<arch>`
-- `https://files.previa.dev/<version>/files/previa-runner-<os>-<arch>`
-
-On Windows, `.exe` is appended to the filename.
+`previactl manifest show` only fetches and prints this document. It does not
+download or install binaries in v1.
 
 ## Command Surface
 
 The v1 CLI surface is fixed to the commands below:
 
 ```text
-previactl update
 previactl uninstall [--purge]
+previactl up [--runners, -r <N>] [--attach-runner, -a <endpoint> ...] [-d, --detach]
+previactl down
+previactl status
 previactl version
 previactl manifest show
 ```
@@ -108,36 +85,75 @@ No additional v1 commands are required.
 - Prints the parsed JSON in a human-readable format.
 - Does not write to disk.
 
-#### `previactl update`
-
-- Fetches the remote manifest.
-- Reads `PREVIA_HOME/data/install-state.json`.
-- Compares the remote manifest version with:
-  - the installed `previa-main` version from `PREVIA_HOME/data/install-state.json`
-  - the installed `previa-runner` version from `PREVIA_HOME/data/install-state.json`
-  - the running `previactl` binary version from compile-time metadata
-- If all three already match the remote manifest version, prints
-  `already up to date` and exits successfully.
-- If one or more components differ, prints a component-by-component summary
-  showing the current version and the target version for each differing binary.
-- Prompts the user for confirmation before downloading anything.
-- Aborts with no changes if the user does not confirm.
-- Downloads and atomically replaces each differing component.
-- Includes the `previactl` binary itself in the update set when its version is
-  behind the remote manifest version.
-- Replaces the running `previactl` binary by downloading a temporary file,
-  marking it executable, and atomically swapping it into place as the final
-  update step.
-- Does not overwrite existing config files.
-- Updates `PREVIA_HOME/data/install-state.json` after all selected components
-  are replaced successfully.
-- Does not restart processes that are already running.
-
 #### `previactl uninstall [--purge]`
 
-- Removes installed binaries and `PREVIA_HOME/data/install-state.json`.
+- Stops the detached local stack if `PREVIA_HOME/run/up-state.json` exists.
+- Removes `PREVIA_HOME/bin/previa-main` and `PREVIA_HOME/bin/previa-runner` if
+  they exist.
+- Removes `PREVIA_HOME/run/up-state.json` if it exists.
+- Removes `PREVIA_HOME/data/install-state.json` if it exists.
 - Without `--purge`, preserves `PREVIA_HOME/config` and `PREVIA_HOME/data`.
 - With `--purge`, removes the entire `PREVIA_HOME` tree.
+
+#### `previactl up [--runners, -r <N>] [--attach-runner, -a <endpoint> ...]`
+
+- Bootstraps a local stack on the current host.
+- Executes exactly one `previa-main` process.
+- Optionally spawns the number of local `previa-runner` processes declared by
+  `--runners <N>` or `-r <N>`.
+- Optionally attaches one or more existing runner endpoints provided through
+  repeated `--attach-runner <endpoint>` or `-a <endpoint>` flags.
+- Accepts `<endpoint>` values as full HTTP base URLs such as
+  `http://10.0.0.12:55880`.
+- Requires at least one runner source overall: either `--runners <N>` greater
+  than `0`, at least one `--attach-runner` / `-a`, or both.
+- When `--runners` is omitted, it defaults to `1`.
+- When present, `--runners <N>` must be an integer greater than or equal to
+  `0`.
+- Accepts `-d` and `--detach` to leave the spawned processes running in
+  background.
+- Uses port `55880` for the first local runner and increments sequentially for
+  each additional local runner.
+- Builds `RUNNER_ENDPOINTS` for `previa-main` by concatenating:
+  - the local runner processes started by the command, in local port order
+  - the attached runner endpoints provided via `--attach-runner` / `-a`, in
+    CLI order
+- Example:
+  `http://127.0.0.1:55880,http://127.0.0.1:55881,http://10.0.0.12:55880`
+- Starts `previa-main` after all local runner processes have been spawned.
+- Without `-d` or `--detach`, runs all child processes in foreground and
+  multiplexes their stdout and stderr to the current terminal session.
+- Without `-d` or `--detach`, stops all child processes when the command
+  receives `SIGINT` or `SIGTERM`.
+- With `-d` or `--detach`, writes `PREVIA_HOME/run/up-state.json` and then
+  exits successfully.
+- Does not rewrite `PREVIA_HOME/config/main.env` or
+  `PREVIA_HOME/config/runner.env`.
+
+#### `previactl down`
+
+- Stops a local detached stack started by `previactl up --detach`.
+- Reads `PREVIA_HOME/run/up-state.json`.
+- Sends a termination signal to the recorded `previa-main` PID and to every
+  recorded local `previa-runner` PID.
+- Waits for the recorded local processes to exit.
+- Removes `PREVIA_HOME/run/up-state.json` after shutdown completes.
+- Fails with a clear error if no detached runtime file exists.
+- Does not send termination signals to attached runner endpoints because they
+  are not child processes of `previactl`.
+
+#### `previactl status`
+
+- Reports the status of the detached local stack managed by `previactl up`.
+- Reads `PREVIA_HOME/run/up-state.json` when it exists.
+- Checks whether the recorded `previa-main` PID and local `previa-runner` PIDs
+  are still alive.
+- Prints `stopped` when the runtime file does not exist.
+- Prints `running` with the recorded PIDs, ports, and attached runner endpoints
+  when all recorded local processes are alive.
+- Prints `degraded` when the runtime file exists but one or more recorded local
+  PIDs are no longer alive.
+- Does not interact with native service managers.
 
 #### `previactl version`
 
@@ -145,13 +161,11 @@ No additional v1 commands are required.
 - Does not fetch the manifest.
 - Does not read `PREVIA_HOME/data/install-state.json`.
 - Does not inspect running processes.
-- The printed version is the same value used by `update` for
-  `previactl` version comparisons.
 
-## Installation Layout
+## Filesystem Layout
 
-v1 uses `PREVIA_HOME` as the installation base directory across supported
-operating systems.
+v1 uses `PREVIA_HOME` as the base directory for all `previactl`-generated
+files.
 
 - Environment variable:
   - `PREVIA_HOME`
@@ -164,53 +178,60 @@ operating systems.
   - `PREVIA_HOME/config/runner.env`
   - `PREVIA_HOME/data/install-state.json`
   - `PREVIA_HOME/data/main/orchestrator.db`
-  - `PREVIA_HOME/run/`
+  - `PREVIA_HOME/run/up-state.json`
 
 Any `previactl` command that writes files must create parent directories as
 needed.
 
-## Persistent State
+## Runtime State
 
-### Install State File
+### Detached Runtime File
 
-Path: `PREVIA_HOME/data/install-state.json`
+Path: `PREVIA_HOME/run/up-state.json`
 
 Schema:
 
 ```json
 {
-  "name": "previa",
-  "platform": {
-    "os": "linux",
-    "arch": "x86_64"
+  "mode": "detached",
+  "started_at": "2026-03-11T16:25:00Z",
+  "main": {
+    "pid": 41021,
+    "port": 5588
   },
-  "installed_at": "2026-03-11T16:10:00Z",
-  "components": {
-    "main": {
-      "version": "0.0.5",
-      "source_url": "https://files.previa.dev/0.0.5/files/previa-main-linux-amd64",
-      "path": "/home/assis/.previa/bin/previa-main"
+  "attached_runners": [
+    "http://10.0.0.12:55880"
+  ],
+  "runners": [
+    {
+      "pid": 41022,
+      "port": 55880
     },
-    "runner": {
-      "version": "0.0.5",
-      "source_url": "https://files.previa.dev/0.0.5/files/previa-runner-linux-amd64",
-      "path": "/home/assis/.previa/bin/previa-runner"
+    {
+      "pid": 41023,
+      "port": 55881
     }
-  }
+  ]
 }
 ```
 
 Rules:
 
-- `components.main.version` and `components.runner.version` are the source of
-  truth for installed binary version checks.
-- `previactl` version is not persisted in `install-state.json`; it is read from
-  the running binary metadata.
-- The file is rewritten only after all selected update components are replaced
+- `previactl up --detach` must fail if `PREVIA_HOME/run/up-state.json` already
+  exists.
+- The runtime file is written only after all child processes have been spawned
   successfully.
-- The file is removed by `uninstall`.
-- Partial writes must be avoided by writing to a temporary file in the same
-  directory and renaming it into place.
+- The runtime file must be written atomically by writing a temporary file in
+  `PREVIA_HOME/run` and renaming it into place.
+- `previactl down` reads this file, terminates the recorded local processes,
+  waits for them to stop, and then removes the file.
+- `previactl status` reads this file and reports `running`, `degraded`, or
+  `stopped` based on file presence and PID liveness.
+- The runtime file must persist attached runner endpoints for status reporting
+  and `RUNNER_ENDPOINTS` introspection.
+- If one or more recorded local PIDs no longer exist, `down` continues shutting
+  down the remaining recorded local processes and still removes the runtime
+  file.
 
 ## Configuration Model
 
@@ -235,8 +256,7 @@ Notes:
 
 - `ORCHESTRATOR_DATABASE_URL` must use an absolute path inside
   `PREVIA_HOME/data/main/orchestrator.db`.
-- Configuration files are managed outside `previactl` v1 install workflows.
-- `update` must not rewrite this file.
+- `up` reads this file when present and must not rewrite it.
 
 ### `runner.env`
 
@@ -252,101 +272,111 @@ RUST_LOG=info
 
 Notes:
 
-- `update` must not rewrite this file.
+- `up` reads this file when present and must not rewrite it.
 
-## Installation and Update Flow
+## Runtime Rules
 
-### Download Rules
+`previactl up` is the v1 bootstrap command for local development, single-host
+evaluation, and hybrid local-plus-remote runner attachment.
 
-- `update` must use the component URLs resolved from the remote manifest for the
-  target version.
-- Each binary is first downloaded to a temporary file in the destination
-  directory.
-- Temporary files are marked executable before the final rename.
-- Final replacement uses atomic rename within the same filesystem.
-- If any download or rename fails, existing installed binaries must remain in
-  place.
+Rules:
 
-### Update Flow
-
-1. Fetch and parse the manifest.
-2. Read `PREVIA_HOME/data/install-state.json`; if missing, fail with `not installed`.
-3. Read the running `previactl` version.
-4. Compare the remote manifest version against `main`, `runner`, and
-   `previactl`.
-5. If all three already match, print `already up to date` and exit with code
-   `0`.
-6. Print the list of components with version differences and prompt for user
-   confirmation.
-7. If the user declines, exit with no changes.
-8. Resolve the artifact URLs for each differing component.
-9. Download and atomically replace the selected components, updating
-   `previactl` last.
-10. Rewrite `PREVIA_HOME/data/install-state.json` with the new `main` and
-    `runner` version and artifact URLs.
-11. Exit without restarting already-running processes.
+- It is local-only and does not provision remote hosts.
+- It uses the installed binaries from `PREVIA_HOME/bin`.
+- It always executes one `previa-main`.
+- It executes exactly the local runner count declared by the operator in
+  `--runners <N>` or `-r <N>`.
+- It may attach existing runner endpoints declared through repeated
+  `--attach-runner <endpoint>` or `-a <endpoint>` flags.
+- It must reject `up` if `--runners 0` / `-r 0` is combined with no
+  `--attach-runner` / `-a`.
+- `previa-main` binds to the configured `ADDRESS` and `PORT` from
+  `PREVIA_HOME/config/main.env` when present.
+- Each local spawned runner binds to `127.0.0.1` and uses ports starting at
+  `55880`.
+- The command must override `RUNNER_ENDPOINTS` for the `previa-main` child
+  process so that it points to all local spawned runners followed by all
+  attached runner endpoints.
+- Attached runner endpoints are treated as externally managed and are never
+  spawned, restarted, or terminated by `previactl`.
+- If any child process fails during startup, the command must terminate the
+  remaining local children and exit with a non-zero status.
 
 ## Error Handling
 
 The implementation must surface explicit user-facing errors for:
 
-- Unsupported operating system.
-- Unsupported CPU architecture.
-- Missing manifest keys for the current platform.
-- Invalid or incomplete manifest schema.
-- HTTP download failures.
-- Missing installation state during `update`.
-- Failed `previactl` self-replacement during `update`.
-- User declined confirmation during `update`.
+- Missing `PREVIA_HOME/bin/previa-main`.
+- Missing `PREVIA_HOME/bin/previa-runner` when local runners are requested.
+- Invalid `--attach-runner <endpoint>` / `-a <endpoint>` value.
+- Existing detached runtime file during `up --detach`.
+- Missing detached runtime file during `down`.
 - Permission failures when writing inside `PREVIA_HOME`.
+- Failure to spawn `previa-main` or one of the local `previa-runner`
+  processes.
 
 ## Test Plan
 
 The implementation is complete only when these scenarios are covered:
 
-1. `update` with equal local and remote versions for `main`, `runner`, and
-   `previactl` prints `already up to date`.
-2. `update` with a newer remote version lists the differing components and asks
-   the user for confirmation before downloading anything.
-3. `update` exits without changes when the user declines the confirmation
-   prompt.
-4. `update` with a newer remote version replaces every differing component and
-   updates `PREVIA_HOME/data/install-state.json`.
-5. `update` replaces `previactl` only after updating `main` and `runner`
-   successfully.
-6. Missing manifest key for the detected platform fails before any binary is
-   replaced.
-7. Failed download of any selected component leaves the existing installation
-   untouched.
-8. `version` prints the `previactl` binary version without requiring network or
-    installed Previa binaries.
-9. `uninstall` without `--purge` removes binaries and runtime state but preserves
-    `PREVIA_HOME/config` and `PREVIA_HOME/data`.
-10. Any file generated by `previactl` is written under `PREVIA_HOME`.
+1. `manifest show` fetches and prints the remote manifest without writing files.
+2. `version` prints the `previactl` binary version without requiring network.
+3. `up -r 3` starts one `previa-main`, three local runners, and injects
+   `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
+   into the `previa-main` child process.
+4. `up -r 1 -a http://10.0.0.12:55880` injects
+   `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://10.0.0.12:55880`
+   into the `previa-main` child process.
+5. `up -r 0 -a http://10.0.0.12:55880` is valid and starts only `previa-main`
+   locally while attaching the remote runner endpoint.
+6. `up -r 0` with no attached runner fails validation before spawning any
+   process.
+7. `up -a 10.0.0.12:55880` fails clearly because the attached runner endpoint is
+   not a full HTTP base URL.
+8. `up -r 3 --detach` writes `PREVIA_HOME/run/up-state.json` with the
+   `previa-main` PID and the three runner PIDs, then exits without stopping the
+   spawned processes.
+9. Detached runtime state persists attached runner endpoints when
+   `--attach-runner` or `-a` is used.
+10. `status` reports `running` when all PIDs in `PREVIA_HOME/run/up-state.json`
+    are alive.
+11. `status` reports `degraded` when the runtime file exists but one or more
+    recorded local PIDs are no longer alive.
+12. `status` reports `stopped` when no detached runtime file exists.
+13. `down` reads `PREVIA_HOME/run/up-state.json`, terminates the recorded local
+    processes, waits for shutdown, and removes the runtime file.
+14. `down` fails clearly when no detached runtime file exists.
+15. `down` does not attempt to terminate attached runner endpoints.
+16. `up --detach` fails clearly when `PREVIA_HOME/run/up-state.json` already
+    exists.
+17. `uninstall` without `--purge` removes binaries and runtime state but
+    preserves `PREVIA_HOME/config` and `PREVIA_HOME/data`.
+18. `uninstall --purge` removes the entire `PREVIA_HOME` tree.
+19. Any file generated by `previactl` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 
 - Automatic rollback is out of scope for v1.
-- If `update` fails before atomic rename, the previous installation remains
-  authoritative.
-- If `update` fails after one component swap but before all selected
-  components are replaced, the operator must recover manually by rerunning
-  `previactl update` or restoring the previous binaries.
+- If `up` fails before detached runtime state is written, the command must
+  terminate already spawned child processes before exiting.
+- If `down` encounters one or more missing local PIDs, it must continue
+  processing the remaining recorded local processes and then remove the runtime
+  file.
 
 ## Security and Known Risks
 
-- The manifest is trusted as the release source of truth.
+- The manifest is trusted as the release source of truth for `manifest show`.
 - No checksum verification is available in v1 because the current manifest does
   not expose checksum fields.
 - No signature verification is available in v1.
 - Adding checksums and signed release verification is mandatory hardening work
-  for v2.
+  for the future installer/update workflows.
 
 ## Implementation Notes
 
 - The future crate will be named `previactl`.
 - It should remain separate from HTTP transport concerns and reuse dedicated
-  modules for manifest fetching, platform detection, installation state, and
-  self-update/process replacement behavior.
+  modules for manifest fetching, runtime state persistence, process spawning,
+  endpoint validation, and teardown behavior.
 - The CLI must target the existing `previa-main` and `previa-runner` contracts
   without requiring changes to those binaries for v1.
