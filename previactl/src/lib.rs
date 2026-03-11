@@ -22,8 +22,8 @@ use crate::config::{ResolvedUpConfig, resolve_up_config};
 use crate::health::{DerivedState, probe_health, state_from_pid_and_health};
 use crate::logs::{follow_logs, print_logs};
 use crate::output::{
-    ListEntryJson, ProcessJson, StatusJson, print_list_human, print_process_rows,
-    print_status_human,
+    ListEntryJson, ProcessJson, StatusJson, StatusProcessJson, print_list_human,
+    print_process_rows, print_status_human,
 };
 use crate::paths::{PreviaPaths, StackPaths};
 use crate::process::{
@@ -346,7 +346,7 @@ async fn build_status_json(
     };
 
     let main = if runner_selector.is_none() {
-        Some(process_json_from_main(&state.main, http).await?)
+        Some(status_process_json_from_main(&state.main, http).await?)
     } else {
         None
     };
@@ -363,8 +363,15 @@ async fn build_status_json(
         state.runners.clone()
     };
 
-    let runners = collect_runner_json(&runners, http).await?;
-    let state_name = derive_overall_state(main.as_ref(), &runners, state, main_only, runner_selector.is_some());
+    let runners = collect_status_runner_json(&runners, http).await?;
+    let runner_states = runners.iter().map(|runner| runner.state.clone()).collect::<Vec<_>>();
+    let state_name = derive_overall_state(
+        main.as_ref().map(|main| main.state.as_str()),
+        &runner_states,
+        state,
+        main_only,
+        runner_selector.is_some(),
+    );
 
     Ok(StatusJson {
         name: state.name.clone(),
@@ -407,6 +414,22 @@ async fn process_json_from_main(main: &MainRuntime, http: &Client) -> Result<Pro
     })
 }
 
+async fn status_process_json_from_main(
+    main: &MainRuntime,
+    http: &Client,
+) -> Result<StatusProcessJson> {
+    let health_url = format!("http://{}:{}/health", main.address, main.port);
+    let status = state_from_pid_and_health(main.pid, probe_health(http, &health_url).await);
+    Ok(StatusProcessJson {
+        state: status.as_str().to_owned(),
+        pid: main.pid,
+        address: main.address.clone(),
+        port: main.port,
+        health_url,
+        log_path: main.log_path.clone(),
+    })
+}
+
 async fn collect_runner_json(
     runners: &[LocalRunnerRuntime],
     http: &Client,
@@ -428,6 +451,26 @@ async fn collect_runner_json(
     Ok(out)
 }
 
+async fn collect_status_runner_json(
+    runners: &[LocalRunnerRuntime],
+    http: &Client,
+) -> Result<Vec<StatusProcessJson>> {
+    let mut out = Vec::with_capacity(runners.len());
+    for runner in runners {
+        let health_url = format!("http://{}:{}/health", runner.address, runner.port);
+        let status = state_from_pid_and_health(runner.pid, probe_health(http, &health_url).await);
+        out.push(StatusProcessJson {
+            state: status.as_str().to_owned(),
+            pid: runner.pid,
+            address: runner.address.clone(),
+            port: runner.port,
+            health_url,
+            log_path: runner.log_path.clone(),
+        });
+    }
+    Ok(out)
+}
+
 async fn overall_stack_state(
     state: Option<&DetachedRuntimeState>,
     http: &Client,
@@ -437,9 +480,10 @@ async fn overall_stack_state(
     };
     let main = process_json_from_main(&state.main, http).await?;
     let runners = collect_runner_json(&state.runners, http).await?;
+    let runner_states = runners.iter().map(|runner| runner.state.clone()).collect::<Vec<_>>();
     Ok(derive_overall_state(
-        Some(&main),
-        &runners,
+        Some(main.state.as_str()),
+        &runner_states,
         state,
         false,
         false,
@@ -447,20 +491,24 @@ async fn overall_stack_state(
 }
 
 fn derive_overall_state(
-    main: Option<&ProcessJson>,
-    runners: &[ProcessJson],
+    main_state: Option<&str>,
+    runner_states: &[String],
     _runtime: &DetachedRuntimeState,
     main_only: bool,
     runner_only: bool,
 ) -> DerivedState {
     let mut states = Vec::new();
     if !runner_only {
-        if let Some(main) = main {
-            states.push(DerivedState::from_value(&main.state));
+        if let Some(main_state) = main_state {
+            states.push(DerivedState::from_value(main_state));
         }
     }
     if !main_only {
-        states.extend(runners.iter().map(|runner| DerivedState::from_value(&runner.state)));
+        states.extend(
+            runner_states
+                .iter()
+                .map(|runner_state| DerivedState::from_value(runner_state)),
+        );
     }
     DerivedState::collapse(&states)
 }

@@ -113,6 +113,22 @@ impl ResolvedUpConfig {
     }
 }
 
+fn validate_port(port: u16, label: &str) -> Result<u16> {
+    if port == 0 {
+        bail!("invalid {label} '0'");
+    }
+    Ok(port)
+}
+
+fn validate_port_range(range: PortRange) -> Result<PortRange> {
+    validate_port(range.start, "runner port range")?;
+    validate_port(range.end, "runner port range")?;
+    if range.start > range.end {
+        bail!("invalid runner port range");
+    }
+    Ok(range)
+}
+
 pub async fn resolve_up_config(
     paths: &PreviaPaths,
     stack_paths: &StackPaths,
@@ -161,6 +177,7 @@ pub async fn resolve_up_config(
         .or_else(|| compose.as_ref().and_then(|compose| compose.main.as_ref()?.port))
         .or_else(|| main_env_file.get("PORT").and_then(|value| value.parse::<u16>().ok()))
         .unwrap_or(5588);
+    let main_port = validate_port(main_port, "main port")?;
 
     let runner_address = args
         .runner_address
@@ -192,9 +209,7 @@ pub async fn resolve_up_config(
             end: 55979,
         }
     };
-    if runner_port_range.start > runner_port_range.end {
-        bail!("invalid runner port range");
-    }
+    let runner_port_range = validate_port_range(runner_port_range)?;
 
     let local_runner_count = args
         .runners

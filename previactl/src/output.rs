@@ -12,12 +12,22 @@ pub struct ProcessJson {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct StatusProcessJson {
+    pub state: String,
+    pub pid: u32,
+    pub address: String,
+    pub port: u16,
+    pub health_url: String,
+    pub log_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct StatusJson {
     pub name: String,
     pub state: String,
     pub runtime_file: String,
-    pub main: Option<ProcessJson>,
-    pub runners: Vec<ProcessJson>,
+    pub main: Option<StatusProcessJson>,
+    pub runners: Vec<StatusProcessJson>,
     pub attached_runners: Vec<String>,
 }
 
@@ -35,7 +45,7 @@ pub fn print_status_human(status: &StatusJson, main_only: bool, runner_only: boo
         if let Some(main) = &status.main {
             println!(
                 "{}\t{}\t{}\t{}:{}",
-                main.role, main.state, main.pid, main.address, main.port
+                "main", main.state, main.pid, main.address, main.port
             );
         } else {
             println!("main\tstopped");
@@ -47,7 +57,7 @@ pub fn print_status_human(status: &StatusJson, main_only: bool, runner_only: boo
         for runner in &status.runners {
             println!(
                 "{}\t{}\t{}\t{}:{}",
-                runner.role, runner.state, runner.pid, runner.address, runner.port
+                "runner", runner.state, runner.pid, runner.address, runner.port
             );
         }
         return;

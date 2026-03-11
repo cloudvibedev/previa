@@ -32,20 +32,44 @@ pub async fn spawn_detached_stack(
     let mut runners = Vec::new();
     for launch in &config.local_runners {
         let log_path = config.stack_paths.runner_log(launch.port);
-        let child = spawn_detached_process(
+        let child = match spawn_detached_process(
             &config.previa_paths.runner_binary,
             &launch.env,
             &log_path,
-        )?;
-        runners.push(wait_for_startup(child, &launch.health_url(), http).await?);
+        ) {
+            Ok(child) => child,
+            Err(err) => {
+                cleanup_started_children(&mut runners).await?;
+                return Err(err);
+            }
+        };
+        match wait_for_startup(child, &launch.health_url(), http).await {
+            Ok(child) => runners.push(child),
+            Err(err) => {
+                cleanup_started_children(&mut runners).await?;
+                return Err(err);
+            }
+        }
     }
 
-    let main = spawn_detached_process(
+    let main = match spawn_detached_process(
         &config.previa_paths.main_binary,
         &config.main_env,
         &config.stack_paths.main_log,
-    )?;
-    let main = wait_for_startup(main, &config.main_health_url(), http).await?;
+    ) {
+        Ok(child) => child,
+        Err(err) => {
+            cleanup_started_children(&mut runners).await?;
+            return Err(err);
+        }
+    };
+    let main = match wait_for_startup(main, &config.main_health_url(), http).await {
+        Ok(child) => child,
+        Err(err) => {
+            cleanup_started_children(&mut runners).await?;
+            return Err(err);
+        }
+    };
     Ok(SpawnedStack { main, runners })
 }
 
@@ -56,16 +80,46 @@ pub async fn spawn_foreground_stack(
     let mut runners = Vec::new();
     let mut tasks = Vec::new();
     for launch in &config.local_runners {
-        let (child, mut child_tasks) =
-            spawn_foreground_process(&config.previa_paths.runner_binary, &launch.env, "runner")?;
-        runners.push(wait_for_startup(child, &launch.health_url(), http).await?);
+        let (child, mut child_tasks) = match spawn_foreground_process(
+            &config.previa_paths.runner_binary,
+            &launch.env,
+            "runner",
+        ) {
+            Ok(value) => value,
+            Err(err) => {
+                cleanup_started_children(&mut runners).await?;
+                return Err(err);
+            }
+        };
         tasks.append(&mut child_tasks);
+        match wait_for_startup(child, &launch.health_url(), http).await {
+            Ok(child) => runners.push(child),
+            Err(err) => {
+                cleanup_started_children(&mut runners).await?;
+                return Err(err);
+            }
+        }
     }
 
-    let (main, mut child_tasks) =
-        spawn_foreground_process(&config.previa_paths.main_binary, &config.main_env, "main")?;
-    let main = wait_for_startup(main, &config.main_health_url(), http).await?;
+    let (main, mut child_tasks) = match spawn_foreground_process(
+        &config.previa_paths.main_binary,
+        &config.main_env,
+        "main",
+    ) {
+        Ok(value) => value,
+        Err(err) => {
+            cleanup_started_children(&mut runners).await?;
+            return Err(err);
+        }
+    };
     tasks.append(&mut child_tasks);
+    let main = match wait_for_startup(main, &config.main_health_url(), http).await {
+        Ok(child) => child,
+        Err(err) => {
+            cleanup_started_children(&mut runners).await?;
+            return Err(err);
+        }
+    };
     Ok(ForegroundStack {
         main,
         runners,
@@ -234,6 +288,18 @@ async fn wait_for_startup(mut child: Child, health_url: &str, http: &reqwest::Cl
 
 fn child_ids(children: &[Child]) -> Vec<u32> {
     children.iter().filter_map(Child::id).collect()
+}
+
+async fn cleanup_started_children(children: &mut [Child]) -> Result<()> {
+    let pids = child_ids(children);
+    if pids.is_empty() {
+        return Ok(());
+    }
+    graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
+    for child in children {
+        let _ = child.wait().await;
+    }
+    Ok(())
 }
 
 async fn sigterm() {

@@ -45,7 +45,7 @@ impl DerivedState {
 
 pub async fn probe_health(http: &Client, url: &str) -> bool {
     match http.get(url).send().await {
-        Ok(response) => response.status().is_success(),
+        Ok(response) => response.status() == reqwest::StatusCode::OK,
         Err(_) => false,
     }
 }
