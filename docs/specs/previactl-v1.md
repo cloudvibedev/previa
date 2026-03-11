@@ -87,6 +87,9 @@ No additional v1 commands are required.
   - built-in defaults from this specification
 - Requires at least one runner source overall: either `--runners <N>` greater
   than `0`, at least one `--attach-runner` / `-a`, or both.
+- When omitted, the effective `previa-main` `ADDRESS` comes from
+  `PREVIA_HOME/config/main.env`, or `0.0.0.0` when that file or variable is
+  absent.
 - When omitted, `--main-port` / `-p` defaults to the effective `PORT` value from
   `PREVIA_HOME/config/main.env`, or `5588` when that file or variable is absent.
 - When present, `--main-port <port>` / `-p <port>` must be an integer from `1`
@@ -99,6 +102,9 @@ No additional v1 commands are required.
   - parse as two integer ports from `1` to `65535`
   - satisfy `start <= end`
   - provide at least as many distinct ports as the requested local runner count
+- When omitted, the effective local runner `ADDRESS` comes from
+  `PREVIA_HOME/config/runner.env`, or `127.0.0.1` when that file or variable is
+  absent.
 - Accepts `-d` and `--detach` to leave the spawned processes running in
   background.
 - Uses the lowest port in the effective runner port range for the first local
@@ -301,7 +307,9 @@ Supported filenames:
 
 Supported top-level schema:
 
+- `main.address: string` optional
 - `main.port: integer` optional
+- `runners.address: string` optional
 - `runners.count: integer` optional
 - `runners.port_range.start: integer` optional
 - `runners.port_range.end: integer` optional
@@ -311,8 +319,10 @@ Example YAML:
 
 ```yaml
 main:
+  address: 0.0.0.0
   port: 6688
 runners:
+  address: 127.0.0.1
   count: 3
   port_range:
     start: 56000
@@ -327,9 +337,11 @@ Example JSON:
 ```json
 {
   "main": {
+    "address": "0.0.0.0",
     "port": 6688
   },
   "runners": {
+    "address": "127.0.0.1",
     "count": 3,
     "port_range": {
       "start": 56000,
@@ -342,7 +354,11 @@ Example JSON:
 
 Rules:
 
+- `main.address` maps to the `ADDRESS` environment variable for
+  `previa-main`.
 - `main.port` is equivalent to `--main-port` / `-p`.
+- `runners.address` maps to the `ADDRESS` environment variable for spawned
+  local `previa-runner` processes.
 - `runners.count` is equivalent to `--runners` / `-r`.
 - `runners.port_range.start` and `runners.port_range.end` together are
   equivalent to `--runner-port-range` / `-P`.
@@ -378,7 +394,7 @@ Path: `PREVIA_HOME/config/runner.env`
 Default content:
 
 ```dotenv
-ADDRESS=0.0.0.0
+ADDRESS=127.0.0.1
 PORT=55880
 RUST_LOG=info
 ```
@@ -407,15 +423,20 @@ Rules:
   inclusive local port interval available for spawned runners.
 - It may attach existing runner targets declared through repeated
   `--attach-runner <selector>` or `-a <selector>` flags.
-- It may load `main.port`, `runners.count`, `runners.port_range`, and
-  `runners.attach` from a compose file.
+- It may load `main.address`, `main.port`, `runners.address`,
+  `runners.count`, `runners.port_range`, and `runners.attach` from a compose
+  file.
 - It must reject `up` if `--runners 0` / `-r 0` is combined with no
   `--attach-runner` / `-a`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
   `PREVIA_HOME/config/main.env` when present, except that `PORT` is overridden
   by `--main-port <port>` / `-p <port>` when provided.
-- Each local spawned runner binds to `127.0.0.1` and uses ports from the
-  effective runner port range in ascending order.
+- `previa-main` may also take its effective `ADDRESS` from `main.address` in a
+  compose file.
+- Each local spawned runner binds to the effective runner `ADDRESS` from
+  `PREVIA_HOME/config/runner.env` or `runners.address` in a compose file and
+  uses ports from the effective runner port range in ascending order.
+- The effective runner `ADDRESS` defaults to `127.0.0.1`.
 - The effective runner port range defaults to `55880:55979`.
 - `up` must fail before spawning any local child process when the requested
   local runner count exceeds the capacity of the effective runner port range.
@@ -467,7 +488,8 @@ The implementation is complete only when these scenarios are covered:
    documented lookup order.
 4. `up /workspace/demo/previa-compose.yaml` reads that exact file.
 5. `up /workspace/demo/previa-compose.yaml` applies compose settings for main
-   port, runner count, runner port range, and attached runners.
+   address, main port, runner address, runner count, runner port range, and
+   attached runners.
 6. `up /workspace/demo/previa-compose.yaml -p 7788 -r 2` lets the CLI flags
     override the compose file values.
 7. `up -r 3` starts one `previa-main`, three local runners, and injects
@@ -498,8 +520,9 @@ The implementation is complete only when these scenarios are covered:
 19. `up -r 3 --detach` writes `PREVIA_HOME/run/up-state.json` with the
    `previa-main` PID and the three runner PIDs, then exits without stopping the
    spawned processes.
-20. Detached runtime state persists the effective main port, runner port range,
-   and attached runner endpoints when `up --detach` is used.
+20. Detached runtime state persists the effective main address, main port,
+   runner addresses, runner port range, and attached runner endpoints when
+   `up --detach` is used.
 21. `status` reports `running` when all PIDs in `PREVIA_HOME/run/up-state.json`
     are alive.
 22. `status` reports `degraded` when the runtime file exists but one or more
