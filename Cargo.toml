@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ['engine', 'main', 'runner']
+members = ['engine', 'main', 'previactl', 'runner']
 
 [workspace.package]
 version = "0.0.5"
@@ -36,3 +36,9 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 utoipa = { version = "5.4.0", features = ["axum_extras"] }
 uuid = { version = "1.22.0", features = ["v4", "v7"] }
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
+reqwest = { version = "0.13.2", default-features = false, features = [
+    "json",
+    "rustls",
+    "stream",
+] }
+serde_yaml = "0.9"
