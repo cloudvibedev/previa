@@ -117,6 +117,23 @@ where
     .await
 }
 
+fn finalize_step_result<FResult>(
+    step_id: &str,
+    result: StepExecutionResult,
+    context: &mut HashMap<String, StepExecutionResult>,
+    results: &mut Vec<StepExecutionResult>,
+    on_step_result: &mut FResult,
+) -> bool
+where
+    FResult: FnMut(&StepExecutionResult),
+{
+    let should_stop_pipeline = result.status == "error";
+    context.insert(step_id.to_owned(), result.clone());
+    on_step_result(&result);
+    results.push(result);
+    should_stop_pipeline
+}
+
 async fn execute_pipeline_with_client_specs_hooks<FStart, FResult, FCancel>(
     client: &Client,
     pipeline: &Pipeline,
@@ -214,9 +231,15 @@ where
                     if attempt < max_attempts {
                         continue;
                     }
-                    context.insert(step.id.clone(), result.clone());
-                    on_step_result(&result);
-                    results.push(result);
+                    if finalize_step_result(
+                        &step.id,
+                        result,
+                        &mut context,
+                        &mut results,
+                        &mut on_step_result,
+                    ) {
+                        break 'steps;
+                    }
                     break;
                 }
             };
@@ -250,9 +273,15 @@ where
                     if attempt < max_attempts {
                         continue;
                     }
-                    context.insert(step.id.clone(), result.clone());
-                    on_step_result(&result);
-                    results.push(result);
+                    if finalize_step_result(
+                        &step.id,
+                        result,
+                        &mut context,
+                        &mut results,
+                        &mut on_step_result,
+                    ) {
+                        break 'steps;
+                    }
                     break;
                 }
             };
@@ -333,9 +362,15 @@ where
                                 if attempt < max_attempts {
                                     continue;
                                 }
-                                context.insert(step.id.clone(), result.clone());
-                                on_step_result(&result);
-                                results.push(result);
+                                if finalize_step_result(
+                                    &step.id,
+                                    result,
+                                    &mut context,
+                                    &mut results,
+                                    &mut on_step_result,
+                                ) {
+                                    break 'steps;
+                                }
                                 break;
                             }
                         }
@@ -404,9 +439,15 @@ where
                         continue;
                     }
 
-                    context.insert(step.id.clone(), result.clone());
-                    on_step_result(&result);
-                    results.push(result);
+                    if finalize_step_result(
+                        &step.id,
+                        result,
+                        &mut context,
+                        &mut results,
+                        &mut on_step_result,
+                    ) {
+                        break 'steps;
+                    }
                     break;
                 }
                 Err(err) => {
@@ -432,9 +473,15 @@ where
                         continue;
                     }
 
-                    context.insert(step.id.clone(), result.clone());
-                    on_step_result(&result);
-                    results.push(result);
+                    if finalize_step_result(
+                        &step.id,
+                        result,
+                        &mut context,
+                        &mut results,
+                        &mut on_step_result,
+                    ) {
+                        break 'steps;
+                    }
                     break;
                 }
             }
@@ -663,6 +710,77 @@ mod tests {
                 .error
                 .as_ref()
                 .is_some_and(|err| err.contains("1 assertion(s) failed"))
+        );
+    }
+
+    #[tokio::test]
+    async fn stops_pipeline_after_step_failure() {
+        let server = MockServer::start_async().await;
+
+        let failing_step = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/fails");
+                then.status(500).body("internal error");
+            })
+            .await;
+
+        let next_step = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/next");
+                then.status(200).body("ok");
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Stop on failure".to_owned(),
+            description: None,
+            steps: vec![
+                PipelineStep {
+                    id: "fails".to_owned(),
+                    name: "Fails".to_owned(),
+                    description: None,
+                    method: "GET".to_owned(),
+                    url: format!("{}/fails", server.base_url()),
+                    headers: HashMap::new(),
+                    body: None,
+                    operation_id: None,
+                    delay: None,
+                    retry: None,
+                    asserts: vec![StepAssertion {
+                        field: "status".to_owned(),
+                        operator: "equals".to_owned(),
+                        expected: Some("201".to_owned()),
+                    }],
+                },
+                PipelineStep {
+                    id: "next".to_owned(),
+                    name: "Next".to_owned(),
+                    description: None,
+                    method: "GET".to_owned(),
+                    url: format!("{}/next", server.base_url()),
+                    headers: HashMap::new(),
+                    body: None,
+                    operation_id: None,
+                    delay: None,
+                    retry: None,
+                    asserts: vec![],
+                },
+            ],
+        };
+
+        let results = execute_pipeline(&pipeline, None).await;
+
+        failing_step.assert_async().await;
+        assert_eq!(next_step.calls_async().await, 0);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].step_id, "fails");
+        assert_eq!(results[0].status, "error");
+        assert!(
+            results[0]
+                .error
+                .as_ref()
+                .is_some_and(|err| err.contains("HTTP 500") && err.contains("assertion(s) failed"))
         );
     }
 
