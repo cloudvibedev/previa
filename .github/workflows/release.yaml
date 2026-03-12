@@ -68,6 +68,9 @@ jobs:
             arch_slug: amd64
             exe_ext: ""
             use_cross: false
+            build_runner: true
+            build_main: true
+            build_ctl: true
           - name: linux-arm64
             runs_on: ubuntu-latest
             target: aarch64-unknown-linux-gnu
@@ -75,6 +78,39 @@ jobs:
             arch_slug: arm64
             exe_ext: ""
             use_cross: true
+            build_runner: true
+            build_main: true
+            build_ctl: true
+          - name: macos-amd64
+            runs_on: macos-13
+            target: x86_64-apple-darwin
+            os_slug: macos
+            arch_slug: amd64
+            exe_ext: ""
+            use_cross: false
+            build_runner: false
+            build_main: false
+            build_ctl: true
+          - name: macos-arm64
+            runs_on: macos-14
+            target: aarch64-apple-darwin
+            os_slug: macos
+            arch_slug: arm64
+            exe_ext: ""
+            use_cross: false
+            build_runner: false
+            build_main: false
+            build_ctl: true
+          - name: windows-amd64
+            runs_on: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_slug: windows
+            arch_slug: amd64
+            exe_ext: ".exe"
+            use_cross: false
+            build_runner: false
+            build_main: false
+            build_ctl: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,18 +133,30 @@ jobs:
         shell: bash
         run: cargo install cross --locked
 
-      - name: Build previa-main, previa-runner and previactl
+      - name: Build selected binaries
         shell: bash
         run: |
           set -euo pipefail
           if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target "${{ matrix.target }}" -p previa-runner
-            cross build --release --target "${{ matrix.target }}" -p previa-main
-            cross build --release --target "${{ matrix.target }}" -p previactl
+            if [ "${{ matrix.build_runner }}" = "true" ]; then
+              cross build --release --target "${{ matrix.target }}" -p previa-runner
+            fi
+            if [ "${{ matrix.build_main }}" = "true" ]; then
+              cross build --release --target "${{ matrix.target }}" -p previa-main
+            fi
+            if [ "${{ matrix.build_ctl }}" = "true" ]; then
+              cross build --release --target "${{ matrix.target }}" -p previactl
+            fi
           else
-            cargo build --release --target "${{ matrix.target }}" -p previa-runner
-            cargo build --release --target "${{ matrix.target }}" -p previa-main
-            cargo build --release --target "${{ matrix.target }}" -p previactl
+            if [ "${{ matrix.build_runner }}" = "true" ]; then
+              cargo build --release --target "${{ matrix.target }}" -p previa-runner
+            fi
+            if [ "${{ matrix.build_main }}" = "true" ]; then
+              cargo build --release --target "${{ matrix.target }}" -p previa-main
+            fi
+            if [ "${{ matrix.build_ctl }}" = "true" ]; then
+              cargo build --release --target "${{ matrix.target }}" -p previactl
+            fi
           fi
 
       - name: Prepare release assets
@@ -117,17 +165,23 @@ jobs:
           set -euo pipefail
 
           mkdir -p dist
-          runner_src="target/${{ matrix.target }}/release/previa-runner${{ matrix.exe_ext }}"
-          main_src="target/${{ matrix.target }}/release/previa-main${{ matrix.exe_ext }}"
-          ctl_src="target/${{ matrix.target }}/release/previactl${{ matrix.exe_ext }}"
+          if [ "${{ matrix.build_main }}" = "true" ]; then
+            main_src="target/${{ matrix.target }}/release/previa-main${{ matrix.exe_ext }}"
+            main_asset="previa-main-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
+            cp "${main_src}" "dist/${main_asset}"
+          fi
 
-          runner_asset="previa-runner-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
-          main_asset="previa-main-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
-          ctl_asset="previactl-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
+          if [ "${{ matrix.build_runner }}" = "true" ]; then
+            runner_src="target/${{ matrix.target }}/release/previa-runner${{ matrix.exe_ext }}"
+            runner_asset="previa-runner-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
+            cp "${runner_src}" "dist/${runner_asset}"
+          fi
 
-          cp "${main_src}" "dist/${main_asset}"
-          cp "${runner_src}" "dist/${runner_asset}"
-          cp "${ctl_src}" "dist/${ctl_asset}"
+          if [ "${{ matrix.build_ctl }}" = "true" ]; then
+            ctl_src="target/${{ matrix.target }}/release/previactl${{ matrix.exe_ext }}"
+            ctl_asset="previactl-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
+            cp "${ctl_src}" "dist/${ctl_asset}"
+          fi
 
       - name: Upload release assets
         uses: actions/upload-artifact@v4

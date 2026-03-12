@@ -49,6 +49,8 @@ https://downloads.previa.dev/install.sh
 
 The installer writes binaries to `~/.previa/bin`, sets `PREVIA_HOME="$HOME/.previa"`, and updates `~/.zshrc` and `~/.bashrc` when they exist.
 
+`previactl` release binaries are also published for macOS and Windows. `previa-main` and `previa-runner` remain Linux-only artifacts.
+
 ## Quick Start
 
 ### 1. Start one or more runners
