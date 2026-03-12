@@ -16,8 +16,17 @@ use crate::server::execution::parse_runner_endpoints;
 use crate::server::mcp::models::McpConfig;
 use crate::server::state::{AppState, DB_SCHEMA_VERSION};
 
+fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
+    args.into_iter().skip(1).any(|arg| arg == "--version" || arg == "-v")
+}
+
 #[tokio::main]
 async fn main() {
+    if should_print_version(std::env::args()) {
+        println!("previa-main {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     let _ = dotenvy::dotenv();
 
     tracing_subscriber::fmt()
@@ -97,4 +106,22 @@ async fn main() {
     axum::serve(listener, app)
         .await
         .expect("failed to start orchestrator");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_print_version;
+
+    #[test]
+    fn detects_version_flags() {
+        assert!(should_print_version(vec![
+            "previa-main".to_owned(),
+            "--version".to_owned(),
+        ]));
+        assert!(should_print_version(vec![
+            "previa-main".to_owned(),
+            "-v".to_owned(),
+        ]));
+        assert!(!should_print_version(vec!["previa-main".to_owned()]));
+    }
 }

@@ -6,8 +6,17 @@ use tracing::info;
 use crate::server::build_app;
 use crate::server::state::AppState;
 
+fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
+    args.into_iter().skip(1).any(|arg| arg == "--version" || arg == "-v")
+}
+
 #[tokio::main]
 async fn main() {
+    if should_print_version(std::env::args()) {
+        println!("previa-runner {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     let _ = dotenvy::dotenv();
 
     tracing_subscriber::fmt()
@@ -36,4 +45,22 @@ async fn main() {
     axum::serve(listener, app)
         .await
         .expect("failed to start server");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_print_version;
+
+    #[test]
+    fn detects_version_flags() {
+        assert!(should_print_version(vec![
+            "previa-runner".to_owned(),
+            "--version".to_owned(),
+        ]));
+        assert!(should_print_version(vec![
+            "previa-runner".to_owned(),
+            "-v".to_owned(),
+        ]));
+        assert!(!should_print_version(vec!["previa-runner".to_owned()]));
+    }
 }
