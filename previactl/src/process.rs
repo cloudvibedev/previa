@@ -317,11 +317,7 @@ fn spawn_foreground_process(
     Ok((child, tasks))
 }
 
-async fn wait_for_startup(
-    mut child: Child,
-    health_url: &str,
-    http: &reqwest::Client,
-) -> Result<Child> {
+async fn wait_for_startup(mut child: Child, health_url: &str, http: &reqwest::Client) -> Result<Child> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(status) = child
@@ -380,7 +376,7 @@ pub fn conflict_message(conflict: &BindingConflict) -> String {
         BindingConflictKind::Main => "main",
         BindingConflictKind::Runner => "runner",
     };
-    format!("requested {role} bind target '{bind_address}' is already in use or unavailable")
+    format!("Requested {role} bind target '{bind_address}' is already in use or unavailable")
 }
 
 fn format_bind_address(address: &str, port: u16) -> String {
