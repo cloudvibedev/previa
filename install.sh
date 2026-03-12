@@ -2,7 +2,7 @@
 
 set -eu
 
-MANIFEST_URL="https://downloads.previa.dev/manifest.json"
+MANIFEST_URL="https://downloads.previa.dev/latest.json"
 PREVIA_HOME_DEFAULT="${HOME}/.previa"
 PREVIA_BIN_DIR="${PREVIA_HOME_DEFAULT}/bin"
 RC_BEGIN="# >>> Previa installer >>>"
@@ -96,11 +96,11 @@ manifest_value() {
   query="$1"
 
   if [ "${JSON_TOOL}" = "jq" ]; then
-    jq -r "${query}" "${TEMP_DIR}/manifest.json"
+    jq -r "${query}" "${TEMP_DIR}/latest.json"
     return
   fi
 
-  "${JSON_TOOL}" - "$query" "${TEMP_DIR}/manifest.json" <<'PY'
+  "${JSON_TOOL}" - "$query" "${TEMP_DIR}/latest.json" <<'PY'
 import json
 import pathlib
 import sys
@@ -223,7 +223,7 @@ main() {
   success "Using ${DOWNLOADER} and ${JSON_TOOL}"
 
   info "Downloading manifest"
-  download_to "${MANIFEST_URL}" "${TEMP_DIR}/manifest.json"
+  download_to "${MANIFEST_URL}" "${TEMP_DIR}/latest.json"
   VERSION="$(manifest_value ".version")"
   [ -n "${VERSION}" ] && [ "${VERSION}" != "null" ] || fail "Manifest is invalid: missing version."
   success "Resolved latest version ${VERSION}"
