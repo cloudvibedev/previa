@@ -18,14 +18,7 @@ pub(crate) fn resolve_assert_field(field: &str, result: &StepExecutionResult) ->
     }
 
     if let Some(path) = field.strip_prefix("body.") {
-        let mut current = &response.body;
-        for key in path.split('.') {
-            current = match current {
-                Value::Object(map) => map.get(key)?,
-                _ => return None,
-            };
-        }
-        return value_to_string(current);
+        return resolve_json_path(&response.body, path).and_then(value_to_string);
     }
 
     if let Some(header_name) = field.strip_prefix("header.") {
@@ -37,6 +30,21 @@ pub(crate) fn resolve_assert_field(field: &str, result: &StepExecutionResult) ->
     }
 
     None
+}
+
+fn resolve_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut current = value;
+    for segment in path.split('.') {
+        current = match current {
+            Value::Object(map) => map.get(segment)?,
+            Value::Array(items) => {
+                let index = segment.parse::<usize>().ok()?;
+                items.get(index)?
+            }
+            _ => return None,
+        };
+    }
+    Some(current)
 }
 
 pub(crate) fn evaluate_assertions(
@@ -91,4 +99,76 @@ pub(crate) fn evaluate_assertions(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_assert_field;
+    use crate::core::types::{StepExecutionResult, StepResponse};
+    use serde_json::{Value, json};
+    use std::collections::HashMap;
+
+    fn step_result(body: Value) -> StepExecutionResult {
+        StepExecutionResult {
+            step_id: "step".to_owned(),
+            status: "success".to_owned(),
+            request: None,
+            response: Some(StepResponse {
+                status: 200,
+                status_text: "OK".to_owned(),
+                headers: HashMap::new(),
+                body,
+            }),
+            error: None,
+            duration: Some(1),
+            attempts: None,
+            attempt: Some(1),
+            max_attempts: Some(1),
+            assert_results: None,
+        }
+    }
+
+    #[test]
+    fn resolves_assert_fields_inside_arrays() {
+        let result = step_result(json!({
+            "pods": [
+                {
+                    "phase": "Running",
+                    "podName": "pod-1"
+                }
+            ],
+            "containers": [
+                {
+                    "name": "app"
+                }
+            ]
+        }));
+
+        assert_eq!(
+            resolve_assert_field("body.pods.0.phase", &result),
+            Some("Running".to_owned())
+        );
+        assert_eq!(
+            resolve_assert_field("body.pods.0.podName", &result),
+            Some("pod-1".to_owned())
+        );
+        assert_eq!(
+            resolve_assert_field("body.containers.0.name", &result),
+            Some("app".to_owned())
+        );
+    }
+
+    #[test]
+    fn returns_none_for_invalid_array_indexes() {
+        let result = step_result(json!({
+            "pods": [
+                {
+                    "phase": "Running"
+                }
+            ]
+        }));
+
+        assert_eq!(resolve_assert_field("body.pods.one.phase", &result), None);
+        assert_eq!(resolve_assert_field("body.pods.2.phase", &result), None);
+    }
 }
