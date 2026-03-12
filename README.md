@@ -21,13 +21,43 @@ Previa architecture is composed of three Rust crates:
 - `previa-main` (orchestrator API)
 - `previa-runner` (remote execution API)
 - `previa-engine` (pipeline execution core)
-- `previactl` (Linux CLI para install/update/uninstall dos binários)
+- `previactl` (CLI para instalar e operar os binários do Previa)
 
 Data flow:
 
 ```text
 main -> runner -> engine
 ```
+
+## Install
+
+### Linux and macOS
+
+```bash
+curl -fsSL https://downloads.previa.dev/install.sh | sh
+```
+
+Direct script URL:
+
+```text
+https://downloads.previa.dev/install.sh
+```
+
+The installer writes binaries to `~/.previa/bin`, sets `PREVIA_HOME="$HOME/.previa"`, and updates `~/.zshrc` and `~/.bashrc` when they exist.
+
+### Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://downloads.previa.dev/install.ps1 | iex"
+```
+
+Direct script URL:
+
+```text
+https://downloads.previa.dev/install.ps1
+```
+
+The installer writes binaries to `%LOCALAPPDATA%\Previa\bin`, sets `PREVIA_HOME`, and updates the user `Path`.
 
 ## Quick Start
 
