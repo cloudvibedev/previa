@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Previa logo" width="220">
+</p>
+
 # Previa
 
 ## Overview
