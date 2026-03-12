@@ -227,10 +227,8 @@ main() {
   [ -n "${VERSION}" ] && [ "${VERSION}" != "null" ] || fail "Manifest is invalid: missing version."
   success "Resolved latest version ${VERSION}"
 
-  info "Installing binaries into ${PREVIA_BIN_DIR}"
+  info "Installing previactl into ${PREVIA_BIN_DIR}"
   mkdir -p "${PREVIA_BIN_DIR}" || fail "Failed to create ${PREVIA_BIN_DIR}."
-  install_binary "previa-main" "previa-main" "previa_main_${OS_SLUG}_${ARCH_SLUG}"
-  install_binary "previa-runner" "previa-runner" "previa_runner_${OS_SLUG}_${ARCH_SLUG}"
   install_binary "previactl" "previactl" "previactl_${OS_SLUG}_${ARCH_SLUG}"
 
   info "Configuring PREVIA_HOME and PATH"
