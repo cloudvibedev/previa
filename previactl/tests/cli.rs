@@ -544,9 +544,12 @@ fn up_prompts_and_accepts_shifted_runner_range_on_enter() {
 
     let temp = setup_previa_home();
     let main_port = find_free_port();
-    let occupied_runner_port = find_free_port();
-    let _occupied =
-        TcpListener::bind(("127.0.0.1", occupied_runner_port)).expect("occupy runner port");
+    let occupied =
+        TcpListener::bind("127.0.0.1:0").expect("occupy runner port");
+    let occupied_runner_port = occupied
+        .local_addr()
+        .expect("occupied runner local addr")
+        .port();
 
     let output = run_command_with_stdin(
         temp.path(),

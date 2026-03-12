@@ -5,8 +5,6 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use nix::sys::signal::{Signal, kill};
-use nix::unistd::Pid;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
@@ -224,7 +222,7 @@ pub async fn monitor_foreground_stack(mut stack: ForegroundStack) -> Result<()> 
 pub async fn graceful_shutdown_pids(pids: &[u32], timeout: Duration) -> Result<()> {
     for pid in pids {
         if pid_exists(*pid) {
-            let _ = kill(Pid::from_raw(*pid as i32), Some(Signal::SIGTERM));
+            let _ = terminate_pid(*pid);
         }
     }
 
@@ -238,14 +236,14 @@ pub async fn graceful_shutdown_pids(pids: &[u32], timeout: Duration) -> Result<(
 
     for pid in pids {
         if pid_exists(*pid) {
-            let _ = kill(Pid::from_raw(*pid as i32), Some(Signal::SIGKILL));
+            let _ = force_kill_pid(*pid);
         }
     }
     Ok(())
 }
 
 pub fn pid_exists(pid: u32) -> bool {
-    kill(Pid::from_raw(pid as i32), None).is_ok()
+    pid_exists_impl(pid)
 }
 
 fn spawn_detached_process(
@@ -384,5 +382,75 @@ fn format_bind_address(address: &str, port: u16) -> String {
         format!("[{address}]:{port}")
     } else {
         format!("{address}:{port}")
+    }
+}
+
+#[cfg(unix)]
+fn pid_exists_impl(pid: u32) -> bool {
+    use nix::sys::signal::kill;
+    use nix::unistd::Pid;
+
+    kill(Pid::from_raw(pid as i32), None).is_ok()
+}
+
+#[cfg(windows)]
+fn pid_exists_impl(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, SYNCHRONIZE, WaitForSingleObject,
+    };
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid);
+        if handle == 0 {
+            return false;
+        }
+        let wait = WaitForSingleObject(handle, 0);
+        let _ = CloseHandle(handle);
+        wait != WAIT_OBJECT_0
+    }
+}
+
+#[cfg(unix)]
+fn terminate_pid(pid: u32) -> Result<()> {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+
+    let _ = kill(Pid::from_raw(pid as i32), Some(Signal::SIGTERM));
+    Ok(())
+}
+
+#[cfg(windows)]
+fn terminate_pid(pid: u32) -> Result<()> {
+    let status = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string()])
+        .status()
+        .context("failed to run taskkill")?;
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("taskkill failed for pid {pid} with status {status}")
+    }
+}
+
+#[cfg(unix)]
+fn force_kill_pid(pid: u32) -> Result<()> {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+
+    let _ = kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL));
+    Ok(())
+}
+
+#[cfg(windows)]
+fn force_kill_pid(pid: u32) -> Result<()> {
+    let status = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F", "/T"])
+        .status()
+        .context("failed to run taskkill")?;
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("taskkill /F failed for pid {pid} with status {status}")
     }
 }
