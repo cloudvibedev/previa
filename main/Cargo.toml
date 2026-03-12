@@ -41,3 +41,4 @@ sqlx = { version = "0.8", features = [
 regex = "1"
 
 [dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

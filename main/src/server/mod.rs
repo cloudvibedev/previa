@@ -50,7 +50,7 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
         .route("/health", get(health))
         .route("/info", get(get_info))
         .route("/openapi.json", get(openapi_json))
-        .route("/proxy", post(proxy_request))
+        .route("/proxy", post(proxy_request).options(preflight))
         .route(
             "/api/v1/executions/{executionId}/cancel",
             post(cancel_execution),
@@ -131,4 +131,71 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
     )
     .layer(from_fn(propagate_transaction_header))
     .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use axum::body::Body;
+    use axum::http::{HeaderValue, Method, Request};
+    use reqwest::Client;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tokio::sync::RwLock;
+    use tower::ServiceExt;
+
+    use crate::server::mcp::models::McpConfig;
+    use crate::server::state::AppState;
+
+    use super::build_app;
+
+    #[tokio::test]
+    async fn proxy_preflight_allows_private_network_requests() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory db");
+        let state = AppState {
+            client: Client::new(),
+            db,
+            context_name: "default".to_owned(),
+            runner_endpoints: Vec::new(),
+            rps_per_node: 1000,
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+        };
+        let app = build_app(
+            state,
+            &McpConfig {
+                enabled: false,
+                path: "/mcp".to_owned(),
+            },
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/proxy")
+                    .header("origin", "https://id-preview.example")
+                    .header("access-control-request-method", "POST")
+                    .header("access-control-request-headers", "content-type")
+                    .header("access-control-request-private-network", "true")
+                    .body(Body::empty())
+                    .expect("preflight request"),
+            )
+            .await
+            .expect("preflight response");
+
+        assert!(response.status().is_success());
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-private-network"),
+            Some(&HeaderValue::from_static("true"))
+        );
+        assert!(response.headers().contains_key("access-control-allow-origin"));
+    }
 }
