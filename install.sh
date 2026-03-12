@@ -125,8 +125,7 @@ detect_platform() {
 
   case "${os_name}" in
     Linux) OS_SLUG="linux" ;;
-    Darwin) OS_SLUG="macos" ;;
-    *) fail "Unsupported operating system: ${os_name}." ;;
+    *) fail "Unsupported operating system: ${os_name}. Previa binaries are published for Linux only." ;;
   esac
 
   case "${arch_name}" in

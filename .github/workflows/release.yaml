@@ -75,20 +75,6 @@ jobs:
             arch_slug: arm64
             exe_ext: ""
             use_cross: true
-          - name: macos-amd64
-            runs_on: macos-14
-            target: x86_64-apple-darwin
-            os_slug: macos
-            arch_slug: amd64
-            exe_ext: ""
-            use_cross: false
-          - name: macos-arm64
-            runs_on: macos-14
-            target: aarch64-apple-darwin
-            os_slug: macos
-            arch_slug: arm64
-            exe_ext: ""
-            use_cross: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -242,12 +228,12 @@ jobs:
             links_json="${links_json}\"${link_key}\":\"${link_value}\""
           done
 
-          cat > manifest.json <<EOF
+          cat > latest.json <<EOF
           {"name":"previa","version":"${VERSION}","create_at":"${created_at}","links":{${links_json}}}
           EOF
 
-          echo "Uploading manifest.json to s3://${R2_BUCKET}/manifest.json"
-          aws s3 cp manifest.json "s3://${R2_BUCKET}/manifest.json" --endpoint-url "${endpoint}" --no-progress
+          echo "Uploading latest.json to s3://${R2_BUCKET}/latest.json"
+          aws s3 cp latest.json "s3://${R2_BUCKET}/latest.json" --endpoint-url "${endpoint}" --no-progress
 
       - name: Publish install scripts to R2
         shell: bash

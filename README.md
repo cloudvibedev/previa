@@ -35,7 +35,7 @@ main -> runner -> engine
 
 ## Install
 
-### Linux and macOS
+### Linux
 
 ```bash
 curl -fsSL https://downloads.previa.dev/install.sh | sh
