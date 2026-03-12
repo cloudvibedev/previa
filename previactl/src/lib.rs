@@ -4,6 +4,7 @@ mod compose;
 mod config;
 mod envfile;
 mod health;
+mod logs;
 mod output;
 mod paths;
 mod process;
@@ -12,6 +13,7 @@ mod runtime;
 mod selectors;
 
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -29,20 +31,24 @@ use crate::compose::{
     desired_state_from_resolved, write_generated_compose,
 };
 use crate::config::{ResolvedUpConfig, resolve_up_config};
-use crate::health::{DerivedState, probe_health, state_from_running_and_health};
+use crate::health::{
+    DerivedState, probe_health, state_from_pid_and_health, state_from_running_and_health,
+};
+use crate::logs::{follow_logs, print_logs};
 use crate::output::{
     ListEntryJson, ProcessJson, StatusJson, StatusProcessJson, print_list_human,
     print_process_rows, print_status_human,
 };
 use crate::paths::{PreviaPaths, StackPaths};
 use crate::process::{
-    BindingConflict, BindingConflictKind, conflict_message, startup_binding_conflicts,
-    validate_startup_bindings,
+    BindingConflict, BindingConflictKind, SpawnedStack, conflict_message, graceful_shutdown_pids,
+    monitor_foreground_stack, pid_exists, spawn_detached_stack, spawn_foreground_stack,
+    startup_binding_conflicts, validate_startup_bindings,
 };
 use crate::pull::pull_images;
 use crate::runtime::{
-    DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, acquire_lock, read_runtime_state,
-    remove_runtime_state, write_runtime_state,
+    DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, RuntimeBackend, acquire_lock,
+    read_runtime_state, remove_runtime_state, write_runtime_state,
 };
 use crate::selectors::{RunnerSelector, parse_stack_name};
 
@@ -91,38 +97,61 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
     let _lock = acquire_lock(&stack_paths)?;
     ensure_context_not_running(&stack_paths).await?;
 
-    write_generated_compose(&resolved)?;
-    let state = desired_state_from_resolved(&resolved, Utc::now().to_rfc3339());
-    let compose = compose_project_from_state(&state);
+    match resolved.backend {
+        RuntimeBackend::Compose => {
+            write_generated_compose(&resolved)?;
+            let state = desired_state_from_resolved(&resolved, Utc::now().to_rfc3339());
+            let compose = compose_project_from_state(&state);
 
-    if resolved.detach {
-        if stack_paths.runtime_file.exists() {
-            remove_runtime_state(&stack_paths)?;
+            if resolved.detach {
+                if stack_paths.runtime_file.exists() {
+                    remove_runtime_state(&stack_paths)?;
+                }
+
+                if let Err(err) = compose.up(true, false).await {
+                    let _ = compose.down().await;
+                    return Err(err);
+                }
+
+                if let Err(err) = wait_for_detached_startup(&compose, &state, http).await {
+                    let _ = compose.down().await;
+                    return Err(err);
+                }
+
+                write_runtime_state(&stack_paths, &state)?;
+                println!(
+                    "context '{}' started in detached mode (main: {}:{})",
+                    stack_name, state.main.address, state.main.port
+                );
+                Ok(())
+            } else {
+                let result = compose.up(false, false).await;
+                if result.is_err() {
+                    let _ = compose.down().await;
+                }
+                result
+            }
         }
+        RuntimeBackend::Bin => {
+            if resolved.detach {
+                if stack_paths.runtime_file.exists() {
+                    remove_runtime_state(&stack_paths)?;
+                }
 
-        if let Err(err) = compose.up(true, false).await {
-            let _ = compose.down().await;
-            return Err(err);
+                let spawned = spawn_detached_stack(&resolved, http).await?;
+                let state = detached_state_from_spawn(&resolved, &spawned)?;
+                write_runtime_state(&stack_paths, &state)?;
+                println!(
+                    "context '{}' started in detached mode (main: {}:{})",
+                    stack_name, state.main.address, state.main.port
+                );
+                Ok(())
+            } else {
+                let foreground = spawn_foreground_stack(&resolved, http).await?;
+                monitor_foreground_stack(foreground).await
+            }
         }
-
-        if let Err(err) = wait_for_detached_startup(&compose, &state, http).await {
-            let _ = compose.down().await;
-            return Err(err);
-        }
-
-        write_runtime_state(&stack_paths, &state)?;
-        println!(
-            "context '{}' started in detached mode (main: {}:{})",
-            stack_name, state.main.address, state.main.port
-        );
-        return Ok(());
     }
-
-    let result = compose.up(false, false).await;
-    if result.is_err() {
-        let _ = compose.down().await;
-    }
-    result
 }
 
 async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
@@ -152,26 +181,54 @@ async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
         );
     }
 
-    let compose = compose_project_from_state(&state);
-    let selected_services = selected
-        .iter()
-        .map(|idx| state.runners[*idx].service_name.clone())
-        .collect::<Vec<_>>();
-    compose.stop_services(&selected_services).await?;
-    compose.remove_services(&selected_services).await?;
+    match state.backend {
+        RuntimeBackend::Compose => {
+            let compose = compose_project_from_state(&state);
+            let selected_services = selected
+                .iter()
+                .map(|idx| state.runners[*idx].service_name.clone())
+                .collect::<Vec<_>>();
+            compose.stop_services(&selected_services).await?;
+            compose.remove_services(&selected_services).await?;
 
-    let next_state = DetachedRuntimeState {
-        runners: state
-            .runners
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, runner)| (!selected.contains(&idx)).then_some(runner.clone()))
-            .collect(),
-        ..state.clone()
-    };
-    let resolved = ResolvedUpConfig::from_runtime(&stack_paths, &next_state, None).await?;
-    write_generated_compose(&resolved)?;
-    write_runtime_state(&stack_paths, &next_state)?;
+            let next_state = DetachedRuntimeState {
+                runners: state
+                    .runners
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, runner)| {
+                        (!selected.contains(&idx)).then_some(runner.clone())
+                    })
+                    .collect(),
+                ..state.clone()
+            };
+            let resolved =
+                ResolvedUpConfig::from_runtime(paths, &stack_paths, &next_state, None).await?;
+            write_generated_compose(&resolved)?;
+            write_runtime_state(&stack_paths, &next_state)?;
+        }
+        RuntimeBackend::Bin => {
+            let selected_pids = selected
+                .iter()
+                .map(|idx| state.runners[*idx].pid)
+                .collect::<Vec<_>>();
+            graceful_shutdown_pids(&selected_pids, Duration::from_secs(3)).await?;
+
+            let next_state = DetachedRuntimeState {
+                runners: state
+                    .runners
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, runner)| {
+                        (!selected.contains(&idx)).then_some(runner.clone())
+                    })
+                    .collect(),
+                ..state.clone()
+            };
+            write_runtime_state(&stack_paths, &next_state)?;
+        }
+    }
+
     println!("context '{}' updated", stack_name);
     Ok(())
 }
@@ -181,21 +238,48 @@ async fn cmd_restart(paths: &PreviaPaths, http: &Client, args: RestartArgs) -> R
     let stack_paths = paths.stack(&stack_name);
     let _lock = acquire_lock(&stack_paths)?;
     let state = read_required_state(&stack_paths)?;
-    let resolved =
-        ResolvedUpConfig::from_runtime(&stack_paths, &state, args.version.as_deref()).await?;
-    write_generated_compose(&resolved)?;
 
-    let next_state = desired_state_from_resolved(&resolved, Utc::now().to_rfc3339());
-    let compose = compose_project_from_state(&next_state);
-    compose.down().await?;
-    compose.up(true, true).await?;
+    match state.backend {
+        RuntimeBackend::Compose => {
+            let resolved = ResolvedUpConfig::from_runtime(
+                paths,
+                &stack_paths,
+                &state,
+                args.version.as_deref(),
+            )
+            .await?;
+            write_generated_compose(&resolved)?;
 
-    if let Err(err) = wait_for_detached_startup(&compose, &next_state, http).await {
-        let _ = compose.down().await;
-        return Err(err);
+            let next_state = desired_state_from_resolved(&resolved, Utc::now().to_rfc3339());
+            let compose = compose_project_from_state(&next_state);
+            compose.down().await?;
+            compose.up(true, true).await?;
+
+            if let Err(err) = wait_for_detached_startup(&compose, &next_state, http).await {
+                let _ = compose.down().await;
+                return Err(err);
+            }
+
+            write_runtime_state(&stack_paths, &next_state)?;
+        }
+        RuntimeBackend::Bin => {
+            if args.version.is_some() {
+                bail!("--version is only supported for compose-backed runtimes");
+            }
+
+            let pids = all_runtime_pids(&state);
+            graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
+            sleep(Duration::from_millis(200)).await;
+            remove_runtime_state(&stack_paths)?;
+
+            let resolved =
+                ResolvedUpConfig::from_runtime(paths, &stack_paths, &state, None).await?;
+            let spawned = spawn_detached_stack(&resolved, http).await?;
+            let next_state = detached_state_from_spawn(&resolved, &spawned)?;
+            write_runtime_state(&stack_paths, &next_state)?;
+        }
     }
 
-    write_runtime_state(&stack_paths, &next_state)?;
     println!("context '{}' restarted", stack_name);
     Ok(())
 }
@@ -281,30 +365,69 @@ async fn cmd_logs(paths: &PreviaPaths, args: LogsArgs) -> Result<()> {
 
     let stack_paths = paths.stack(&stack_name);
     let state = read_required_state(&stack_paths)?;
-    let compose = compose_project_from_state(&state);
 
-    let services = if args.main {
-        vec![state.main.service_name.clone()]
-    } else if let Some(selector) = args.runner.as_deref() {
-        let selector = RunnerSelector::parse(selector)?;
-        let indexes = select_runner_indexes(&state.runners, &[selector])?;
-        indexes
-            .into_iter()
-            .map(|idx| state.runners[idx].service_name.clone())
-            .collect::<Vec<_>>()
-    } else {
-        let mut services = vec![state.main.service_name.clone()];
-        let mut runners = state.runners.clone();
-        runners.sort_by_key(|runner| runner.port);
-        services.extend(runners.into_iter().map(|runner| runner.service_name));
-        services
-    };
+    match state.backend {
+        RuntimeBackend::Compose => {
+            let compose = compose_project_from_state(&state);
+            let services = if args.main {
+                vec![state.main.service_name.clone()]
+            } else if let Some(selector) = args.runner.as_deref() {
+                let selector = RunnerSelector::parse(selector)?;
+                let indexes = select_runner_indexes(&state.runners, &[selector])?;
+                indexes
+                    .into_iter()
+                    .map(|idx| state.runners[idx].service_name.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                let mut services = vec![state.main.service_name.clone()];
+                let mut runners = state.runners.clone();
+                runners.sort_by_key(|runner| runner.port);
+                services.extend(runners.into_iter().map(|runner| runner.service_name));
+                services
+            };
 
-    if args.follow {
-        compose.logs_follow(&services, args.tail).await
-    } else {
-        print!("{}", compose.logs_output(&services, args.tail).await?);
-        Ok(())
+            if args.follow {
+                compose.logs_follow(&services, args.tail).await
+            } else {
+                print!("{}", compose.logs_output(&services, args.tail).await?);
+                Ok(())
+            }
+        }
+        RuntimeBackend::Bin => {
+            let logs = if args.main {
+                vec![("main".to_owned(), PathBuf::from(&state.main.log_path))]
+            } else if let Some(selector) = args.runner.as_deref() {
+                let selector = RunnerSelector::parse(selector)?;
+                let indexes = select_runner_indexes(&state.runners, &[selector])?;
+                indexes
+                    .into_iter()
+                    .map(|idx| {
+                        let runner = &state.runners[idx];
+                        (
+                            format!("runner:{}:{}", runner.address, runner.port),
+                            PathBuf::from(&runner.log_path),
+                        )
+                    })
+                    .collect()
+            } else {
+                let mut files = vec![("main".to_owned(), PathBuf::from(&state.main.log_path))];
+                let mut runners = state.runners.clone();
+                runners.sort_by_key(|runner| runner.port);
+                files.extend(runners.into_iter().map(|runner| {
+                    (
+                        format!("runner:{}:{}", runner.address, runner.port),
+                        PathBuf::from(runner.log_path),
+                    )
+                }));
+                files
+            };
+
+            if args.follow {
+                follow_logs(logs, args.tail).await
+            } else {
+                print_logs(logs, args.tail).await
+            }
+        }
     }
 }
 
@@ -320,7 +443,17 @@ async fn cmd_open(paths: &PreviaPaths, args: OpenArgs) -> Result<()> {
 
 fn print_dry_run(resolved: &ResolvedUpConfig) {
     println!("context: {}", resolved.stack_paths.name);
-    println!("image tag: {}", resolved.image_tag);
+    println!(
+        "backend: {}",
+        if resolved.backend == RuntimeBackend::Compose {
+            "compose"
+        } else {
+            "bin"
+        }
+    );
+    if resolved.backend == RuntimeBackend::Compose {
+        println!("image tag: {}", resolved.image_tag);
+    }
     println!("main: {}:{}", resolved.main.address, resolved.main.port);
     println!(
         "local runners: {} ({:?}-{:?})",
@@ -338,22 +471,32 @@ async fn ensure_context_not_running(stack_paths: &StackPaths) -> Result<()> {
     let Some(state) = read_runtime_state(stack_paths)? else {
         return Ok(());
     };
-    let compose = compose_project_from_state(&state);
-    let mut service_names = vec![state.main.service_name.clone()];
-    service_names.extend(
-        state
-            .runners
-            .iter()
-            .map(|runner| runner.service_name.clone()),
-    );
 
-    for service_name in &service_names {
-        if compose
-            .inspect_service(service_name)
-            .await?
-            .is_some_and(|service| service.running)
-        {
-            bail!("{}", running_context_message(&state));
+    match state.backend {
+        RuntimeBackend::Compose => {
+            let compose = compose_project_from_state(&state);
+            let mut service_names = vec![state.main.service_name.clone()];
+            service_names.extend(
+                state
+                    .runners
+                    .iter()
+                    .map(|runner| runner.service_name.clone()),
+            );
+
+            for service_name in &service_names {
+                if compose
+                    .inspect_service(service_name)
+                    .await?
+                    .is_some_and(|service| service.running)
+                {
+                    bail!("{}", running_context_message(&state));
+                }
+            }
+        }
+        RuntimeBackend::Bin => {
+            if all_runtime_pids(&state).into_iter().any(pid_exists) {
+                bail!("{}", running_context_message(&state));
+            }
         }
     }
 
@@ -396,8 +539,16 @@ async fn stop_detached_context(
     stack_paths: &StackPaths,
     state: &DetachedRuntimeState,
 ) -> Result<()> {
-    let compose = compose_project_from_state(state);
-    compose.down().await?;
+    match state.backend {
+        RuntimeBackend::Compose => {
+            let compose = compose_project_from_state(state);
+            compose.down().await?;
+        }
+        RuntimeBackend::Bin => {
+            let pids = all_runtime_pids(state);
+            graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
+        }
+    }
     remove_runtime_state(stack_paths)?;
     println!("context '{}' stopped", stack_paths.name);
     Ok(())
@@ -498,6 +649,54 @@ fn prompt_for_suggested_port(
     Ok(normalized.is_empty() || normalized == "y" || normalized == "yes")
 }
 
+fn detached_state_from_spawn(
+    resolved: &ResolvedUpConfig,
+    spawned: &SpawnedStack,
+) -> Result<DetachedRuntimeState> {
+    Ok(DetachedRuntimeState {
+        name: resolved.stack_paths.name.clone(),
+        mode: "detached".to_owned(),
+        started_at: Utc::now().to_rfc3339(),
+        source: resolved
+            .source
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        backend: RuntimeBackend::Bin,
+        image_tag: String::new(),
+        compose_file: String::new(),
+        compose_project: String::new(),
+        main: MainRuntime {
+            service_name: String::new(),
+            pid: child_id(&spawned.main)?,
+            address: resolved.main.address.clone(),
+            port: resolved.main.port,
+            log_path: resolved.stack_paths.main_log.display().to_string(),
+        },
+        runner_port_range: resolved.runner_port_range,
+        attached_runners: resolved.attached_runners.clone(),
+        runners: resolved
+            .local_runner_ports
+            .iter()
+            .zip(spawned.runners.iter())
+            .map(|((address, port), child)| {
+                Ok(LocalRunnerRuntime {
+                    service_name: String::new(),
+                    pid: child_id(child)?,
+                    address: address.clone(),
+                    port: *port,
+                    log_path: resolved.stack_paths.runner_log(*port).display().to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+    })
+}
+
+fn child_id(child: &tokio::process::Child) -> Result<u32> {
+    child
+        .id()
+        .ok_or_else(|| anyhow!("spawned process has no pid"))
+}
+
 async fn build_status_json(
     stack_paths: &StackPaths,
     state: Option<&DetachedRuntimeState>,
@@ -523,9 +722,14 @@ async fn build_status_json(
         });
     };
 
-    let compose = compose_project_from_state(state);
     let main = if runner_selector.is_none() {
-        Some(status_process_json_from_main(&compose, &state.main, http).await?)
+        Some(match state.backend {
+            RuntimeBackend::Compose => {
+                let compose = compose_project_from_state(state);
+                status_process_json_from_main_compose(&compose, &state.main, http).await?
+            }
+            RuntimeBackend::Bin => status_process_json_from_main_bin(&state.main, http).await?,
+        })
     } else {
         None
     };
@@ -542,7 +746,13 @@ async fn build_status_json(
         state.runners.clone()
     };
 
-    let runners = collect_status_runner_json(&compose, &selected_runners, http).await?;
+    let runners = match state.backend {
+        RuntimeBackend::Compose => {
+            let compose = compose_project_from_state(state);
+            collect_status_runner_json_compose(&compose, &selected_runners, http).await?
+        }
+        RuntimeBackend::Bin => collect_status_runner_json_bin(&selected_runners, http).await?,
+    };
     let runner_states = runners
         .iter()
         .map(|runner| runner.state.clone())
@@ -571,14 +781,25 @@ async fn process_rows(
     let Some(state) = state else {
         return Ok(Vec::new());
     };
-    let compose = compose_project_from_state(state);
-    let mut rows = Vec::new();
-    rows.push(process_json_from_main(&compose, &state.main, http).await?);
-    rows.extend(collect_runner_json(&compose, &state.runners, http).await?);
-    Ok(rows)
+
+    match state.backend {
+        RuntimeBackend::Compose => {
+            let compose = compose_project_from_state(state);
+            let mut rows = Vec::new();
+            rows.push(process_json_from_main_compose(&compose, &state.main, http).await?);
+            rows.extend(collect_runner_json_compose(&compose, &state.runners, http).await?);
+            Ok(rows)
+        }
+        RuntimeBackend::Bin => {
+            let mut rows = Vec::new();
+            rows.push(process_json_from_main_bin(&state.main, http).await?);
+            rows.extend(collect_runner_json_bin(&state.runners, http).await?);
+            Ok(rows)
+        }
+    }
 }
 
-async fn process_json_from_main(
+async fn process_json_from_main_compose(
     compose: &ComposeProject,
     main: &MainRuntime,
     http: &Client,
@@ -597,7 +818,24 @@ async fn process_json_from_main(
     })
 }
 
-async fn status_process_json_from_main(
+async fn process_json_from_main_bin(main: &MainRuntime, http: &Client) -> Result<ProcessJson> {
+    let health_url = format!("http://{}:{}/health", main.address, main.port);
+    let state = state_from_pid_and_health(
+        if pid_exists(main.pid) { main.pid } else { 0 },
+        probe_health(http, &health_url).await,
+    );
+    Ok(ProcessJson {
+        role: "main".to_owned(),
+        state: state.as_str().to_owned(),
+        pid: if pid_exists(main.pid) { main.pid } else { 0 },
+        address: main.address.clone(),
+        port: main.port,
+        health_url,
+        log_path: main.log_path.clone(),
+    })
+}
+
+async fn status_process_json_from_main_compose(
     compose: &ComposeProject,
     main: &MainRuntime,
     http: &Client,
@@ -615,7 +853,24 @@ async fn status_process_json_from_main(
     })
 }
 
-async fn collect_runner_json(
+async fn status_process_json_from_main_bin(
+    main: &MainRuntime,
+    http: &Client,
+) -> Result<StatusProcessJson> {
+    let health_url = format!("http://{}:{}/health", main.address, main.port);
+    let pid = if pid_exists(main.pid) { main.pid } else { 0 };
+    let state = state_from_pid_and_health(pid, probe_health(http, &health_url).await);
+    Ok(StatusProcessJson {
+        state: state.as_str().to_owned(),
+        pid,
+        address: main.address.clone(),
+        port: main.port,
+        health_url,
+        log_path: main.log_path.clone(),
+    })
+}
+
+async fn collect_runner_json_compose(
     compose: &ComposeProject,
     runners: &[LocalRunnerRuntime],
     http: &Client,
@@ -638,7 +893,33 @@ async fn collect_runner_json(
     Ok(out)
 }
 
-async fn collect_status_runner_json(
+async fn collect_runner_json_bin(
+    runners: &[LocalRunnerRuntime],
+    http: &Client,
+) -> Result<Vec<ProcessJson>> {
+    let mut out = Vec::with_capacity(runners.len());
+    for runner in runners {
+        let health_url = format!("http://{}:{}/health", runner.address, runner.port);
+        let pid = if pid_exists(runner.pid) {
+            runner.pid
+        } else {
+            0
+        };
+        let state = state_from_pid_and_health(pid, probe_health(http, &health_url).await);
+        out.push(ProcessJson {
+            role: "runner".to_owned(),
+            state: state.as_str().to_owned(),
+            pid,
+            address: runner.address.clone(),
+            port: runner.port,
+            health_url,
+            log_path: runner.log_path.clone(),
+        });
+    }
+    Ok(out)
+}
+
+async fn collect_status_runner_json_compose(
     compose: &ComposeProject,
     runners: &[LocalRunnerRuntime],
     http: &Client,
@@ -660,6 +941,31 @@ async fn collect_status_runner_json(
     Ok(out)
 }
 
+async fn collect_status_runner_json_bin(
+    runners: &[LocalRunnerRuntime],
+    http: &Client,
+) -> Result<Vec<StatusProcessJson>> {
+    let mut out = Vec::with_capacity(runners.len());
+    for runner in runners {
+        let health_url = format!("http://{}:{}/health", runner.address, runner.port);
+        let pid = if pid_exists(runner.pid) {
+            runner.pid
+        } else {
+            0
+        };
+        let state = state_from_pid_and_health(pid, probe_health(http, &health_url).await);
+        out.push(StatusProcessJson {
+            state: state.as_str().to_owned(),
+            pid,
+            address: runner.address.clone(),
+            port: runner.port,
+            health_url,
+            log_path: runner.log_path.clone(),
+        });
+    }
+    Ok(out)
+}
+
 async fn overall_stack_state(
     state: Option<&DetachedRuntimeState>,
     http: &Client,
@@ -667,19 +973,38 @@ async fn overall_stack_state(
     let Some(state) = state else {
         return Ok(DerivedState::Stopped);
     };
-    let compose = compose_project_from_state(state);
-    let main = process_json_from_main(&compose, &state.main, http).await?;
-    let runners = collect_runner_json(&compose, &state.runners, http).await?;
-    let runner_states = runners
-        .iter()
-        .map(|runner| runner.state.clone())
-        .collect::<Vec<_>>();
-    Ok(derive_overall_state(
-        Some(main.state.as_str()),
-        &runner_states,
-        false,
-        false,
-    ))
+
+    match state.backend {
+        RuntimeBackend::Compose => {
+            let compose = compose_project_from_state(state);
+            let main = process_json_from_main_compose(&compose, &state.main, http).await?;
+            let runners = collect_runner_json_compose(&compose, &state.runners, http).await?;
+            let runner_states = runners
+                .iter()
+                .map(|runner| runner.state.clone())
+                .collect::<Vec<_>>();
+            Ok(derive_overall_state(
+                Some(main.state.as_str()),
+                &runner_states,
+                false,
+                false,
+            ))
+        }
+        RuntimeBackend::Bin => {
+            let main = process_json_from_main_bin(&state.main, http).await?;
+            let runners = collect_runner_json_bin(&state.runners, http).await?;
+            let runner_states = runners
+                .iter()
+                .map(|runner| runner.state.clone())
+                .collect::<Vec<_>>();
+            Ok(derive_overall_state(
+                Some(main.state.as_str()),
+                &runner_states,
+                false,
+                false,
+            ))
+        }
+    }
 }
 
 fn derive_overall_state(
@@ -702,6 +1027,12 @@ fn derive_overall_state(
         );
     }
     DerivedState::collapse(&states)
+}
+
+fn all_runtime_pids(state: &DetachedRuntimeState) -> Vec<u32> {
+    let mut pids = vec![state.main.pid];
+    pids.extend(state.runners.iter().map(|runner| runner.pid));
+    pids.into_iter().filter(|pid| *pid > 0).collect()
 }
 
 fn select_runner_indexes(

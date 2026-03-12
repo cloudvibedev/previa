@@ -11,18 +11,36 @@ pub struct PortRange {
     pub end: u16,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeBackend {
+    #[default]
+    Compose,
+    Bin,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MainRuntime {
+    #[serde(default)]
     pub service_name: String,
+    #[serde(default)]
+    pub pid: u32,
     pub address: String,
     pub port: u16,
+    #[serde(default)]
+    pub log_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalRunnerRuntime {
+    #[serde(default)]
     pub service_name: String,
+    #[serde(default)]
+    pub pid: u32,
     pub address: String,
     pub port: u16,
+    #[serde(default)]
+    pub log_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,8 +50,13 @@ pub struct DetachedRuntimeState {
     pub started_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default)]
+    pub backend: RuntimeBackend,
+    #[serde(default)]
     pub image_tag: String,
+    #[serde(default)]
     pub compose_file: String,
+    #[serde(default)]
     pub compose_project: String,
     pub main: MainRuntime,
     pub runner_port_range: PortRange,

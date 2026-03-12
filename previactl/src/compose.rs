@@ -8,7 +8,7 @@ use tokio::process::Command;
 
 use crate::config::ResolvedUpConfig;
 use crate::pull::{main_image_ref, runner_image_ref};
-use crate::runtime::{DetachedRuntimeState, LocalRunnerRuntime, MainRuntime};
+use crate::runtime::{DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, RuntimeBackend};
 
 const MAIN_DATA_DIR_IN_CONTAINER: &str = "/previa/data/main";
 pub const MAIN_SERVICE_NAME: &str = "main";
@@ -117,13 +117,16 @@ pub fn desired_state_from_resolved(
             .source
             .as_ref()
             .map(|path| path.display().to_string()),
+        backend: RuntimeBackend::Compose,
         image_tag: resolved.image_tag.clone(),
         compose_file: resolved.stack_paths.compose_file.display().to_string(),
         compose_project: compose_project_name(&resolved.stack_paths.name),
         main: MainRuntime {
             service_name: MAIN_SERVICE_NAME.to_owned(),
+            pid: 0,
             address: resolved.main.address.clone(),
             port: resolved.main.port,
+            log_path: String::new(),
         },
         runner_port_range: resolved.runner_port_range,
         attached_runners: resolved.attached_runners.clone(),
@@ -132,8 +135,10 @@ pub fn desired_state_from_resolved(
             .iter()
             .map(|(address, port)| LocalRunnerRuntime {
                 service_name: runner_service_name(*port),
+                pid: 0,
                 address: address.clone(),
                 port: *port,
+                log_path: String::new(),
             })
             .collect(),
     }
@@ -377,7 +382,7 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::config::{MainResolvedConfig, ResolvedUpConfig, RunnerLaunch};
-    use crate::runtime::PortRange;
+    use crate::runtime::{PortRange, RuntimeBackend};
 
     use super::{
         MAIN_SERVICE_NAME, compose_project_name, runner_service_name, write_generated_compose,
@@ -404,7 +409,11 @@ mod tests {
         stack_paths.ensure_parent_dirs().expect("dirs");
 
         let resolved = ResolvedUpConfig {
+            previa_paths: crate::paths::PreviaPaths {
+                home: temp.path().to_path_buf(),
+            },
             stack_paths: stack_paths.clone(),
+            backend: RuntimeBackend::Compose,
             source: None,
             image_tag: "latest".to_owned(),
             main: MainResolvedConfig {

@@ -26,6 +26,71 @@ printf '%s' "$1" > "$PREVIACTL_OPEN_CAPTURE"
     fs::set_permissions(path, permissions).expect("chmod");
 }
 
+fn write_fake_binary(path: &Path, label: &str) {
+    let script = format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  printf '%s 0.0.7\n' "{label}"
+  exit 0
+fi
+exec python3 -u - <<'PY'
+import os
+import signal
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+address = os.environ.get("ADDRESS", "127.0.0.1")
+port = int(os.environ.get("PORT", "0"))
+health_status = int(os.environ.get("HEALTH_STATUS", "200"))
+health_status_file = os.environ.get("HEALTH_STATUS_FILE")
+fail_port = os.environ.get("FAIL_PORT")
+
+if os.environ.get("FAIL_STARTUP") == "1":
+    sys.exit(1)
+if fail_port and fail_port == str(port):
+    sys.exit(1)
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            status = health_status
+            if health_status_file and os.path.exists(health_status_file):
+                with open(health_status_file, "r", encoding="utf-8") as fh:
+                    status = int(fh.read().strip() or "200")
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(b"ok")
+        elif self.path == "/info":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{{"pid":1,"memoryBytes":0,"virtualMemoryBytes":0,"cpuUsagePercent":0.0}}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, fmt, *args):
+        return
+
+httpd = HTTPServer((address, port), Handler)
+print("fake binary service listening on {{}}:{{}} pid={{}}".format(address, port, os.getpid()), flush=True)
+
+def stop(_signum, _frame):
+    httpd.shutdown()
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+httpd.serve_forever()
+PY
+"#
+    );
+
+    fs::write(path, script).expect("write fake binary");
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("chmod");
+}
+
 fn write_fake_docker(path: &Path) {
     let script = r#"#!/bin/sh
 exec python3 -u - "$@" <<'PY'
@@ -402,6 +467,13 @@ fn setup_fake_docker() -> TempDir {
     temp
 }
 
+fn setup_fake_binaries(temp: &TempDir) {
+    let bin_dir = temp.path().join("bin");
+    fs::create_dir_all(&bin_dir).expect("bin dir");
+    write_fake_binary(&bin_dir.join("previa-main"), "previa-main");
+    write_fake_binary(&bin_dir.join("previa-runner"), "previa-runner");
+}
+
 fn docker_env(temp: &TempDir, command: &mut Command) {
     command
         .env("PREVIA_HOME", temp.path())
@@ -417,6 +489,40 @@ fn dry_run_rejects_detach() {
         .args(["up", "--dry-run", "--detach"])
         .assert()
         .failure();
+}
+
+#[test]
+fn up_bin_rejects_version_override() {
+    let temp = setup_fake_docker();
+    setup_fake_binaries(&temp);
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args(["up", "--bin", "--version", "0.0.7"])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("--version cannot be used with --bin"));
+}
+
+#[test]
+fn up_bin_fails_when_local_binaries_are_missing() {
+    let temp = setup_fake_docker();
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .current_dir(temp.path())
+        .args(["up", "--bin"])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("missing binary 'previa-main'"));
 }
 
 #[test]
@@ -568,6 +674,120 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
     assert!(logs_output.status.success());
     let logs = String::from_utf8(logs_output.stdout).expect("utf8 logs");
     assert!(logs.contains("fake compose service listening"));
+
+    let mut down = cargo_bin();
+    docker_env(&temp, &mut down);
+    down.args(["down", "--context", stack]).assert().success();
+
+    assert!(
+        !temp
+            .path()
+            .join("stacks")
+            .join(stack)
+            .join("run/state.json")
+            .exists()
+    );
+}
+
+#[test]
+fn detached_binary_lifecycle_supports_status_ps_logs_restart_and_down() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    setup_fake_binaries(&temp);
+    let stack = "bin-itest";
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env(&temp, &mut up);
+    up.args([
+        "up",
+        "--bin",
+        "--context",
+        stack,
+        "--detach",
+        "--main-address",
+        "127.0.0.1",
+        "-p",
+        &main_port.to_string(),
+        "--runner-address",
+        "127.0.0.1",
+        "-P",
+        &format!("{runner_port}:{runner_port}"),
+        "-r",
+        "1",
+    ])
+    .assert()
+    .success();
+
+    thread::sleep(Duration::from_millis(500));
+
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            temp.path()
+                .join("stacks")
+                .join(stack)
+                .join("run/state.json"),
+        )
+        .expect("runtime state"),
+    )
+    .expect("runtime json");
+    assert_eq!(state["backend"], "bin");
+    assert!(state["main"]["pid"].as_u64().unwrap_or_default() > 0);
+
+    let mut status = cargo_bin();
+    docker_env(&temp, &mut status);
+    let status_output = status
+        .args(["status", "--context", stack, "--json"])
+        .output()
+        .expect("status output");
+    assert!(status_output.status.success());
+    let status_json: serde_json::Value =
+        serde_json::from_slice(&status_output.stdout).expect("status json");
+    assert_eq!(status_json["state"], "running");
+    assert_eq!(status_json["main"]["address"], "127.0.0.1");
+
+    let mut ps = cargo_bin();
+    docker_env(&temp, &mut ps);
+    let ps_output = ps
+        .args(["ps", "--context", stack, "--json"])
+        .output()
+        .expect("ps output");
+    assert!(ps_output.status.success());
+    let ps_json: serde_json::Value = serde_json::from_slice(&ps_output.stdout).expect("ps json");
+    assert_eq!(ps_json.as_array().expect("ps array").len(), 2);
+    assert_eq!(ps_json[0]["role"], "main");
+    assert!(ps_json[0]["pid"].as_u64().unwrap_or_default() > 0);
+
+    let mut logs = cargo_bin();
+    docker_env(&temp, &mut logs);
+    let logs_output = logs
+        .args(["logs", "--context", stack, "--main"])
+        .output()
+        .expect("logs output");
+    assert!(logs_output.status.success());
+    let logs = String::from_utf8(logs_output.stdout).expect("utf8 logs");
+    assert!(logs.contains("fake binary service listening"));
+
+    let mut restart = cargo_bin();
+    docker_env(&temp, &mut restart);
+    restart
+        .args(["restart", "--context", stack])
+        .assert()
+        .success();
+
+    let mut restart_with_version = cargo_bin();
+    docker_env(&temp, &mut restart_with_version);
+    let restart_output = restart_with_version
+        .args(["restart", "--context", stack, "--version", "0.0.8"])
+        .output()
+        .expect("restart output");
+    assert!(!restart_output.status.success());
+    let restart_stderr = String::from_utf8(restart_output.stderr).expect("utf8 stderr");
+    assert!(restart_stderr.contains("--version is only supported for compose-backed runtimes"));
 
     let mut down = cargo_bin();
     docker_env(&temp, &mut down);

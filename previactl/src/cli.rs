@@ -76,6 +76,8 @@ pub struct UpArgs {
     pub dry_run: bool,
     #[arg(short = 'd', long)]
     pub detach: bool,
+    #[arg(long = "bin")]
+    pub bin: bool,
     #[arg(long, default_value = "latest")]
     pub version: String,
 }

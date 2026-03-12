@@ -11,12 +11,14 @@ use crate::envfile::{
 };
 use crate::paths::{PreviaPaths, StackPaths, sqlite_database_url};
 use crate::pull::normalize_image_tag;
-use crate::runtime::{DetachedRuntimeState, PortRange};
+use crate::runtime::{DetachedRuntimeState, PortRange, RuntimeBackend};
 use crate::selectors::normalize_attach_runner;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedUpConfig {
+    pub previa_paths: PreviaPaths,
     pub stack_paths: StackPaths,
+    pub backend: RuntimeBackend,
     pub source: Option<PathBuf>,
     pub image_tag: String,
     pub main: MainResolvedConfig,
@@ -43,12 +45,23 @@ pub struct RunnerLaunch {
     pub env: BTreeMap<String, String>,
 }
 
+impl RunnerLaunch {
+    pub fn health_url(&self) -> String {
+        format!("http://{}:{}/health", self.address, self.port)
+    }
+}
+
 impl ResolvedUpConfig {
     pub async fn from_runtime(
+        paths: &PreviaPaths,
         stack_paths: &StackPaths,
         state: &DetachedRuntimeState,
         version_override: Option<&str>,
     ) -> Result<Self> {
+        if state.backend == RuntimeBackend::Bin && version_override.is_some() {
+            bail!("--version is only supported for compose-backed runtimes");
+        }
+
         let main_env = read_env_file(&stack_paths.main_env)?;
         let runner_env = read_env_file(&stack_paths.runner_env)?;
         let local_runner_count = state.runners.len();
@@ -83,9 +96,15 @@ impl ResolvedUpConfig {
         );
 
         Ok(Self {
+            previa_paths: paths.clone(),
             stack_paths: stack_paths.clone(),
+            backend: state.backend,
             source: state.source.as_ref().map(PathBuf::from),
-            image_tag: normalize_image_tag(version_override.unwrap_or(state.image_tag.as_str()))?,
+            image_tag: if state.backend == RuntimeBackend::Compose {
+                normalize_image_tag(version_override.unwrap_or(state.image_tag.as_str()))?
+            } else {
+                String::new()
+            },
             main: MainResolvedConfig {
                 address: state.main.address.clone(),
                 port: state.main.port,
@@ -103,6 +122,11 @@ impl ResolvedUpConfig {
             detach: true,
         })
     }
+
+    pub fn main_health_url(&self) -> String {
+        format!("http://{}:{}/health", self.main.address, self.main.port)
+    }
+
     pub fn set_main_port(&mut self, port: u16) {
         self.main.port = port;
         self.main_env.insert("PORT".to_owned(), port.to_string());
@@ -148,14 +172,26 @@ fn validate_port_range(range: PortRange) -> Result<PortRange> {
 }
 
 pub async fn resolve_up_config(
-    _paths: &PreviaPaths,
+    paths: &PreviaPaths,
     stack_paths: &StackPaths,
     args: UpArgs,
 ) -> Result<ResolvedUpConfig> {
     if args.dry_run && args.detach {
         bail!("--dry-run cannot be combined with --detach");
     }
-    let image_tag = normalize_image_tag(&args.version)?;
+    if args.bin && args.version != "latest" {
+        bail!("--version cannot be used with --bin");
+    }
+    let backend = if args.bin {
+        RuntimeBackend::Bin
+    } else {
+        RuntimeBackend::Compose
+    };
+    let image_tag = if backend == RuntimeBackend::Compose {
+        normalize_image_tag(&args.version)?
+    } else {
+        String::new()
+    };
 
     stack_paths.ensure_parent_dirs()?;
     if !args.dry_run {
@@ -282,6 +318,13 @@ pub async fn resolve_up_config(
     if local_runner_count > capacity {
         bail!("requested local runner count exceeds the configured port range");
     }
+    if backend == RuntimeBackend::Bin {
+        let _ = paths.main_binary()?;
+        if local_runner_count > 0 {
+            let _ = paths.runner_binary()?;
+        }
+    }
+
     let mut main_env = merge_env(default_main_env_map(stack_paths), main_env_file);
     if let Some(compose_main) = compose.as_ref().and_then(|compose| compose.main.as_ref()) {
         if let Some(extra_env) = &compose_main.env {
@@ -324,7 +367,9 @@ pub async fn resolve_up_config(
     main_env.insert("RUNNER_ENDPOINTS".to_owned(), runner_endpoints.join(","));
 
     Ok(ResolvedUpConfig {
+        previa_paths: paths.clone(),
         stack_paths: stack_paths.clone(),
+        backend,
         source,
         image_tag,
         main: MainResolvedConfig {

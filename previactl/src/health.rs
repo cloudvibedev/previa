@@ -57,3 +57,7 @@ pub fn state_from_running_and_health(running: bool, healthy: bool) -> DerivedSta
         DerivedState::Degraded
     }
 }
+
+pub fn state_from_pid_and_health(pid: u32, healthy: bool) -> DerivedState {
+    state_from_running_and_health(pid > 0, healthy)
+}

@@ -1,9 +1,7 @@
 use std::env;
-#[cfg(test)]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 #[derive(Debug, Clone)]
 pub struct PreviaPaths {
@@ -19,6 +17,7 @@ pub struct StackPaths {
     pub main_data_dir: PathBuf,
     pub orchestrator_db: PathBuf,
     pub runner_logs_dir: PathBuf,
+    pub main_log: PathBuf,
     pub run_dir: PathBuf,
     pub runtime_file: PathBuf,
     pub lock_file: PathBuf,
@@ -39,6 +38,14 @@ impl PreviaPaths {
         Ok(Self { home })
     }
 
+    pub fn main_binary(&self) -> Result<PathBuf> {
+        resolve_binary(&self.home, "previa-main")
+    }
+
+    pub fn runner_binary(&self) -> Result<PathBuf> {
+        resolve_binary(&self.home, "previa-runner")
+    }
+
     pub fn stack(&self, name: &str) -> StackPaths {
         let root = self.home.join("stacks").join(name);
         let config_dir = root.join("config");
@@ -51,6 +58,7 @@ impl PreviaPaths {
             main_env: config_dir.join("main.env"),
             runner_env: config_dir.join("runner.env"),
             orchestrator_db: main_data_dir.join("orchestrator.db"),
+            main_log: logs_dir.join("main.log"),
             runtime_file: run_dir.join("state.json"),
             lock_file: run_dir.join("lock"),
             compose_file: run_dir.join("docker-compose.generated.yaml"),
@@ -81,6 +89,10 @@ impl PreviaPaths {
 }
 
 impl StackPaths {
+    pub fn runner_log(&self, port: u16) -> PathBuf {
+        self.runner_logs_dir.join(format!("{port}.log"))
+    }
+
     pub fn ensure_parent_dirs(&self) -> Result<()> {
         std::fs::create_dir_all(&self.config_dir)
             .with_context(|| format!("failed to create '{}'", self.config_dir.display()))?;
@@ -103,11 +115,43 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
         .join(path))
 }
 
-pub fn sqlite_database_url(path: &std::path::Path) -> String {
+pub fn sqlite_database_url(path: &Path) -> String {
     format!("sqlite://{}", path.display())
 }
 
-#[cfg(test)]
+fn resolve_binary(home: &Path, binary_name: &str) -> Result<PathBuf> {
+    let candidates = binary_candidates(home, binary_name)?;
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    let searched = candidates
+        .iter()
+        .map(|candidate| format!("'{}'", candidate.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!("missing binary '{}'; searched {}", binary_name, searched);
+}
+
+fn binary_candidates(home: &Path, binary_name: &str) -> Result<Vec<PathBuf>> {
+    let mut candidates = vec![home.join("bin").join(binary_name)];
+
+    if let Some(workspace_root) = discover_workspace_root()? {
+        candidates.push(workspace_root.join("target/debug").join(binary_name));
+        candidates.push(workspace_root.join("target/release").join(binary_name));
+    }
+
+    candidates.dedup();
+    Ok(candidates)
+}
+
+fn discover_workspace_root() -> Result<Option<PathBuf>> {
+    let current_dir = env::current_dir().context("failed to read current directory")?;
+    Ok(find_workspace_root(&current_dir))
+}
+
 fn find_workspace_root(start: &Path) -> Option<PathBuf> {
     for dir in start.ancestors() {
         let manifest = dir.join("Cargo.toml");
@@ -124,7 +168,7 @@ fn find_workspace_root(start: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::find_workspace_root;
+    use super::{binary_candidates, find_workspace_root};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -132,5 +176,19 @@ mod tests {
         let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let root = find_workspace_root(&crate_dir);
         assert_eq!(root, crate_dir.parent().map(Path::to_path_buf));
+    }
+
+    #[test]
+    fn binary_candidates_prioritize_previa_home_before_targets() {
+        let home = PathBuf::from("/tmp/previa-home");
+        let candidates = binary_candidates(&home, "previa-main").expect("candidates");
+        assert_eq!(
+            candidates[0],
+            PathBuf::from("/tmp/previa-home/bin/previa-main")
+        );
+        if candidates.len() >= 3 {
+            assert!(candidates[1].ends_with("target/debug/previa-main"));
+            assert!(candidates[2].ends_with("target/release/previa-main"));
+        }
     }
 }
