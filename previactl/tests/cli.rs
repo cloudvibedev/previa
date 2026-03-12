@@ -179,7 +179,7 @@ fn up_prompts_and_accepts_shifted_main_port_on_enter() {
     assert!(output.status.success());
 
     let output = String::from_utf8(output.stderr).expect("utf8 stderr");
-    assert!(output.contains("Use main port"));
+    assert!(output.contains("press [Y] to continue with main port"));
 
     let state: serde_json::Value = serde_json::from_slice(
         &fs::read(temp.path().join("stacks/default/run/state.json")).expect("runtime state"),
@@ -465,9 +465,7 @@ fn up_fails_before_spawning_when_runner_port_is_already_in_use() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
-    assert!(stderr.contains(&format!(
-        "requested runner bind target '127.0.0.1:{shared_runner_port}'"
-    )));
+    assert!(stderr.contains("-P <start:end>"));
     assert!(!stdout.contains("[main]"));
     assert!(!stdout.contains("[runner]"));
 
@@ -509,7 +507,7 @@ fn up_prompts_and_accepts_shifted_runner_range_on_enter() {
     assert!(output.status.success());
 
     let output = String::from_utf8(output.stderr).expect("utf8 stderr");
-    assert!(output.contains("Use runner ports 100 above instead"));
+    assert!(output.contains("press [Y] to continue with runner ports starting at"));
 
     let state: serde_json::Value = serde_json::from_slice(
         &fs::read(temp.path().join("stacks/default/run/state.json")).expect("runtime state"),

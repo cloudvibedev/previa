@@ -401,13 +401,11 @@ fn prompt_for_suggested_port(
 ) -> Result<bool> {
     let prompt = match conflict.kind {
         BindingConflictKind::Main => format!(
-            "{}. Use main port {suggested_port} instead? [Y/n] \
-Press Enter for yes, or rerun with {suggested_flag}; {override_hint}: ",
+            "{}. You can rerun with {suggested_flag} to define the main port manually ({override_hint}), or press [Y] to continue with main port {suggested_port} [Y/n]: ",
             conflict_message(conflict)
         ),
         BindingConflictKind::Runner => format!(
-            "{}. Use runner ports 100 above instead, starting at {suggested_port}? [Y/n] \
-Press Enter for yes, or rerun with {suggested_flag}; {override_hint}: ",
+            "{}. You can rerun with {suggested_flag} to define the runner ports manually ({override_hint}), or press [Y] to continue with runner ports starting at {suggested_port} [Y/n]: ",
             conflict_message(conflict)
         ),
     };
