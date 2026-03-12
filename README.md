@@ -51,6 +51,8 @@ The installer writes `previactl` to `~/.previa/bin`, sets `PREVIA_HOME="$HOME/.p
 
 `previactl` release binaries are also published for macOS and Windows. `previa-main` and `previa-runner` remain Linux-only artifacts.
 
+You can also pull published container images with `previactl pull`, for example `previactl pull all` or `previactl pull runner --version 0.0.7`.
+
 ## Quick Start
 
 ### 1. Start one or more runners

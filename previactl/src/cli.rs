@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 fn parse_tail_lines(value: &str) -> Result<usize, String> {
     let parsed = value
@@ -24,6 +24,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     Up(UpArgs),
+    Pull(PullArgs),
     Down(DownArgs),
     Restart(RestartArgs),
     Status(StatusArgs),
@@ -32,6 +33,21 @@ pub enum Commands {
     Logs(LogsArgs),
     Open(OpenArgs),
     Version,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PullTarget {
+    Main,
+    Runner,
+    All,
+}
+
+#[derive(Debug, Args)]
+pub struct PullArgs {
+    #[arg(value_enum, default_value_t = PullTarget::All)]
+    pub target: PullTarget,
+    #[arg(long, default_value = "latest")]
+    pub version: String,
 }
 
 #[derive(Debug, Args)]

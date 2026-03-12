@@ -22,6 +22,7 @@ scope for v1 and must not be invented during implementation.
 - Provide context-scoped log access for detached execution.
 - Detect unhealthy processes using both PID liveness and HTTP health probes.
 - Expose the local `previactl` version.
+- Pull published container images for `previa-main` and `previa-runner`.
 
 ## Non-Goals
 
@@ -40,6 +41,7 @@ The v1 CLI surface is fixed to the commands below:
 
 ```text
 previactl up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach]
+previactl pull [main|runner|all] [--version <version>]
 previactl down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]
 previactl restart [--context <context-name>]
 previactl status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]
@@ -50,7 +52,7 @@ previactl open [--context <context-name>]
 previactl version
 ```
 
-No additional v1 commands are required.
+No additional v1 commands are required beyond the surface listed above.
 
 ### Command Semantics
 
@@ -171,6 +173,20 @@ No additional v1 commands are required.
 - With `-d` or `--detach`, redirects each local runner stdout and stderr to
   `PREVIA_HOME/stacks/<context-name>/logs/runners/<port>.log`.
 - Does not rewrite the context-scoped `main.env` or `runner.env`.
+
+#### `previactl pull [main|runner|all] [--version <version>]`
+
+- Pulls published container images using the local Docker CLI.
+- Accepts `main`, `runner`, or `all` as the optional target selector.
+- When omitted, the target defaults to `all`.
+- Accepts `--version <version>` to override the image tag.
+- When omitted, `--version` defaults to `latest`.
+- Resolves repositories exactly as:
+  - `main` -> `ghcr.io/cloudvibedev/main`
+  - `runner` -> `ghcr.io/cloudvibedev/runner`
+- `all` must pull both repositories sequentially using the same resolved tag.
+- Must fail with a clear error when the Docker CLI is unavailable in `PATH`.
+- Must not require local `previa-main` or `previa-runner` binaries to exist.
 
 #### `previactl down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]`
 

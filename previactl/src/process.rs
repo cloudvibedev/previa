@@ -79,14 +79,12 @@ pub async fn spawn_detached_stack(
     http: &reqwest::Client,
 ) -> Result<SpawnedStack> {
     validate_startup_bindings(config)?;
+    let runner_binary = config.previa_paths.runner_binary()?;
+    let main_binary = config.previa_paths.main_binary()?;
     let mut runners = Vec::new();
     for launch in &config.local_runners {
         let log_path = config.stack_paths.runner_log(launch.port);
-        let child = match spawn_detached_process(
-            &config.previa_paths.runner_binary,
-            &launch.env,
-            &log_path,
-        ) {
+        let child = match spawn_detached_process(&runner_binary, &launch.env, &log_path) {
             Ok(child) => child,
             Err(err) => {
                 cleanup_started_children(&mut runners).await?;
@@ -103,7 +101,7 @@ pub async fn spawn_detached_stack(
     }
 
     let main = match spawn_detached_process(
-        &config.previa_paths.main_binary,
+        &main_binary,
         &config.main_env,
         &config.stack_paths.main_log,
     ) {
@@ -128,20 +126,19 @@ pub async fn spawn_foreground_stack(
     http: &reqwest::Client,
 ) -> Result<ForegroundStack> {
     validate_startup_bindings(config)?;
+    let runner_binary = config.previa_paths.runner_binary()?;
+    let main_binary = config.previa_paths.main_binary()?;
     let mut runners = Vec::new();
     let mut tasks = Vec::new();
     for launch in &config.local_runners {
-        let (child, mut child_tasks) = match spawn_foreground_process(
-            &config.previa_paths.runner_binary,
-            &launch.env,
-            "runner",
-        ) {
-            Ok(value) => value,
-            Err(err) => {
-                cleanup_started_children(&mut runners).await?;
-                return Err(err);
-            }
-        };
+        let (child, mut child_tasks) =
+            match spawn_foreground_process(&runner_binary, &launch.env, "runner") {
+                Ok(value) => value,
+                Err(err) => {
+                    cleanup_started_children(&mut runners).await?;
+                    return Err(err);
+                }
+            };
         tasks.append(&mut child_tasks);
         match wait_for_startup(child, &launch.health_url(), http).await {
             Ok(child) => runners.push(child),
@@ -152,17 +149,14 @@ pub async fn spawn_foreground_stack(
         }
     }
 
-    let (main, mut child_tasks) = match spawn_foreground_process(
-        &config.previa_paths.main_binary,
-        &config.main_env,
-        "main",
-    ) {
-        Ok(value) => value,
-        Err(err) => {
-            cleanup_started_children(&mut runners).await?;
-            return Err(err);
-        }
-    };
+    let (main, mut child_tasks) =
+        match spawn_foreground_process(&main_binary, &config.main_env, "main") {
+            Ok(value) => value,
+            Err(err) => {
+                cleanup_started_children(&mut runners).await?;
+                return Err(err);
+            }
+        };
     tasks.append(&mut child_tasks);
     let main = match wait_for_startup(main, &config.main_health_url(), http).await {
         Ok(child) => child,
@@ -315,7 +309,11 @@ fn spawn_foreground_process(
     Ok((child, tasks))
 }
 
-async fn wait_for_startup(mut child: Child, health_url: &str, http: &reqwest::Client) -> Result<Child> {
+async fn wait_for_startup(
+    mut child: Child,
+    health_url: &str,
+    http: &reqwest::Client,
+) -> Result<Child> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(status) = child

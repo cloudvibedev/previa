@@ -165,9 +165,7 @@ pub async fn resolve_up_config(
     if args.dry_run && args.detach {
         bail!("--dry-run cannot be combined with --detach");
     }
-    if !paths.main_binary.exists() {
-        bail!("missing '{}'", paths.main_binary.display());
-    }
+    let _ = paths.main_binary()?;
 
     stack_paths.ensure_parent_dirs()?;
     if !args.dry_run {
@@ -294,8 +292,8 @@ pub async fn resolve_up_config(
     if local_runner_count > capacity {
         bail!("requested local runner count exceeds the configured port range");
     }
-    if local_runner_count > 0 && !paths.runner_binary.exists() {
-        bail!("missing '{}'", paths.runner_binary.display());
+    if local_runner_count > 0 {
+        let _ = paths.runner_binary()?;
     }
 
     let mut main_env = merge_env(default_main_env_map(stack_paths), main_env_file);

@@ -7,6 +7,7 @@ mod logs;
 mod output;
 mod paths;
 mod process;
+mod pull;
 mod runtime;
 mod selectors;
 
@@ -21,7 +22,7 @@ use reqwest::Client;
 
 use crate::browser::{build_open_url, open_browser};
 use crate::cli::{
-    Cli, Commands, DownArgs, LogsArgs, OpenArgs, PsArgs, RestartArgs, StatusArgs, UpArgs,
+    Cli, Commands, DownArgs, LogsArgs, OpenArgs, PsArgs, PullArgs, RestartArgs, StatusArgs, UpArgs,
 };
 use crate::config::{ResolvedUpConfig, resolve_up_config};
 use crate::health::{DerivedState, probe_health, state_from_pid_and_health};
@@ -36,6 +37,7 @@ use crate::process::{
     monitor_foreground_stack, pid_exists, spawn_detached_stack, spawn_foreground_stack,
     startup_binding_conflicts, validate_startup_bindings,
 };
+use crate::pull::pull_images;
 use crate::runtime::{
     DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, acquire_lock, read_runtime_state,
     remove_runtime_state, write_runtime_state,
@@ -52,6 +54,7 @@ pub async fn run() -> Result<()> {
 
     match cli.command {
         Commands::Up(args) => cmd_up(&paths, &http, args).await,
+        Commands::Pull(args) => cmd_pull(args).await,
         Commands::Down(args) => cmd_down(&paths, args).await,
         Commands::Restart(args) => cmd_restart(&paths, &http, args).await,
         Commands::Status(args) => cmd_status(&paths, &http, args).await,
@@ -64,6 +67,10 @@ pub async fn run() -> Result<()> {
             Ok(())
         }
     }
+}
+
+async fn cmd_pull(args: PullArgs) -> Result<()> {
+    pull_images(args.target, &args.version).await
 }
 
 async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> {

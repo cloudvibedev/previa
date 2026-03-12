@@ -10,6 +10,7 @@ Comandos disponiveis:
 
 ```text
 previactl up [OPTIONS] [SOURCE]
+previactl pull [main|runner|all] [--version <version>]
 previactl down [OPTIONS]
 previactl restart [OPTIONS]
 previactl status [OPTIONS]
@@ -132,6 +133,14 @@ Parar o context:
 
 ```bash
 previactl down
+```
+
+Baixar imagens publicadas:
+
+```bash
+previactl pull
+previactl pull main
+previactl pull runner --version 0.0.7
 ```
 
 ## Como o `up` resolve a configuracao
@@ -303,6 +312,35 @@ Comportamento:
 - para runners, sugere `-P <inicio+100:fim+100>`
 - apertar Enter equivale a `Y`
 - responder `n` aborta o comando
+
+## `previactl pull`
+
+Uso:
+
+```text
+previactl pull [main|runner|all] [--version <version>]
+```
+
+### O que faz
+
+- executa `docker pull` para imagens publicadas do Previa no GHCR
+- aceita `main`, `runner` ou `all`
+- quando omitido, o alvo padrao e `all`
+- quando `--version` e omitido, usa `latest`
+
+### Repositorios
+
+- `main` -> `ghcr.io/cloudvibedev/main`
+- `runner` -> `ghcr.io/cloudvibedev/runner`
+
+### Exemplos
+
+```bash
+previactl pull
+previactl pull main
+previactl pull runner --version 0.0.7
+previactl pull all --version latest
+```
 
 ## `previactl down`
 

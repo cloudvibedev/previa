@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::net::TcpListener;
@@ -84,6 +85,17 @@ printf '%s' "$1" > "$PREVIACTL_OPEN_CAPTURE"
     fs::set_permissions(path, permissions).expect("chmod");
 }
 
+fn write_fake_docker(path: &Path) {
+    let script = r#"#!/bin/sh
+printf '%s\n' "$*" >> "$PREVIACTL_DOCKER_LOG"
+"#;
+
+    fs::write(path, script).expect("write fake docker script");
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("chmod");
+}
+
 fn setup_previa_home() -> TempDir {
     let temp = TempDir::new().expect("tempdir");
     let bin = temp.path().join("bin");
@@ -95,6 +107,15 @@ fn setup_previa_home() -> TempDir {
 
 fn cargo_bin() -> Command {
     Command::cargo_bin("previactl").expect("previactl binary")
+}
+
+fn prepend_path(dir: &Path) -> OsString {
+    let mut value = OsString::from(dir.as_os_str());
+    if let Some(current) = std::env::var_os("PATH") {
+        value.push(":");
+        value.push(current);
+    }
+    value
 }
 
 fn find_free_port() -> u16 {
@@ -113,6 +134,50 @@ fn dry_run_rejects_detach() {
         .args(["up", "--dry-run", "--detach"])
         .assert()
         .failure();
+}
+
+#[test]
+fn pull_defaults_to_all_latest_without_local_binaries() {
+    let temp = TempDir::new().expect("tempdir");
+    let docker_dir = temp.path().join("docker-bin");
+    fs::create_dir_all(&docker_dir).expect("docker dir");
+    write_fake_docker(&docker_dir.join("docker"));
+
+    let docker_log = temp.path().join("docker.log");
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .env("PREVIACTL_DOCKER_LOG", &docker_log)
+        .env("PATH", prepend_path(&docker_dir))
+        .args(["pull"])
+        .assert()
+        .success();
+
+    let output = fs::read_to_string(&docker_log).expect("docker log");
+    assert!(output.contains("pull ghcr.io/cloudvibedev/main:latest"));
+    assert!(output.contains("pull ghcr.io/cloudvibedev/runner:latest"));
+}
+
+#[test]
+fn pull_accepts_explicit_version_for_single_target() {
+    let temp = TempDir::new().expect("tempdir");
+    let docker_dir = temp.path().join("docker-bin");
+    fs::create_dir_all(&docker_dir).expect("docker dir");
+    write_fake_docker(&docker_dir.join("docker"));
+
+    let docker_log = temp.path().join("docker.log");
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .env("PREVIACTL_DOCKER_LOG", &docker_log)
+        .env("PATH", prepend_path(&docker_dir))
+        .args(["pull", "runner", "--version", "0.0.7"])
+        .assert()
+        .success();
+
+    let output = fs::read_to_string(&docker_log).expect("docker log");
+    assert_eq!(
+        output.lines().collect::<Vec<_>>(),
+        vec!["pull ghcr.io/cloudvibedev/runner:0.0.7"]
+    );
 }
 
 #[test]
@@ -544,8 +609,7 @@ fn up_prompts_and_accepts_shifted_runner_range_on_enter() {
 
     let temp = setup_previa_home();
     let main_port = find_free_port();
-    let occupied =
-        TcpListener::bind("127.0.0.1:0").expect("occupy runner port");
+    let occupied = TcpListener::bind("127.0.0.1:0").expect("occupy runner port");
     let occupied_runner_port = occupied
         .local_addr()
         .expect("occupied runner local addr")

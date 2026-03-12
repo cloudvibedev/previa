@@ -6,8 +6,6 @@ use anyhow::{Context, Result};
 #[derive(Debug, Clone)]
 pub struct PreviaPaths {
     pub home: PathBuf,
-    pub main_binary: PathBuf,
-    pub runner_binary: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -30,16 +28,21 @@ impl PreviaPaths {
         let home = match env::var("PREVIA_HOME") {
             Ok(value) => absolutize(PathBuf::from(value))?,
             Err(_) => {
-                let user_home = env::var("HOME").context("HOME is not set and PREVIA_HOME is unset")?;
+                let user_home =
+                    env::var("HOME").context("HOME is not set and PREVIA_HOME is unset")?;
                 absolutize(PathBuf::from(user_home).join(".previa"))?
             }
         };
 
-        Ok(Self {
-            main_binary: resolve_binary(&home, "previa-main")?,
-            runner_binary: resolve_binary(&home, "previa-runner")?,
-            home,
-        })
+        Ok(Self { home })
+    }
+
+    pub fn main_binary(&self) -> Result<PathBuf> {
+        resolve_binary(&self.home, "previa-main")
+    }
+
+    pub fn runner_binary(&self) -> Result<PathBuf> {
+        resolve_binary(&self.home, "previa-runner")
     }
 
     pub fn stack(&self, name: &str) -> StackPaths {
@@ -70,9 +73,9 @@ impl PreviaPaths {
             return Ok(Vec::new());
         }
         let mut stacks = Vec::new();
-        for entry in std::fs::read_dir(&stacks_dir)
-            .with_context(|| format!("failed to read stacks directory '{}'", stacks_dir.display()))?
-        {
+        for entry in std::fs::read_dir(&stacks_dir).with_context(|| {
+            format!("failed to read stacks directory '{}'", stacks_dir.display())
+        })? {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
                 let name = entry.file_name().to_string_lossy().into_owned();
@@ -176,9 +179,6 @@ mod tests {
     fn finds_workspace_root_from_nested_directory() {
         let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let root = find_workspace_root(&crate_dir);
-        assert_eq!(
-            root,
-            crate_dir.parent().map(Path::to_path_buf)
-        );
+        assert_eq!(root, crate_dir.parent().map(Path::to_path_buf));
     }
 }
