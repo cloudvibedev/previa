@@ -1,7 +1,5 @@
 use reqwest::Client;
 
-use crate::process::pid_exists;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DerivedState {
     Running,
@@ -50,8 +48,8 @@ pub async fn probe_health(http: &Client, url: &str) -> bool {
     }
 }
 
-pub fn state_from_pid_and_health(pid: u32, healthy: bool) -> DerivedState {
-    if !pid_exists(pid) {
+pub fn state_from_running_and_health(running: bool, healthy: bool) -> DerivedState {
+    if !running {
         DerivedState::Stopped
     } else if healthy {
         DerivedState::Running

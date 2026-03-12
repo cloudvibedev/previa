@@ -76,6 +76,8 @@ pub struct UpArgs {
     pub dry_run: bool,
     #[arg(short = 'd', long)]
     pub detach: bool,
+    #[arg(long, default_value = "latest")]
+    pub version: String,
 }
 
 #[derive(Debug, Args)]
@@ -102,6 +104,8 @@ pub struct RestartArgs {
         help = "Context name"
     )]
     pub context: String,
+    #[arg(long)]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Args)]

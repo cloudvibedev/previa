@@ -3,8 +3,8 @@
 ## Summary
 
 `previactl` is the local operations CLI for Previa. Version 1 is Linux-first and
-local-only: it runs and manages a local Previa context and exposes the local
-`previactl` version.
+local-only: it runs and manages a local Previa context through Docker Compose
+and exposes the local `previactl` version.
 
 This document is implementation-ready. Anything not defined here is out of
 scope for v1 and must not be invented during implementation.
@@ -40,10 +40,10 @@ scope for v1 and must not be invented during implementation.
 The v1 CLI surface is fixed to the commands below:
 
 ```text
-previactl up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach]
+previactl up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach] [--version <tag>]
 previactl pull [main|runner|all] [--version <version>]
 previactl down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]
-previactl restart [--context <context-name>]
+previactl restart [--context <context-name>] [--version <tag>]
 previactl status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]
 previactl list [--json]
 previactl ps [--context <context-name>] [--json]

@@ -10,14 +10,15 @@ use crate::envfile::{
     default_main_env_map, default_runner_env_map, ensure_default_env_files, read_env_file,
 };
 use crate::paths::{PreviaPaths, StackPaths, sqlite_database_url};
+use crate::pull::normalize_image_tag;
 use crate::runtime::{DetachedRuntimeState, PortRange};
 use crate::selectors::normalize_attach_runner;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedUpConfig {
-    pub previa_paths: PreviaPaths,
     pub stack_paths: StackPaths,
     pub source: Option<PathBuf>,
+    pub image_tag: String,
     pub main: MainResolvedConfig,
     pub main_env: BTreeMap<String, String>,
     pub local_runner_count: usize,
@@ -42,17 +43,11 @@ pub struct RunnerLaunch {
     pub env: BTreeMap<String, String>,
 }
 
-impl RunnerLaunch {
-    pub fn health_url(&self) -> String {
-        format!("http://{}:{}/health", self.address, self.port)
-    }
-}
-
 impl ResolvedUpConfig {
     pub async fn from_runtime(
-        paths: &PreviaPaths,
         stack_paths: &StackPaths,
         state: &DetachedRuntimeState,
+        version_override: Option<&str>,
     ) -> Result<Self> {
         let main_env = read_env_file(&stack_paths.main_env)?;
         let runner_env = read_env_file(&stack_paths.runner_env)?;
@@ -88,9 +83,9 @@ impl ResolvedUpConfig {
         );
 
         Ok(Self {
-            previa_paths: paths.clone(),
             stack_paths: stack_paths.clone(),
             source: state.source.as_ref().map(PathBuf::from),
+            image_tag: normalize_image_tag(version_override.unwrap_or(state.image_tag.as_str()))?,
             main: MainResolvedConfig {
                 address: state.main.address.clone(),
                 port: state.main.port,
@@ -108,11 +103,6 @@ impl ResolvedUpConfig {
             detach: true,
         })
     }
-
-    pub fn main_health_url(&self) -> String {
-        format!("http://{}:{}/health", self.main.address, self.main.port)
-    }
-
     pub fn set_main_port(&mut self, port: u16) {
         self.main.port = port;
         self.main_env.insert("PORT".to_owned(), port.to_string());
@@ -158,14 +148,14 @@ fn validate_port_range(range: PortRange) -> Result<PortRange> {
 }
 
 pub async fn resolve_up_config(
-    paths: &PreviaPaths,
+    _paths: &PreviaPaths,
     stack_paths: &StackPaths,
     args: UpArgs,
 ) -> Result<ResolvedUpConfig> {
     if args.dry_run && args.detach {
         bail!("--dry-run cannot be combined with --detach");
     }
-    let _ = paths.main_binary()?;
+    let image_tag = normalize_image_tag(&args.version)?;
 
     stack_paths.ensure_parent_dirs()?;
     if !args.dry_run {
@@ -292,10 +282,6 @@ pub async fn resolve_up_config(
     if local_runner_count > capacity {
         bail!("requested local runner count exceeds the configured port range");
     }
-    if local_runner_count > 0 {
-        let _ = paths.runner_binary()?;
-    }
-
     let mut main_env = merge_env(default_main_env_map(stack_paths), main_env_file);
     if let Some(compose_main) = compose.as_ref().and_then(|compose| compose.main.as_ref()) {
         if let Some(extra_env) = &compose_main.env {
@@ -338,9 +324,9 @@ pub async fn resolve_up_config(
     main_env.insert("RUNNER_ENDPOINTS".to_owned(), runner_endpoints.join(","));
 
     Ok(ResolvedUpConfig {
-        previa_paths: paths.clone(),
         stack_paths: stack_paths.clone(),
         source,
+        image_tag,
         main: MainResolvedConfig {
             address: main_address,
             port: main_port,

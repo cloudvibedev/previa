@@ -1,6 +1,6 @@
 # `previactl`: guia de uso
 
-`previactl` e o CLI local do Previa para subir, inspecionar, parar e abrir um context local composto por um `previa-main` e zero ou mais `previa-runner` locais, alem de aceitar runners anexados por URL.
+`previactl` e o CLI local do Previa para subir, inspecionar, parar e abrir um context local via Docker Compose, com um `previa-main`, zero ou mais `previa-runner` locais e runners anexados por URL.
 
 Este guia cobre o uso operacional da CLI como ela existe hoje no codigo.
 
@@ -58,7 +58,7 @@ previactl up --context other -p 6688 -P 56880:56889
 
 ### PREVIA_HOME
 
-O `previactl` resolve os binarios e grava o estado sob `PREVIA_HOME`.
+O `previactl` grava estado, configuracao e o compose gerado sob `PREVIA_HOME`.
 
 Se `PREVIA_HOME` nao estiver definido, o padrao e:
 
@@ -72,8 +72,6 @@ Layout por context:
 $PREVIA_HOME/
   bin/
     previactl
-    previa-main
-    previa-runner
   stacks/
     <context>/
       config/
@@ -82,11 +80,8 @@ $PREVIA_HOME/
       data/
         main/
           orchestrator.db
-      logs/
-        main.log
-        runners/
-          <port>.log
       run/
+        docker-compose.generated.yaml
         lock
         state.json
 ```
@@ -171,15 +166,16 @@ O `up` tambem injeta:
 Uso:
 
 ```text
-previactl up [--context <context>] [SOURCE] [--main-address <addr>] [-p, --main-port <port>] [--runner-address <addr>] [-P, --runner-port-range <start:end>] [-r, --runners <N>] [-a, --attach-runner <selector> ...] [--dry-run] [-d, --detach]
+previactl up [--context <context>] [SOURCE] [--main-address <addr>] [-p, --main-port <port>] [--runner-address <addr>] [-P, --runner-port-range <start:end>] [-r, --runners <N>] [-a, --attach-runner <selector> ...] [--dry-run] [-d, --detach] [--version <tag>]
 ```
 
 ### O que faz
 
+- gera um `docker-compose.generated.yaml` por context
 - sobe exatamente um `previa-main`
 - pode subir runners locais
 - pode anexar runners ja existentes por endpoint HTTP
-- pode rodar em foreground ou detached mode
+- pode rodar em foreground ou detached mode via `docker compose`
 
 ### Exemplos
 
@@ -224,7 +220,7 @@ previactl up --dry-run
 Detached:
 
 ```bash
-previactl up --detach
+previactl up --detach --version latest
 ```
 
 ### `SOURCE`
@@ -259,7 +255,7 @@ Voce precisa ter pelo menos uma fonte de runner:
 
 ### Dry run
 
-`--dry-run` valida a configuracao sem subir processos.
+`--dry-run` valida a configuracao sem subir containers.
 
 Ele:
 
@@ -282,10 +278,9 @@ attached runners:
 
 Com `--detach`, o `previactl`:
 
-- sobe os processos em background
+- gera `run/docker-compose.generated.yaml`
+- executa `docker compose up -d`
 - grava `run/state.json`
-- grava `logs/main.log`
-- grava `logs/runners/<port>.log`
 
 Mensagem tipica:
 

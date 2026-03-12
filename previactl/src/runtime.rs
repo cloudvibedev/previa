@@ -1,7 +1,7 @@
-use std::fs::{File, OpenOptions};
 use anyhow::{Context, Result, anyhow};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
 
 use crate::paths::StackPaths;
 
@@ -13,18 +13,16 @@ pub struct PortRange {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MainRuntime {
-    pub pid: u32,
+    pub service_name: String,
     pub address: String,
     pub port: u16,
-    pub log_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalRunnerRuntime {
-    pub pid: u32,
+    pub service_name: String,
     pub address: String,
     pub port: u16,
-    pub log_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +32,9 @@ pub struct DetachedRuntimeState {
     pub started_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    pub image_tag: String,
+    pub compose_file: String,
+    pub compose_project: String,
     pub main: MainRuntime,
     pub runner_port_range: PortRange,
     pub attached_runners: Vec<String>,

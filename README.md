@@ -25,7 +25,7 @@ Previa architecture is composed of three Rust crates:
 - `previa-main` (orchestrator API)
 - `previa-runner` (remote execution API)
 - `previa-engine` (pipeline execution core)
-- `previactl` (CLI para instalar e operar os binários do Previa)
+- `previactl` (CLI para instalar e operar o stack local do Previa via Docker Compose)
 
 Data flow:
 
@@ -49,35 +49,30 @@ https://downloads.previa.dev/install.sh
 
 The installer writes `previactl` to `~/.previa/bin`, sets `PREVIA_HOME="$HOME/.previa"`, and updates `~/.zshrc` and `~/.bashrc` when they exist.
 
-`previactl` release binaries are also published for macOS and Windows. `previa-main` and `previa-runner` remain Linux-only artifacts.
+`previactl` release binaries are also published for macOS and Windows. O stack local gerenciado pelo CLI usa as imagens publicadas do `previa-main` e `previa-runner`.
 
 You can also pull published container images with `previactl pull`, for example `previactl pull all` or `previactl pull runner --version 0.0.7`.
 
 ## Quick Start
 
-### 1. Start one or more runners
+### 1. Start the local stack
 
 ```bash
-ADDRESS=0.0.0.0 PORT=55880 cargo run -p previa-runner
+previactl up --detach
 ```
 
-### 2. Start the orchestrator
+### 2. Check status and open the UI
 
 ```bash
-ORCHESTRATOR_DATABASE_URL="sqlite://orchestrator.db" \
-RUNNER_ENDPOINTS="http://127.0.0.1:55880" \
-ADDRESS=0.0.0.0 PORT=5588 \
-cargo run -p previa-main
+previactl status
+previactl open
 ```
 
-### 3. Connect from Previa UI
+### 3. Optional: pull a specific image tag first
 
-Open **https://previa.dev** (fully free UI), add your server URL, and start running tests.
-
-Example server URL:
-
-```text
-http://127.0.0.1:5588
+```bash
+previactl pull all --version 0.0.7
+previactl up --detach --version 0.0.7
 ```
 
 ## Workspace Crates

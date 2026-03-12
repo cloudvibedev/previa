@@ -5,22 +5,36 @@ use tokio::process::Command;
 
 use crate::cli::PullTarget;
 
-const MAIN_IMAGE_REPOSITORY: &str = "ghcr.io/cloudvibedev/main";
-const RUNNER_IMAGE_REPOSITORY: &str = "ghcr.io/cloudvibedev/runner";
+pub const MAIN_IMAGE_REPOSITORY: &str = "ghcr.io/cloudvibedev/main";
+pub const RUNNER_IMAGE_REPOSITORY: &str = "ghcr.io/cloudvibedev/runner";
 
-pub fn resolve_image_refs(target: PullTarget, version: &str) -> Result<Vec<String>> {
+pub fn normalize_image_tag(version: &str) -> Result<String> {
     let version = version.trim();
     if version.is_empty() {
         bail!("--version cannot be empty");
     }
+    Ok(version.to_owned())
+}
 
+pub fn main_image_ref(version: &str) -> Result<String> {
+    Ok(format!(
+        "{MAIN_IMAGE_REPOSITORY}:{}",
+        normalize_image_tag(version)?
+    ))
+}
+
+pub fn runner_image_ref(version: &str) -> Result<String> {
+    Ok(format!(
+        "{RUNNER_IMAGE_REPOSITORY}:{}",
+        normalize_image_tag(version)?
+    ))
+}
+
+pub fn resolve_image_refs(target: PullTarget, version: &str) -> Result<Vec<String>> {
     let refs = match target {
-        PullTarget::Main => vec![format!("{MAIN_IMAGE_REPOSITORY}:{version}")],
-        PullTarget::Runner => vec![format!("{RUNNER_IMAGE_REPOSITORY}:{version}")],
-        PullTarget::All => vec![
-            format!("{MAIN_IMAGE_REPOSITORY}:{version}"),
-            format!("{RUNNER_IMAGE_REPOSITORY}:{version}"),
-        ],
+        PullTarget::Main => vec![main_image_ref(version)?],
+        PullTarget::Runner => vec![runner_image_ref(version)?],
+        PullTarget::All => vec![main_image_ref(version)?, runner_image_ref(version)?],
     };
     Ok(refs)
 }

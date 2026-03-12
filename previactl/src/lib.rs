@@ -1,9 +1,9 @@
 mod browser;
 mod cli;
+mod compose;
 mod config;
 mod envfile;
 mod health;
-mod logs;
 mod output;
 mod paths;
 mod process;
@@ -12,30 +12,32 @@ mod runtime;
 mod selectors;
 
 use std::io::{self, Write};
-use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use clap::Parser;
 use reqwest::Client;
+use tokio::time::sleep;
 
 use crate::browser::{build_open_url, open_browser};
 use crate::cli::{
     Cli, Commands, DownArgs, LogsArgs, OpenArgs, PsArgs, PullArgs, RestartArgs, StatusArgs, UpArgs,
 };
+use crate::compose::{
+    ComposeProject, MAIN_SERVICE_NAME, ServiceInspect, compose_project_from_state,
+    desired_state_from_resolved, write_generated_compose,
+};
 use crate::config::{ResolvedUpConfig, resolve_up_config};
-use crate::health::{DerivedState, probe_health, state_from_pid_and_health};
-use crate::logs::{follow_logs, print_logs};
+use crate::health::{DerivedState, probe_health, state_from_running_and_health};
 use crate::output::{
     ListEntryJson, ProcessJson, StatusJson, StatusProcessJson, print_list_human,
     print_process_rows, print_status_human,
 };
 use crate::paths::{PreviaPaths, StackPaths};
 use crate::process::{
-    BindingConflict, BindingConflictKind, SpawnedStack, conflict_message, graceful_shutdown_pids,
-    monitor_foreground_stack, pid_exists, spawn_detached_stack, spawn_foreground_stack,
-    startup_binding_conflicts, validate_startup_bindings,
+    BindingConflict, BindingConflictKind, conflict_message, startup_binding_conflicts,
+    validate_startup_bindings,
 };
 use crate::pull::pull_images;
 use crate::runtime::{
@@ -76,7 +78,6 @@ async fn cmd_pull(args: PullArgs) -> Result<()> {
 async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> {
     let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
-    ensure_context_not_running(&stack_paths)?;
     let mut resolved = resolve_up_config(paths, &stack_paths, args).await?;
 
     if resolved.dry_run {
@@ -87,18 +88,28 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
 
     resolve_port_conflicts(&mut resolved)?;
 
+    let _lock = acquire_lock(&stack_paths)?;
+    ensure_context_not_running(&stack_paths).await?;
+
+    write_generated_compose(&resolved)?;
+    let state = desired_state_from_resolved(&resolved, Utc::now().to_rfc3339());
+    let compose = compose_project_from_state(&state);
+
     if resolved.detach {
-        let _lock = acquire_lock(&stack_paths)?;
         if stack_paths.runtime_file.exists() {
-            bail!(
-                "detached runtime already exists for context '{}': {}",
-                stack_name,
-                stack_paths.runtime_file.display()
-            );
+            remove_runtime_state(&stack_paths)?;
         }
 
-        let spawned = spawn_detached_stack(&resolved, http).await?;
-        let state = detached_state_from_spawn(&resolved, &spawned)?;
+        if let Err(err) = compose.up(true, false).await {
+            let _ = compose.down().await;
+            return Err(err);
+        }
+
+        if let Err(err) = wait_for_detached_startup(&compose, &state, http).await {
+            let _ = compose.down().await;
+            return Err(err);
+        }
+
         write_runtime_state(&stack_paths, &state)?;
         println!(
             "context '{}' started in detached mode (main: {}:{})",
@@ -107,8 +118,11 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
         return Ok(());
     }
 
-    let foreground = spawn_foreground_stack(&resolved, http).await?;
-    monitor_foreground_stack(foreground).await
+    let result = compose.up(false, false).await;
+    if result.is_err() {
+        let _ = compose.down().await;
+    }
+    result
 }
 
 async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
@@ -122,35 +136,43 @@ async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
     let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
     let selectors = parse_runner_selectors(&args.runners)?;
+    let _lock = acquire_lock(&stack_paths)?;
+    let state = read_required_state(&stack_paths)?;
+
     if selectors.is_empty() {
-        stop_detached_context(&stack_paths).await?;
-    } else {
-        let _lock = acquire_lock(&stack_paths)?;
-        let mut state = read_required_state(&stack_paths)?;
-
-        let selected = select_runner_indexes(&state.runners, &selectors)?;
-        let remaining_local = state.runners.len().saturating_sub(selected.len());
-        if remaining_local == 0 && state.attached_runners.is_empty() {
-            bail!(
-                "cannot remove the selected runners because the context would have zero runner sources"
-            );
-        }
-
-        let selected_pids = selected
-            .iter()
-            .map(|idx| state.runners[*idx].pid)
-            .collect::<Vec<_>>();
-        graceful_shutdown_pids(&selected_pids, Duration::from_secs(3)).await?;
-
-        state.runners = state
-            .runners
-            .into_iter()
-            .enumerate()
-            .filter_map(|(idx, runner)| (!selected.contains(&idx)).then_some(runner))
-            .collect();
-        write_runtime_state(&stack_paths, &state)?;
-        println!("context '{}' updated", stack_name);
+        stop_detached_context(&stack_paths, &state).await?;
+        return Ok(());
     }
+
+    let selected = select_runner_indexes(&state.runners, &selectors)?;
+    let remaining_local = state.runners.len().saturating_sub(selected.len());
+    if remaining_local == 0 && state.attached_runners.is_empty() {
+        bail!(
+            "cannot remove the selected runners because the context would have zero runner sources"
+        );
+    }
+
+    let compose = compose_project_from_state(&state);
+    let selected_services = selected
+        .iter()
+        .map(|idx| state.runners[*idx].service_name.clone())
+        .collect::<Vec<_>>();
+    compose.stop_services(&selected_services).await?;
+    compose.remove_services(&selected_services).await?;
+
+    let next_state = DetachedRuntimeState {
+        runners: state
+            .runners
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, runner)| (!selected.contains(&idx)).then_some(runner.clone()))
+            .collect(),
+        ..state.clone()
+    };
+    let resolved = ResolvedUpConfig::from_runtime(&stack_paths, &next_state, None).await?;
+    write_generated_compose(&resolved)?;
+    write_runtime_state(&stack_paths, &next_state)?;
+    println!("context '{}' updated", stack_name);
     Ok(())
 }
 
@@ -159,14 +181,20 @@ async fn cmd_restart(paths: &PreviaPaths, http: &Client, args: RestartArgs) -> R
     let stack_paths = paths.stack(&stack_name);
     let _lock = acquire_lock(&stack_paths)?;
     let state = read_required_state(&stack_paths)?;
+    let resolved =
+        ResolvedUpConfig::from_runtime(&stack_paths, &state, args.version.as_deref()).await?;
+    write_generated_compose(&resolved)?;
 
-    let pids = all_runtime_pids(&state);
-    graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
-    remove_runtime_state(&stack_paths)?;
+    let next_state = desired_state_from_resolved(&resolved, Utc::now().to_rfc3339());
+    let compose = compose_project_from_state(&next_state);
+    compose.down().await?;
+    compose.up(true, true).await?;
 
-    let resolved = ResolvedUpConfig::from_runtime(paths, &stack_paths, &state).await?;
-    let spawned = spawn_detached_stack(&resolved, http).await?;
-    let next_state = detached_state_from_spawn(&resolved, &spawned)?;
+    if let Err(err) = wait_for_detached_startup(&compose, &next_state, http).await {
+        let _ = compose.down().await;
+        return Err(err);
+    }
+
     write_runtime_state(&stack_paths, &next_state)?;
     println!("context '{}' restarted", stack_name);
     Ok(())
@@ -253,38 +281,30 @@ async fn cmd_logs(paths: &PreviaPaths, args: LogsArgs) -> Result<()> {
 
     let stack_paths = paths.stack(&stack_name);
     let state = read_required_state(&stack_paths)?;
-    let logs = if args.main {
-        vec![("main".to_owned(), PathBuf::from(&state.main.log_path))]
+    let compose = compose_project_from_state(&state);
+
+    let services = if args.main {
+        vec![state.main.service_name.clone()]
     } else if let Some(selector) = args.runner.as_deref() {
         let selector = RunnerSelector::parse(selector)?;
         let indexes = select_runner_indexes(&state.runners, &[selector])?;
         indexes
             .into_iter()
-            .map(|idx| {
-                let runner = &state.runners[idx];
-                (
-                    format!("runner:{}:{}", runner.address, runner.port),
-                    PathBuf::from(&runner.log_path),
-                )
-            })
-            .collect()
+            .map(|idx| state.runners[idx].service_name.clone())
+            .collect::<Vec<_>>()
     } else {
-        let mut files = vec![("main".to_owned(), PathBuf::from(&state.main.log_path))];
+        let mut services = vec![state.main.service_name.clone()];
         let mut runners = state.runners.clone();
         runners.sort_by_key(|runner| runner.port);
-        files.extend(runners.into_iter().map(|runner| {
-            (
-                format!("runner:{}:{}", runner.address, runner.port),
-                PathBuf::from(runner.log_path),
-            )
-        }));
-        files
+        services.extend(runners.into_iter().map(|runner| runner.service_name));
+        services
     };
 
     if args.follow {
-        follow_logs(logs, args.tail).await
+        compose.logs_follow(&services, args.tail).await
     } else {
-        print_logs(logs, args.tail).await
+        print!("{}", compose.logs_output(&services, args.tail).await?);
+        Ok(())
     }
 }
 
@@ -300,6 +320,7 @@ async fn cmd_open(paths: &PreviaPaths, args: OpenArgs) -> Result<()> {
 
 fn print_dry_run(resolved: &ResolvedUpConfig) {
     println!("context: {}", resolved.stack_paths.name);
+    println!("image tag: {}", resolved.image_tag);
     println!("main: {}:{}", resolved.main.address, resolved.main.port);
     println!(
         "local runners: {} ({:?}-{:?})",
@@ -313,16 +334,30 @@ fn print_dry_run(resolved: &ResolvedUpConfig) {
     }
 }
 
-fn ensure_context_not_running(stack_paths: &StackPaths) -> Result<()> {
+async fn ensure_context_not_running(stack_paths: &StackPaths) -> Result<()> {
     let Some(state) = read_runtime_state(stack_paths)? else {
         return Ok(());
     };
+    let compose = compose_project_from_state(&state);
+    let mut service_names = vec![state.main.service_name.clone()];
+    service_names.extend(
+        state
+            .runners
+            .iter()
+            .map(|runner| runner.service_name.clone()),
+    );
 
-    if !all_runtime_pids(&state).into_iter().any(pid_exists) {
-        return Ok(());
+    for service_name in &service_names {
+        if compose
+            .inspect_service(service_name)
+            .await?
+            .is_some_and(|service| service.running)
+        {
+            bail!("{}", running_context_message(&state));
+        }
     }
 
-    bail!("{}", running_context_message(&state));
+    Ok(())
 }
 
 fn running_context_message(state: &DetachedRuntimeState) -> String {
@@ -345,10 +380,11 @@ async fn cmd_down_all_contexts(paths: &PreviaPaths) -> Result<()> {
 
     let mut stopped = 0usize;
     for stack_path in stack_paths {
-        if read_runtime_state(&stack_path)?.is_none() {
+        let Some(state) = read_runtime_state(&stack_path)? else {
             continue;
-        }
-        stop_detached_context(&stack_path).await?;
+        };
+        let _lock = acquire_lock(&stack_path)?;
+        stop_detached_context(&stack_path, &state).await?;
         stopped += 1;
     }
 
@@ -356,11 +392,12 @@ async fn cmd_down_all_contexts(paths: &PreviaPaths) -> Result<()> {
     Ok(())
 }
 
-async fn stop_detached_context(stack_paths: &StackPaths) -> Result<()> {
-    let _lock = acquire_lock(stack_paths)?;
-    let state = read_required_state(stack_paths)?;
-    let pids = all_runtime_pids(&state);
-    graceful_shutdown_pids(&pids, Duration::from_secs(3)).await?;
+async fn stop_detached_context(
+    stack_paths: &StackPaths,
+    state: &DetachedRuntimeState,
+) -> Result<()> {
+    let compose = compose_project_from_state(state);
+    compose.down().await?;
     remove_runtime_state(stack_paths)?;
     println!("context '{}' stopped", stack_paths.name);
     Ok(())
@@ -387,7 +424,7 @@ fn resolve_port_conflicts(resolved: &mut ResolvedUpConfig) -> Result<()> {
                 conflict,
                 next_port,
                 &format!("-p {next_port}"),
-                &format!("use -p <port> to define the main port explicitly"),
+                "use -p <port> to define the main port explicitly",
             )? {
                 bail!(
                     "{}; rerun with -p <port> to choose a free main port",
@@ -461,48 +498,6 @@ fn prompt_for_suggested_port(
     Ok(normalized.is_empty() || normalized == "y" || normalized == "yes")
 }
 
-fn detached_state_from_spawn(
-    resolved: &ResolvedUpConfig,
-    spawned: &SpawnedStack,
-) -> Result<DetachedRuntimeState> {
-    Ok(DetachedRuntimeState {
-        name: resolved.stack_paths.name.clone(),
-        mode: "detached".to_owned(),
-        started_at: Utc::now().to_rfc3339(),
-        source: resolved
-            .source
-            .as_ref()
-            .map(|path| path.display().to_string()),
-        main: MainRuntime {
-            pid: child_id(&spawned.main)?,
-            address: resolved.main.address.clone(),
-            port: resolved.main.port,
-            log_path: resolved.stack_paths.main_log.display().to_string(),
-        },
-        runner_port_range: resolved.runner_port_range,
-        attached_runners: resolved.attached_runners.clone(),
-        runners: resolved
-            .local_runner_ports
-            .iter()
-            .zip(spawned.runners.iter())
-            .map(|((address, port), child)| {
-                Ok(LocalRunnerRuntime {
-                    pid: child_id(child)?,
-                    address: address.clone(),
-                    port: *port,
-                    log_path: resolved.stack_paths.runner_log(*port).display().to_string(),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?,
-    })
-}
-
-fn child_id(child: &tokio::process::Child) -> Result<u32> {
-    child
-        .id()
-        .ok_or_else(|| anyhow!("spawned process has no pid"))
-}
-
 async fn build_status_json(
     stack_paths: &StackPaths,
     state: Option<&DetachedRuntimeState>,
@@ -528,13 +523,14 @@ async fn build_status_json(
         });
     };
 
+    let compose = compose_project_from_state(state);
     let main = if runner_selector.is_none() {
-        Some(status_process_json_from_main(&state.main, http).await?)
+        Some(status_process_json_from_main(&compose, &state.main, http).await?)
     } else {
         None
     };
 
-    let runners = if main_only {
+    let selected_runners = if main_only {
         Vec::new()
     } else if let Some(selector) = runner_selector {
         let indexes = select_runner_indexes(&state.runners, std::slice::from_ref(selector))?;
@@ -546,7 +542,7 @@ async fn build_status_json(
         state.runners.clone()
     };
 
-    let runners = collect_status_runner_json(&runners, http).await?;
+    let runners = collect_status_runner_json(&compose, &selected_runners, http).await?;
     let runner_states = runners
         .iter()
         .map(|runner| runner.state.clone())
@@ -554,7 +550,6 @@ async fn build_status_json(
     let state_name = derive_overall_state(
         main.as_ref().map(|main| main.state.as_str()),
         &runner_states,
-        state,
         main_only,
         runner_selector.is_some(),
     );
@@ -565,11 +560,7 @@ async fn build_status_json(
         runtime_file,
         main,
         runners,
-        attached_runners: if runner_selector.is_some() || main_only {
-            state.attached_runners.clone()
-        } else {
-            state.attached_runners.clone()
-        },
+        attached_runners: state.attached_runners.clone(),
     })
 }
 
@@ -580,78 +571,90 @@ async fn process_rows(
     let Some(state) = state else {
         return Ok(Vec::new());
     };
+    let compose = compose_project_from_state(state);
     let mut rows = Vec::new();
-    rows.push(process_json_from_main(&state.main, http).await?);
-    rows.extend(collect_runner_json(&state.runners, http).await?);
+    rows.push(process_json_from_main(&compose, &state.main, http).await?);
+    rows.extend(collect_runner_json(&compose, &state.runners, http).await?);
     Ok(rows)
 }
 
-async fn process_json_from_main(main: &MainRuntime, http: &Client) -> Result<ProcessJson> {
+async fn process_json_from_main(
+    compose: &ComposeProject,
+    main: &MainRuntime,
+    http: &Client,
+) -> Result<ProcessJson> {
     let health_url = format!("http://{}:{}/health", main.address, main.port);
-    let status = state_from_pid_and_health(main.pid, probe_health(http, &health_url).await);
+    let inspect = compose.inspect_service(&main.service_name).await?;
+    let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, http).await;
     Ok(ProcessJson {
         role: "main".to_owned(),
-        state: status.as_str().to_owned(),
-        pid: main.pid,
+        state: state.as_str().to_owned(),
+        pid,
         address: main.address.clone(),
         port: main.port,
         health_url,
-        log_path: main.log_path.clone(),
+        log_path,
     })
 }
 
 async fn status_process_json_from_main(
+    compose: &ComposeProject,
     main: &MainRuntime,
     http: &Client,
 ) -> Result<StatusProcessJson> {
     let health_url = format!("http://{}:{}/health", main.address, main.port);
-    let status = state_from_pid_and_health(main.pid, probe_health(http, &health_url).await);
+    let inspect = compose.inspect_service(&main.service_name).await?;
+    let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, http).await;
     Ok(StatusProcessJson {
-        state: status.as_str().to_owned(),
-        pid: main.pid,
+        state: state.as_str().to_owned(),
+        pid,
         address: main.address.clone(),
         port: main.port,
         health_url,
-        log_path: main.log_path.clone(),
+        log_path,
     })
 }
 
 async fn collect_runner_json(
+    compose: &ComposeProject,
     runners: &[LocalRunnerRuntime],
     http: &Client,
 ) -> Result<Vec<ProcessJson>> {
     let mut out = Vec::with_capacity(runners.len());
     for runner in runners {
         let health_url = format!("http://{}:{}/health", runner.address, runner.port);
-        let status = state_from_pid_and_health(runner.pid, probe_health(http, &health_url).await);
+        let inspect = compose.inspect_service(&runner.service_name).await?;
+        let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, http).await;
         out.push(ProcessJson {
             role: "runner".to_owned(),
-            state: status.as_str().to_owned(),
-            pid: runner.pid,
+            state: state.as_str().to_owned(),
+            pid,
             address: runner.address.clone(),
             port: runner.port,
             health_url,
-            log_path: runner.log_path.clone(),
+            log_path,
         });
     }
     Ok(out)
 }
 
 async fn collect_status_runner_json(
+    compose: &ComposeProject,
     runners: &[LocalRunnerRuntime],
     http: &Client,
 ) -> Result<Vec<StatusProcessJson>> {
     let mut out = Vec::with_capacity(runners.len());
     for runner in runners {
         let health_url = format!("http://{}:{}/health", runner.address, runner.port);
-        let status = state_from_pid_and_health(runner.pid, probe_health(http, &health_url).await);
+        let inspect = compose.inspect_service(&runner.service_name).await?;
+        let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, http).await;
         out.push(StatusProcessJson {
-            state: status.as_str().to_owned(),
-            pid: runner.pid,
+            state: state.as_str().to_owned(),
+            pid,
             address: runner.address.clone(),
             port: runner.port,
             health_url,
-            log_path: runner.log_path.clone(),
+            log_path,
         });
     }
     Ok(out)
@@ -664,8 +667,9 @@ async fn overall_stack_state(
     let Some(state) = state else {
         return Ok(DerivedState::Stopped);
     };
-    let main = process_json_from_main(&state.main, http).await?;
-    let runners = collect_runner_json(&state.runners, http).await?;
+    let compose = compose_project_from_state(state);
+    let main = process_json_from_main(&compose, &state.main, http).await?;
+    let runners = collect_runner_json(&compose, &state.runners, http).await?;
     let runner_states = runners
         .iter()
         .map(|runner| runner.state.clone())
@@ -673,7 +677,6 @@ async fn overall_stack_state(
     Ok(derive_overall_state(
         Some(main.state.as_str()),
         &runner_states,
-        state,
         false,
         false,
     ))
@@ -682,7 +685,6 @@ async fn overall_stack_state(
 fn derive_overall_state(
     main_state: Option<&str>,
     runner_states: &[String],
-    _runtime: &DetachedRuntimeState,
     main_only: bool,
     runner_only: bool,
 ) -> DerivedState {
@@ -700,12 +702,6 @@ fn derive_overall_state(
         );
     }
     DerivedState::collapse(&states)
-}
-
-fn all_runtime_pids(state: &DetachedRuntimeState) -> Vec<u32> {
-    let mut pids = vec![state.main.pid];
-    pids.extend(state.runners.iter().map(|runner| runner.pid));
-    pids
 }
 
 fn select_runner_indexes(
@@ -745,6 +741,74 @@ fn read_required_state(stack_paths: &StackPaths) -> Result<DetachedRuntimeState>
             stack_paths.name
         )
     })
+}
+
+async fn runtime_state_from_inspect(
+    inspect: Option<ServiceInspect>,
+    health_url: &str,
+    http: &Client,
+) -> (DerivedState, u32, String) {
+    let Some(inspect) = inspect else {
+        return (DerivedState::Stopped, 0, String::new());
+    };
+    let healthy = if inspect.running {
+        probe_health(http, health_url).await
+    } else {
+        false
+    };
+    (
+        state_from_running_and_health(inspect.running, healthy),
+        inspect.pid,
+        inspect.log_path,
+    )
+}
+
+async fn wait_for_detached_startup(
+    compose: &ComposeProject,
+    state: &DetachedRuntimeState,
+    http: &Client,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let main = compose.inspect_service(MAIN_SERVICE_NAME).await?;
+        if main.as_ref().is_some_and(|service| !service.running) {
+            bail!("service '{MAIN_SERVICE_NAME}' exited during startup");
+        }
+
+        let main_healthy = main.is_some()
+            && probe_health(
+                http,
+                &format!("http://{}:{}/health", state.main.address, state.main.port),
+            )
+            .await;
+
+        let mut runners_healthy = true;
+        for runner in &state.runners {
+            let inspect = compose.inspect_service(&runner.service_name).await?;
+            if inspect.as_ref().is_some_and(|service| !service.running) {
+                bail!("service '{}' exited during startup", runner.service_name);
+            }
+            if inspect.is_none()
+                || !probe_health(
+                    http,
+                    &format!("http://{}:{}/health", runner.address, runner.port),
+                )
+                .await
+            {
+                runners_healthy = false;
+            }
+        }
+
+        if main_healthy && runners_healthy {
+            return Ok(());
+        }
+
+        if Instant::now() >= deadline {
+            bail!("services did not become healthy before the startup timeout");
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
 }
 
 #[cfg(test)]

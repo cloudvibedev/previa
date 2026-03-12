@@ -1,5 +1,7 @@
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(test)]
+use std::path::Path;
 
 use anyhow::{Context, Result};
 
@@ -17,10 +19,10 @@ pub struct StackPaths {
     pub main_data_dir: PathBuf,
     pub orchestrator_db: PathBuf,
     pub runner_logs_dir: PathBuf,
-    pub main_log: PathBuf,
     pub run_dir: PathBuf,
     pub runtime_file: PathBuf,
     pub lock_file: PathBuf,
+    pub compose_file: PathBuf,
 }
 
 impl PreviaPaths {
@@ -37,14 +39,6 @@ impl PreviaPaths {
         Ok(Self { home })
     }
 
-    pub fn main_binary(&self) -> Result<PathBuf> {
-        resolve_binary(&self.home, "previa-main")
-    }
-
-    pub fn runner_binary(&self) -> Result<PathBuf> {
-        resolve_binary(&self.home, "previa-runner")
-    }
-
     pub fn stack(&self, name: &str) -> StackPaths {
         let root = self.home.join("stacks").join(name);
         let config_dir = root.join("config");
@@ -57,9 +51,9 @@ impl PreviaPaths {
             main_env: config_dir.join("main.env"),
             runner_env: config_dir.join("runner.env"),
             orchestrator_db: main_data_dir.join("orchestrator.db"),
-            main_log: logs_dir.join("main.log"),
             runtime_file: run_dir.join("state.json"),
             lock_file: run_dir.join("lock"),
+            compose_file: run_dir.join("docker-compose.generated.yaml"),
             config_dir,
             main_data_dir,
             runner_logs_dir,
@@ -87,10 +81,6 @@ impl PreviaPaths {
 }
 
 impl StackPaths {
-    pub fn runner_log(&self, port: u16) -> PathBuf {
-        self.runner_logs_dir.join(format!("{port}.log"))
-    }
-
     pub fn ensure_parent_dirs(&self) -> Result<()> {
         std::fs::create_dir_all(&self.config_dir)
             .with_context(|| format!("failed to create '{}'", self.config_dir.display()))?;
@@ -113,49 +103,11 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
         .join(path))
 }
 
-pub fn sqlite_database_url(path: &Path) -> String {
+pub fn sqlite_database_url(path: &std::path::Path) -> String {
     format!("sqlite://{}", path.display())
 }
 
-fn resolve_binary(home: &Path, binary_name: &str) -> Result<PathBuf> {
-    let candidates = binary_candidates(home, binary_name)?;
-    for candidate in &candidates {
-        if candidate.exists() {
-            return Ok(candidate.clone());
-        }
-    }
-
-    let searched = candidates
-        .iter()
-        .map(|candidate| format!("'{}'", candidate.display()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    anyhow::bail!("missing binary '{}'; searched {}", binary_name, searched);
-}
-
-fn binary_candidates(home: &Path, binary_name: &str) -> Result<Vec<PathBuf>> {
-    let mut candidates = vec![home.join("bin").join(binary_name)];
-
-    if let Ok(exe) = env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join(binary_name));
-        }
-    }
-
-    if let Some(workspace_root) = discover_workspace_root()? {
-        candidates.push(workspace_root.join("target/debug").join(binary_name));
-        candidates.push(workspace_root.join("target/release").join(binary_name));
-    }
-
-    candidates.dedup();
-    Ok(candidates)
-}
-
-fn discover_workspace_root() -> Result<Option<PathBuf>> {
-    let current_dir = env::current_dir().context("failed to read current directory")?;
-    Ok(find_workspace_root(&current_dir))
-}
-
+#[cfg(test)]
 fn find_workspace_root(start: &Path) -> Option<PathBuf> {
     for dir in start.ancestors() {
         let manifest = dir.join("Cargo.toml");
