@@ -75,7 +75,9 @@ Currently implemented operators:
 ## Important Behavior Notes
 
 - `GET` and `HEAD` do not send request body.
+- `delay` is expressed in milliseconds and is applied before each attempt, including retries.
 - `maxAttempts = retry + 1`.
+- Assertion failures can trigger retry when `retry` allows additional attempts.
 - `should_cancel` callback can interrupt execution.
 - Unknown templates may remain unchanged.
 
