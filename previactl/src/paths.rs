@@ -1,7 +1,7 @@
 use std::env;
-use std::path::PathBuf;
 #[cfg(test)]
 use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 

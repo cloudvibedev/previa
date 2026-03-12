@@ -196,6 +196,10 @@ mod tests {
                 .get("access-control-allow-private-network"),
             Some(&HeaderValue::from_static("true"))
         );
-        assert!(response.headers().contains_key("access-control-allow-origin"));
+        assert!(
+            response
+                .headers()
+                .contains_key("access-control-allow-origin")
+        );
     }
 }
