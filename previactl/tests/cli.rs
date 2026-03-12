@@ -405,7 +405,7 @@ fn down_all_context_stops_every_detached_context() {
 
     cargo_bin()
         .env("PREVIA_HOME", temp.path())
-        .args(["down", "--all-context"])
+        .args(["down", "--all-contexts"])
         .assert()
         .success();
 

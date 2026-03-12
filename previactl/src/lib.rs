@@ -107,7 +107,7 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
 async fn cmd_down(paths: &PreviaPaths, args: DownArgs) -> Result<()> {
     if args.all_context {
         if !args.runners.is_empty() {
-            bail!("--all-context and --runner are mutually exclusive");
+            bail!("--all-contexts and --runner are mutually exclusive");
         }
         return cmd_down_all_contexts(paths).await;
     }

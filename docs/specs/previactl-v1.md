@@ -40,7 +40,7 @@ The v1 CLI surface is fixed to the commands below:
 
 ```text
 previactl up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach]
-previactl down [--context <context-name>] [--all-context] [--runner <address|address:port|port> ...]
+previactl down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]
 previactl restart [--context <context-name>]
 previactl status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]
 previactl list [--json]
@@ -172,11 +172,11 @@ No additional v1 commands are required.
   `PREVIA_HOME/stacks/<context-name>/logs/runners/<port>.log`.
 - Does not rewrite the context-scoped `main.env` or `runner.env`.
 
-#### `previactl down [--context <context-name>] [--all-context] [--runner <address|address:port|port> ...]`
+#### `previactl down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]`
 
 - Stops a local detached context started by `previactl up --detach`.
 - Accepts `--context <context-name>` and defaults to `default` when omitted.
-- Accepts `--all-context` to stop every detached context recorded under
+- Accepts `--all-contexts` to stop every detached context recorded under
   `PREVIA_HOME/stacks/`.
 - Reads the runtime file for the selected context name.
 - Without `--runner`, sends a termination signal to the recorded
@@ -189,11 +189,11 @@ No additional v1 commands are required.
   runtime file after removing the stopped local runner entries and preserving
   the `previa-main` PID plus any remaining local runners and attached runner
   endpoints.
-- With `--all-context`, ignores per-context selection and stops every detached
+- With `--all-contexts`, ignores per-context selection and stops every detached
   context that currently has a runtime file.
-- With `--all-context`, removes each selected context runtime file after the
+- With `--all-contexts`, removes each selected context runtime file after the
   recorded local processes exit.
-- `--all-context` and `--runner <selector>` are mutually exclusive in v1.
+- `--all-contexts` and `--runner <selector>` are mutually exclusive in v1.
 - `--runner <selector>` accepts:
   - `port`, for example `55880`
   - `address:port`, for example `127.0.0.1:55880`
@@ -835,7 +835,7 @@ The implementation must surface explicit user-facing errors for:
 - Unknown local runner selector during `down --runner <selector>`.
 - Attempted `down --runner <selector>` that would leave the stack with zero runner
   sources.
-- Mutually exclusive `down --all-context` and `down --runner <selector>`.
+- Mutually exclusive `down --all-contexts` and `down --runner <selector>`.
 - Missing detached runtime file for the selected context name during `restart`.
 - Mutually exclusive `status --main` and `status --runner <selector>`.
 - Unknown local runner selector during `status --runner <selector>`.
@@ -988,7 +988,7 @@ The implementation is complete only when these scenarios are covered:
 65. `down --runner 55880` fails clearly if removing that runner would leave the
     context with zero runner sources overall.
 66. `down` does not attempt to terminate attached runner endpoints.
-67. `down --all-context` stops every detached context with a runtime file under
+67. `down --all-contexts` stops every detached context with a runtime file under
     `PREVIA_HOME/stacks/`.
 68. `restart --context api` reads `PREVIA_HOME/stacks/api/run/state.json`, stops the
     detached local processes, starts a new detached context with the same runner

@@ -71,7 +71,7 @@ pub struct DownArgs {
         help = "Context name"
     )]
     pub context: String,
-    #[arg(long = "all-context")]
+    #[arg(long = "all-contexts")]
     pub all_context: bool,
     #[arg(long = "runner")]
     pub runners: Vec<String>,
