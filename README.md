@@ -45,20 +45,6 @@ https://downloads.previa.dev/install.sh
 
 The installer writes binaries to `~/.previa/bin`, sets `PREVIA_HOME="$HOME/.previa"`, and updates `~/.zshrc` and `~/.bashrc` when they exist.
 
-### Windows
-
-```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://downloads.previa.dev/install.ps1 | iex"
-```
-
-Direct script URL:
-
-```text
-https://downloads.previa.dev/install.ps1
-```
-
-The installer writes binaries to `%LOCALAPPDATA%\Previa\bin`, sets `PREVIA_HOME`, and updates the user `Path`.
-
 ## Quick Start
 
 ### 1. Start one or more runners

@@ -89,13 +89,6 @@ jobs:
             arch_slug: arm64
             exe_ext: ""
             use_cross: false
-          - name: windows-amd64
-            runs_on: windows-latest
-            target: x86_64-pc-windows-msvc
-            os_slug: windows
-            arch_slug: amd64
-            exe_ext: ".exe"
-            use_cross: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -272,9 +265,6 @@ jobs:
 
           echo "Uploading install.sh to s3://${R2_BUCKET}/install.sh"
           aws s3 cp install.sh "s3://${R2_BUCKET}/install.sh" --endpoint-url "${endpoint}" --no-progress
-
-          echo "Uploading install.ps1 to s3://${R2_BUCKET}/install.ps1"
-          aws s3 cp install.ps1 "s3://${R2_BUCKET}/install.ps1" --endpoint-url "${endpoint}" --no-progress
 
   tag_release:
     name: Create git tag
