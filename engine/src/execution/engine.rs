@@ -1106,6 +1106,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accepts_array_index_assertions_in_response_body() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/runtime");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "app": {
+                            "status": "ready"
+                        },
+                        "pods": [
+                            {
+                                "podName": "app-keep-manual-123",
+                                "phase": "Running"
+                            }
+                        ],
+                        "containers": [
+                            {
+                                "name": "app-keep-manual"
+                            }
+                        ]
+                    }));
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Runtime arrays".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "runtime".to_owned(),
+                name: "Runtime".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/runtime", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: vec![
+                    StepAssertion {
+                        field: "status".to_owned(),
+                        operator: "equals".to_owned(),
+                        expected: Some("200".to_owned()),
+                    },
+                    StepAssertion {
+                        field: "body.app.status".to_owned(),
+                        operator: "equals".to_owned(),
+                        expected: Some("ready".to_owned()),
+                    },
+                    StepAssertion {
+                        field: "body.pods.0.podName".to_owned(),
+                        operator: "exists".to_owned(),
+                        expected: None,
+                    },
+                    StepAssertion {
+                        field: "body.pods.0.phase".to_owned(),
+                        operator: "equals".to_owned(),
+                        expected: Some("Running".to_owned()),
+                    },
+                    StepAssertion {
+                        field: "body.containers.0.name".to_owned(),
+                        operator: "exists".to_owned(),
+                        expected: None,
+                    },
+                ],
+            }],
+        };
+
+        let results = execute_pipeline(&pipeline, None).await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "success");
+        assert_eq!(results[0].error, None);
+        assert!(
+            results[0]
+                .assert_results
+                .as_ref()
+                .is_some_and(|items| items.iter().all(|item| item.passed))
+        );
+        call.assert_calls_async(1).await;
+    }
+
+    #[tokio::test]
     async fn retries_when_status_assert_fails_on_http_error() {
         let server = MockServer::start_async().await;
         let call = server
