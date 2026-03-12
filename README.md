@@ -81,6 +81,7 @@ http://127.0.0.1:5588
 - [`engine/README.md`](engine/README.md)
 - [`runner/README.md`](runner/README.md)
 - [`main/README.md`](main/README.md)
+- [`docs/previactl-usage.md`](docs/previactl-usage.md)
 - [`docs/specs/previactl-v1.md`](docs/specs/previactl-v1.md)
 
 ## Local Verification
