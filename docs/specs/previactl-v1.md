@@ -128,6 +128,11 @@ No additional v1 commands are required.
   plan without spawning child processes or mutating runtime state.
 - Accepts `-d` and `--detach` to leave the spawned processes running in
   background.
+- Before validating local bind availability or spawning any child process, `up`
+  must fail clearly when the selected context already has running recorded
+  processes.
+- That error must identify the selected context and list the recorded services
+  with their addresses and ports.
 - Uses the lowest port in the effective runner port range for the first local
   runner and increments sequentially for each additional local runner.
 - Builds `RUNNER_ENDPOINTS` for `previa-main` by concatenating:

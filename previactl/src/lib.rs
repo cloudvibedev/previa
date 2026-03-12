@@ -33,7 +33,7 @@ use crate::output::{
 use crate::paths::{PreviaPaths, StackPaths};
 use crate::process::{
     BindingConflict, BindingConflictKind, SpawnedStack, conflict_message, graceful_shutdown_pids,
-    monitor_foreground_stack, spawn_detached_stack, spawn_foreground_stack,
+    monitor_foreground_stack, pid_exists, spawn_detached_stack, spawn_foreground_stack,
     startup_binding_conflicts, validate_startup_bindings,
 };
 use crate::runtime::{
@@ -69,6 +69,7 @@ pub async fn run() -> Result<()> {
 async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> {
     let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
+    ensure_context_not_running(&stack_paths)?;
     let mut resolved = resolve_up_config(paths, &stack_paths, args).await?;
 
     if resolved.dry_run {
@@ -303,6 +304,32 @@ fn print_dry_run(resolved: &ResolvedUpConfig) {
     if let Some(source) = &resolved.source {
         println!("source: {}", source.display());
     }
+}
+
+fn ensure_context_not_running(stack_paths: &StackPaths) -> Result<()> {
+    let Some(state) = read_runtime_state(stack_paths)? else {
+        return Ok(());
+    };
+
+    if !all_runtime_pids(&state).into_iter().any(pid_exists) {
+        return Ok(());
+    }
+
+    bail!("{}", running_context_message(&state));
+}
+
+fn running_context_message(state: &DetachedRuntimeState) -> String {
+    let mut lines = vec![
+        format!("context '{}' is already running", state.name),
+        format!("main: {}:{}", state.main.address, state.main.port),
+    ];
+    for runner in &state.runners {
+        lines.push(format!("runner: {}:{}", runner.address, runner.port));
+    }
+    for attached in &state.attached_runners {
+        lines.push(format!("attached-runner: {attached}"));
+    }
+    lines.join("\n")
 }
 
 async fn cmd_down_all_contexts(paths: &PreviaPaths) -> Result<()> {

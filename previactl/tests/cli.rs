@@ -288,6 +288,66 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
 }
 
 #[test]
+fn up_fails_early_when_context_is_already_running() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_previa_home();
+    let stack = "busy";
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args([
+            "up",
+            "--context",
+            stack,
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "-r",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    thread::sleep(Duration::from_millis(500));
+    let next_main_port = find_free_port();
+
+    let output = cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args([
+            "up",
+            "--context",
+            stack,
+            "--main-port",
+            &next_main_port.to_string(),
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains(&format!("context '{stack}' is already running")));
+    assert!(stderr.contains(&format!("main: 127.0.0.1:{main_port}")));
+    assert!(stderr.contains(&format!("runner: 127.0.0.1:{runner_port}")));
+
+    cargo_bin()
+        .env("PREVIA_HOME", temp.path())
+        .args(["down", "--context", stack])
+        .assert()
+        .success();
+}
+
+#[test]
 fn down_all_context_stops_every_detached_context() {
     if !python3_available() {
         return;
