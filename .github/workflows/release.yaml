@@ -372,16 +372,16 @@ jobs:
       matrix:
         include:
           - service: previa-runner
-            image: cloudvibe-runner
+            image: previa/runner
             arch: amd64
           - service: previa-runner
-            image: cloudvibe-runner
+            image: previa/runner
             arch: arm64
           - service: previa-main
-            image: cloudvibe-main
+            image: previa/main
             arch: amd64
           - service: previa-main
-            image: cloudvibe-main
+            image: previa/main
             arch: arm64
     steps:
       - name: Checkout
@@ -424,8 +424,8 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest-${{ matrix.arch }}
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.version_check.outputs.version }}-${{ matrix.arch }}
+            ghcr.io/${{ matrix.image }}:latest-${{ matrix.arch }}
+            ghcr.io/${{ matrix.image }}:${{ needs.version_check.outputs.version }}-${{ matrix.arch }}
           build-args: |
             BIN_NAME=${{ matrix.service }}
             TARGETARCH=${{ matrix.arch }}
@@ -441,8 +441,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: cloudvibe-main
-          - image: cloudvibe-runner
+          - image: previa/main
+          - image: previa/runner
     steps:
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -457,7 +457,7 @@ jobs:
           VERSION: ${{ needs.version_check.outputs.version }}
         run: |
           set -euo pipefail
-          image="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}"
+          image="ghcr.io/${{ matrix.image }}"
 
           docker buildx imagetools create \
             -t "${image}:latest" \
