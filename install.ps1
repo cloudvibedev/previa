@@ -38,6 +38,49 @@ function Get-ManifestLink {
     return [string] $property.Value
 }
 
+function Download-FileWithProgress {
+    param(
+        [Parameter(Mandatory = $true)][string] $Url,
+        [Parameter(Mandatory = $true)][string] $Destination,
+        [Parameter(Mandatory = $true)][string] $Activity
+    )
+
+    $httpClient = [System.Net.Http.HttpClient]::new()
+    try {
+        $response = $httpClient.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        $response.EnsureSuccessStatusCode()
+
+        $totalBytes = $response.Content.Headers.ContentLength
+        $downloadedBytes = 0L
+        $buffer = New-Object byte[] 65536
+        $stream = $response.Content.ReadAsStream()
+        $fileStream = [System.IO.File]::Open($Destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+
+        try {
+            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $fileStream.Write($buffer, 0, $read)
+                $downloadedBytes += $read
+
+                if ($totalBytes) {
+                    $percentComplete = [int](($downloadedBytes * 100) / $totalBytes)
+                    Write-Progress -Activity $Activity -Status "$percentComplete% ($downloadedBytes / $totalBytes bytes)" -PercentComplete $percentComplete
+                }
+                else {
+                    Write-Progress -Activity $Activity -Status "$downloadedBytes bytes downloaded" -PercentComplete 0
+                }
+            }
+        }
+        finally {
+            $fileStream.Dispose()
+            $stream.Dispose()
+            Write-Progress -Activity $Activity -Completed
+        }
+    }
+    finally {
+        $httpClient.Dispose()
+    }
+}
+
 function Add-PathEntry {
     param([Parameter(Mandatory = $true)][string] $PathValue)
 
@@ -88,7 +131,7 @@ function Install-Binary {
     $downloadPath = Join-Path $TempRoot $TargetName
 
     Write-Step "Downloading $TargetName"
-    Invoke-WebRequest -Uri $url -OutFile $downloadPath
+    Download-FileWithProgress -Url $url -Destination $downloadPath -Activity "Downloading $TargetName"
     Copy-Item -Path $downloadPath -Destination $destination -Force
     Write-Success "Installed $TargetName -> $destination"
 }
@@ -115,7 +158,10 @@ try {
     Write-Success "Platform: $osSlug/$archSlug"
 
     Write-Step 'Downloading manifest'
-    $manifest = Invoke-RestMethod -Uri $ManifestUrl -Method Get
+    New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+    $manifestPath = Join-Path $tempRoot 'manifest.json'
+    Download-FileWithProgress -Url $ManifestUrl -Destination $manifestPath -Activity 'Downloading manifest'
+    $manifest = Get-Content -Raw $manifestPath | ConvertFrom-Json
     if (-not $manifest.version) {
         Fail 'Manifest is invalid: missing version.'
     }
@@ -123,7 +169,6 @@ try {
 
     Write-Step "Installing binaries into $BinDir"
     New-Item -Path $BinDir -ItemType Directory -Force | Out-Null
-    New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
 
     Install-Binary -Manifest $manifest -AssetKey "previa_main_${osSlug}_${archSlug}" -TargetName 'previa-main.exe' -TempRoot $tempRoot
     Install-Binary -Manifest $manifest -AssetKey "previa_runner_${osSlug}_${archSlug}" -TargetName 'previa-runner.exe' -TempRoot $tempRoot

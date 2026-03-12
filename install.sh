@@ -86,9 +86,9 @@ download_to() {
   destination="$2"
 
   if [ "${DOWNLOADER}" = "curl" ]; then
-    curl -fsSL "${url}" -o "${destination}" || fail "Failed to download ${url}."
+    curl -fL# "${url}" -o "${destination}" || fail "Failed to download ${url}."
   else
-    wget -qO "${destination}" "${url}" || fail "Failed to download ${url}."
+    wget --progress=bar:force:noscroll -O "${destination}" "${url}" || fail "Failed to download ${url}."
   fi
 }
 
