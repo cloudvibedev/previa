@@ -1,13 +1,23 @@
+use std::time::Duration;
+
 use previa_runner::Pipeline;
+use reqwest::Method;
+use reqwest::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
+use tokio::time::timeout;
+use tokio_stream::StreamExt;
 use tracing::info;
 
 use crate::server::db::{
-    delete_pipeline_record, insert_project_pipeline, list_e2e_history_records,
+    delete_pipeline_record, delete_project_spec_record, import_project_bundle,
+    insert_project_pipeline, insert_project_spec_record, list_e2e_history_records,
     list_load_history_records, list_project_records, list_project_spec_records,
-    load_e2e_history_record_by_id, load_load_history_record_by_id, load_pipelines_for_project,
-    load_project_pipeline_record, load_project_record, project_exists, update_project_pipeline,
+    load_e2e_history_for_export, load_e2e_history_record_by_id, load_load_history_for_export,
+    load_load_history_record_by_id, load_pipelines_for_project, load_project_export,
+    load_project_pipeline_record, load_project_record, load_project_spec_record_by_id,
+    project_exists, update_project_pipeline, update_project_spec_record, upsert_project_metadata,
+    upsert_project_with_pipelines,
 };
 use crate::server::docs::build_openapi_document;
 use crate::server::execution::collect_runner_statuses;
@@ -15,22 +25,31 @@ use crate::server::execution::e2e_queue::{
     QueueError, cancel_e2e_queue, create_e2e_queue, get_current_e2e_queue_snapshot,
     get_e2e_queue_snapshot,
 };
-use crate::server::execution::resolve_runtime_specs_for_execution;
+use crate::server::execution::forward::parse_sse_block;
+use crate::server::execution::{
+    StartE2eExecutionError, StartLoadExecutionError, resolve_runtime_specs_for_execution,
+    start_e2e_execution, start_load_execution,
+};
 use crate::server::mcp::models::{
-    CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, InitializeParams, ListProjectsToolArgs,
-    McpPeerInfo, McpRequest, McpResponse, McpSession, ProjectByIdArgs, ProjectHistoryToolArgs,
-    ProjectPipelineByIdArgs, ProjectQueueByIdArgs, ProjectTestByIdArgs, PromptDefinition,
-    PromptGetParams, PromptGetResult, PromptMessage, PromptTextContent, PromptsListParams,
-    SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult, ToolDefinition, ToolTextContent,
-    ToolsListParams, UpdateProjectPipelineArgs, ValidateOpenApiToolArgs,
+    CreateProjectArgs, CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, CreateProjectSpecArgs,
+    ExecutionByIdArgs, ExecutionCancelArgs, ExportProjectArgs, ImportProjectArgs, InitializeParams,
+    ListProjectsToolArgs, McpPeerInfo, McpRequest, McpResponse, McpSession, ProjectByIdArgs,
+    ProjectHistoryToolArgs, ProjectPipelineByIdArgs, ProjectQueueByIdArgs, ProjectSpecByIdArgs,
+    ProjectTestByIdArgs, PromptDefinition, PromptGetParams, PromptGetResult, PromptMessage,
+    PromptTextContent, PromptsListParams, ProxyToolArgs, RunProjectE2eTestArgs,
+    RunProjectLoadTestArgs, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult,
+    ToolDefinition, ToolTextContent, ToolsListParams, UpdateProjectArgs, UpdateProjectPipelineArgs,
+    UpdateProjectSpecArgs, ValidateOpenApiToolArgs,
 };
 use crate::server::models::{
-    HistoryQuery, OrchestratorInfoResponse, ProjectE2eQueueRequest, ProjectListQuery,
+    E2eTestRequest, HistoryQuery, LoadTestRequest, OrchestratorInfoResponse,
+    ProjectE2eQueueRequest, ProjectExportEnvelope, ProjectListQuery, ProxyRequest,
 };
-use crate::server::state::AppState;
-use crate::server::utils::new_uuid_v7;
+use crate::server::state::{AppState, ExecutionKind};
+use crate::server::utils::{new_uuid_v7, now_iso};
 use crate::server::validation::openapi::validate_openapi_source;
 use crate::server::validation::pipelines::{KNOWN_TEMPLATE_HELPERS, validate_pipeline_templates};
+use crate::server::validation::specs::{normalize_spec_slug, normalize_spec_urls_with_legacy};
 
 const INVALID_REQUEST: i32 = -32600;
 const METHOD_NOT_FOUND: i32 = -32601;
@@ -428,6 +447,117 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                 ))),
             }
         }
+        "create_project" => {
+            let args = parse_tool_arguments::<CreateProjectArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            if args.project.name.trim().is_empty() {
+                return Ok(tool_error("project name is required".to_owned()));
+            }
+            let project = upsert_project_with_pipelines(&state.db, new_uuid_v7(), args.project)
+                .await
+                .map_err(|err| format!("failed to create project: {err}"))?;
+            Ok(tool_success(serde_json::to_value(project).unwrap()))
+        }
+        "update_project" => {
+            let args = parse_tool_arguments::<UpdateProjectArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            if args.project.name.trim().is_empty() {
+                return Ok(tool_error("project name is required".to_owned()));
+            }
+            let project = upsert_project_metadata(&state.db, args.project_id, args.project)
+                .await
+                .map_err(|err| format!("failed to update project: {err}"))?;
+            Ok(tool_success(serde_json::to_value(project).unwrap()))
+        }
+        "delete_project" => {
+            let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let deleted = sqlx::query("DELETE FROM projects WHERE id = ?")
+                .bind(&args.project_id)
+                .execute(&state.db)
+                .await
+                .map_err(|err| format!("failed to delete project: {err}"))?
+                .rows_affected()
+                > 0;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "project '{}' not found",
+                    args.project_id
+                )))
+            }
+        }
+        "export_project" => {
+            let args = parse_tool_arguments::<ExportProjectArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let project_id = args.project_id.trim();
+            if project_id.is_empty() {
+                return Ok(tool_error("projectId cannot be empty".to_owned()));
+            }
+
+            let include_history = args.include_history.unwrap_or(true);
+            let mut project = match load_project_export(&state.db, project_id)
+                .await
+                .map_err(|err| format!("failed to load project export: {err}"))?
+            {
+                Some(project) => project,
+                None => return Ok(tool_error(format!("project '{}' not found", project_id))),
+            };
+
+            if include_history {
+                project.history.e2e = load_e2e_history_for_export(&state.db, project_id)
+                    .await
+                    .map_err(|err| format!("failed to load e2e history export: {err}"))?;
+                project.history.load = load_load_history_for_export(&state.db, project_id)
+                    .await
+                    .map_err(|err| format!("failed to load load history export: {err}"))?;
+            }
+
+            Ok(tool_success(
+                serde_json::to_value(ProjectExportEnvelope {
+                    format: "previa.project.export.v1".to_owned(),
+                    exported_at: now_iso(),
+                    history_included: include_history,
+                    project,
+                })
+                .unwrap(),
+            ))
+        }
+        "import_project" => {
+            let args = parse_tool_arguments::<ImportProjectArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let mut bundle = args.bundle;
+            if bundle.format != "previa.project.export.v1" {
+                return Ok(tool_error("invalid import format".to_owned()));
+            }
+            bundle.project.id = bundle.project.id.trim().to_owned();
+            bundle.project.name = bundle.project.name.trim().to_owned();
+            if bundle.project.id.is_empty() {
+                return Ok(tool_error("project.id is required".to_owned()));
+            }
+            if bundle.project.name.is_empty() {
+                return Ok(tool_error("project.name is required".to_owned()));
+            }
+            if project_exists(&state.db, &bundle.project.id)
+                .await
+                .map_err(|err| format!("failed to load project: {err}"))?
+            {
+                return Ok(tool_error("project already exists".to_owned()));
+            }
+
+            let imported = import_project_bundle(
+                &state.db,
+                &bundle.project,
+                args.include_history.unwrap_or(true),
+            )
+            .await
+            .map_err(|err| format!("failed to import project: {err}"))?;
+            Ok(tool_success(serde_json::to_value(imported).unwrap()))
+        }
         "list_project_pipelines" => {
             let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
@@ -659,6 +789,67 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                 .map_err(|err| format!("failed to list project specs: {err}"))?;
             Ok(tool_success(serde_json::to_value(specs).unwrap()))
         }
+        "get_project_spec" => {
+            let args = parse_tool_arguments::<ProjectSpecByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            match load_project_spec_record_by_id(&state.db, &args.project_id, &args.spec_id)
+                .await
+                .map_err(|err| format!("failed to load project spec: {err}"))?
+            {
+                Some(spec) => Ok(tool_success(serde_json::to_value(spec).unwrap())),
+                None => Ok(tool_error(format!(
+                    "project spec '{}' not found in project '{}'",
+                    args.spec_id, args.project_id
+                ))),
+            }
+        }
+        "create_project_spec" => {
+            let args = parse_tool_arguments::<CreateProjectSpecArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let payload = normalize_project_spec_payload(args.spec)?;
+            let spec = insert_project_spec_record(&state.db, &args.project_id, payload)
+                .await
+                .map_err(|err| format!("failed to create project spec: {err}"))?;
+            Ok(tool_success(serde_json::to_value(spec).unwrap()))
+        }
+        "update_project_spec" => {
+            let args = parse_tool_arguments::<UpdateProjectSpecArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let payload = normalize_project_spec_payload(args.spec)?;
+            match update_project_spec_record(&state.db, &args.project_id, &args.spec_id, payload)
+                .await
+                .map_err(|err| format!("failed to update project spec: {err}"))?
+            {
+                Some(spec) => Ok(tool_success(serde_json::to_value(spec).unwrap())),
+                None => Ok(tool_error(format!(
+                    "project spec '{}' not found in project '{}'",
+                    args.spec_id, args.project_id
+                ))),
+            }
+        }
+        "delete_project_spec" => {
+            let args = parse_tool_arguments::<ProjectSpecByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = delete_project_spec_record(&state.db, &args.project_id, &args.spec_id)
+                .await
+                .map_err(|err| format!("failed to delete project spec: {err}"))?;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "specId": args.spec_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "project spec '{}' not found in project '{}'",
+                    args.spec_id, args.project_id
+                )))
+            }
+        }
         "create_project_e2e_queue" => {
             let args = parse_tool_arguments::<CreateProjectE2eQueueArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
@@ -722,6 +913,157 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                 }))),
                 Err(err) => queue_tool_outcome(err),
             }
+        }
+        "run_project_e2e_test" => {
+            let args = parse_tool_arguments::<RunProjectE2eTestArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let transaction_id = args.transaction_id.clone();
+            let payload = resolve_project_e2e_request(state, args).await?;
+            match start_e2e_execution(state.clone(), payload, transaction_id).await {
+                Ok(started) => Ok(tool_success(
+                    execution_started_payload(state, &started.execution_id, "e2e").await,
+                )),
+                Err(err) => execution_start_tool_outcome(err),
+            }
+        }
+        "run_project_load_test" => {
+            let args = parse_tool_arguments::<RunProjectLoadTestArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let transaction_id = args.transaction_id.clone();
+            let payload = resolve_project_load_request(state, args).await?;
+            match start_load_execution(state.clone(), payload, transaction_id).await {
+                Ok(started) => Ok(tool_success(
+                    execution_started_payload(state, &started.execution_id, "load").await,
+                )),
+                Err(err) => load_execution_start_tool_outcome(err),
+            }
+        }
+        "get_execution" => {
+            let args = parse_tool_arguments::<ExecutionByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            match execution_snapshot(state, &args.project_id, &args.execution_id).await? {
+                Some(snapshot) => Ok(tool_success(snapshot)),
+                None => Ok(tool_error(format!(
+                    "execution '{}' not found in project '{}'",
+                    args.execution_id, args.project_id
+                ))),
+            }
+        }
+        "cancel_execution" => {
+            let args = parse_tool_arguments::<ExecutionCancelArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            match cancel_execution_payload(state, &args.execution_id).await? {
+                Some(payload) => Ok(tool_success(payload)),
+                None => Ok(tool_error(
+                    "execution not found or already finished".to_owned(),
+                )),
+            }
+        }
+        "delete_e2e_history" => {
+            let args = parse_tool_arguments::<ProjectHistoryToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = delete_history_rows(
+                &state.db,
+                "integration_history",
+                &args.project_id,
+                args.pipeline_index,
+            )
+            .await?;
+            Ok(tool_success(json!({
+                "projectId": args.project_id,
+                "pipelineIndex": args.pipeline_index,
+                "deleted": true,
+                "rowsAffected": deleted
+            })))
+        }
+        "delete_e2e_test" => {
+            let args = parse_tool_arguments::<ProjectTestByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = sqlx::query(
+                "DELETE FROM integration_history WHERE project_id = ? AND (id = ? OR execution_id = ?)",
+            )
+            .bind(&args.project_id)
+            .bind(&args.test_id)
+            .bind(&args.test_id)
+            .execute(&state.db)
+            .await
+            .map_err(|err| format!("failed to delete e2e history record: {err}"))?
+            .rows_affected()
+                > 0;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "testId": args.test_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "e2e test '{}' not found in project '{}'",
+                    args.test_id, args.project_id
+                )))
+            }
+        }
+        "delete_load_history" => {
+            let args = parse_tool_arguments::<ProjectHistoryToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = delete_history_rows(
+                &state.db,
+                "load_history",
+                &args.project_id,
+                args.pipeline_index,
+            )
+            .await?;
+            Ok(tool_success(json!({
+                "projectId": args.project_id,
+                "pipelineIndex": args.pipeline_index,
+                "deleted": true,
+                "rowsAffected": deleted
+            })))
+        }
+        "delete_load_test" => {
+            let args = parse_tool_arguments::<ProjectTestByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = sqlx::query(
+                "DELETE FROM load_history WHERE project_id = ? AND (id = ? OR execution_id = ?)",
+            )
+            .bind(&args.project_id)
+            .bind(&args.test_id)
+            .bind(&args.test_id)
+            .execute(&state.db)
+            .await
+            .map_err(|err| format!("failed to delete load history record: {err}"))?
+            .rows_affected()
+                > 0;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "testId": args.test_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "load test '{}' not found in project '{}'",
+                    args.test_id, args.project_id
+                )))
+            }
+        }
+        "proxy_request" => {
+            let args = parse_tool_arguments::<ProxyToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let payload = render_proxy_request(args.request)?;
+            let result = proxy_tool_request(
+                state,
+                payload,
+                args.max_events.unwrap_or(50),
+                args.timeout_ms.unwrap_or(5_000),
+            )
+            .await?;
+            Ok(tool_success(result))
         }
         "validate_openapi" => {
             let args = parse_tool_arguments::<ValidateOpenApiToolArgs>(params.arguments)?;
@@ -829,6 +1171,69 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "create_project".to_owned(),
+            title: Some("Create Project".to_owned()),
+            description: "Creates a project with optional pipelines.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["project"],
+                "properties": {
+                    "project": { "type": "object" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "update_project".to_owned(),
+            title: Some("Update Project".to_owned()),
+            description: "Updates project metadata by id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "project"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "project": { "type": "object" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_project".to_owned(),
+            title: Some("Delete Project".to_owned()),
+            description: "Deletes a project by id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "export_project".to_owned(),
+            title: Some("Export Project".to_owned()),
+            description: "Exports a project bundle, optionally including history.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "includeHistory": { "type": "boolean" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "import_project".to_owned(),
+            title: Some("Import Project".to_owned()),
+            description: "Imports a project bundle.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["bundle"],
+                "properties": {
+                    "bundle": { "type": "object" },
+                    "includeHistory": { "type": "boolean" }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "list_project_pipelines".to_owned(),
             title: Some("List Pipelines".to_owned()),
             description: "Lists pipelines for a project.".to_owned(),
@@ -871,6 +1276,32 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "delete_e2e_history".to_owned(),
+            title: Some("Delete E2E History".to_owned()),
+            description: "Deletes E2E history for a project, optionally filtered by pipeline index.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineIndex": { "type": "integer" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_e2e_test".to_owned(),
+            title: Some("Delete E2E Test".to_owned()),
+            description: "Deletes a single E2E history record by history id or execution id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "testId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "testId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "list_load_history".to_owned(),
             title: Some("List Load History".to_owned()),
             description: "Lists executed load tests for a project.".to_owned(),
@@ -891,6 +1322,32 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             title: Some("Get Load Test".to_owned()),
             description: "Returns a single executed load test by history id or execution id."
                 .to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "testId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "testId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_load_history".to_owned(),
+            title: Some("Delete Load History".to_owned()),
+            description: "Deletes load history for a project, optionally filtered by pipeline index.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineIndex": { "type": "integer" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_load_test".to_owned(),
+            title: Some("Delete Load Test".to_owned()),
+            description: "Deletes a single load history record by history id or execution id.".to_owned(),
             input_schema: json!({
                 "type": "object",
                 "required": ["projectId", "testId"],
@@ -966,6 +1423,59 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "get_project_spec".to_owned(),
+            title: Some("Get Spec".to_owned()),
+            description: "Returns one OpenAPI spec from a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "specId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "specId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "create_project_spec".to_owned(),
+            title: Some("Create Spec".to_owned()),
+            description: "Creates an OpenAPI spec for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "spec"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "spec": { "type": "object" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "update_project_spec".to_owned(),
+            title: Some("Update Spec".to_owned()),
+            description: "Updates an OpenAPI spec for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "specId", "spec"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "specId": { "type": "string", "minLength": 1 },
+                    "spec": { "type": "object" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_project_spec".to_owned(),
+            title: Some("Delete Spec".to_owned()),
+            description: "Deletes an OpenAPI spec from a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "specId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "specId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "create_project_e2e_queue".to_owned(),
             title: Some("Create E2E Queue".to_owned()),
             description: "Creates and starts a sequential E2E queue for a project.".to_owned(),
@@ -1022,6 +1532,90 @@ fn tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {
                     "projectId": { "type": "string", "minLength": 1 },
                     "queueId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "run_project_e2e_test".to_owned(),
+            title: Some("Run E2E Test".to_owned()),
+            description: "Starts an E2E execution for a project and returns the execution id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineId": { "type": ["string", "null"] },
+                    "pipeline": pipeline_schema(),
+                    "selectedBaseUrlKey": { "type": ["string", "null"] },
+                    "pipelineIndex": { "type": ["integer", "null"] },
+                    "specs": { "type": "array", "items": { "type": "object" } },
+                    "transactionId": { "type": ["string", "null"] }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "run_project_load_test".to_owned(),
+            title: Some("Run Load Test".to_owned()),
+            description: "Starts a load execution for a project and returns the execution id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "config"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineId": { "type": ["string", "null"] },
+                    "pipeline": pipeline_schema(),
+                    "config": {
+                        "type": "object",
+                        "required": ["totalRequests", "concurrency", "rampUpSeconds"],
+                        "properties": {
+                            "totalRequests": { "type": "integer", "minimum": 1 },
+                            "concurrency": { "type": "integer", "minimum": 1 },
+                            "rampUpSeconds": { "type": "number", "minimum": 0 }
+                        }
+                    },
+                    "selectedBaseUrlKey": { "type": ["string", "null"] },
+                    "pipelineIndex": { "type": ["integer", "null"] },
+                    "specs": { "type": "array", "items": { "type": "object" } },
+                    "transactionId": { "type": ["string", "null"] }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "get_execution".to_owned(),
+            title: Some("Get Execution".to_owned()),
+            description: "Returns the active snapshot or final stored result of an execution.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "executionId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "executionId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "cancel_execution".to_owned(),
+            title: Some("Cancel Execution".to_owned()),
+            description: "Requests cancellation for an active execution.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["executionId"],
+                "properties": {
+                    "executionId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "proxy_request".to_owned(),
+            title: Some("Proxy Request".to_owned()),
+            description: "Executes a proxied HTTP request. SSE responses are collected with an event/time limit.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["request"],
+                "properties": {
+                    "request": { "type": "object" },
+                    "maxEvents": { "type": "integer", "minimum": 1 },
+                    "timeoutMs": { "type": "integer", "minimum": 1 }
                 }
             }),
         },
@@ -1132,6 +1726,370 @@ fn queue_tool_outcome(err: QueueError) -> Result<ToolCallResult, String> {
         QueueError::BadRequest(message) | QueueError::NotFound(message) => Ok(tool_error(message)),
         QueueError::Internal(message) => Err(message),
     }
+}
+
+fn normalize_project_spec_payload(
+    mut payload: crate::server::models::ProjectSpecUpsertRequest,
+) -> Result<crate::server::models::ProjectSpecUpsertRequest, String> {
+    payload.slug = normalize_spec_slug(payload.slug.as_deref())?;
+    payload.urls =
+        normalize_spec_urls_with_legacy(payload.urls, std::mem::take(&mut payload.servers))?;
+    Ok(payload)
+}
+
+async fn resolve_project_e2e_request(
+    state: &AppState,
+    args: RunProjectE2eTestArgs,
+) -> Result<E2eTestRequest, String> {
+    let (pipeline, pipeline_index) = match (args.pipeline_id.clone(), args.pipeline) {
+        (Some(pipeline_id), _) if !pipeline_id.trim().is_empty() => {
+            match crate::server::db::load_project_pipeline_for_execution(
+                &state.db,
+                &args.project_id,
+                &pipeline_id,
+            )
+            .await
+            .map_err(|err| format!("failed to load pipeline for execution: {err}"))?
+            {
+                Some((pipeline, position)) => (pipeline, Some(position)),
+                None => return Err("pipelineId not found for project".to_owned()),
+            }
+        }
+        (_, Some(pipeline)) => (pipeline, args.pipeline_index),
+        _ => return Err("pipelineId is required".to_owned()),
+    };
+
+    Ok(E2eTestRequest {
+        pipeline,
+        selected_base_url_key: args.selected_base_url_key,
+        project_id: Some(args.project_id),
+        pipeline_index,
+        specs: args.specs,
+    })
+}
+
+async fn resolve_project_load_request(
+    state: &AppState,
+    args: RunProjectLoadTestArgs,
+) -> Result<LoadTestRequest, String> {
+    let (pipeline, pipeline_index) = match (args.pipeline_id.clone(), args.pipeline) {
+        (Some(pipeline_id), _) if !pipeline_id.trim().is_empty() => {
+            match crate::server::db::load_project_pipeline_for_execution(
+                &state.db,
+                &args.project_id,
+                &pipeline_id,
+            )
+            .await
+            .map_err(|err| format!("failed to load pipeline for execution: {err}"))?
+            {
+                Some((pipeline, position)) => (pipeline, Some(position)),
+                None => return Err("pipelineId not found for project".to_owned()),
+            }
+        }
+        (_, Some(pipeline)) => (pipeline, args.pipeline_index),
+        _ => return Err("pipelineId is required".to_owned()),
+    };
+
+    Ok(LoadTestRequest {
+        pipeline,
+        config: args.config,
+        selected_base_url_key: args.selected_base_url_key,
+        project_id: Some(args.project_id),
+        pipeline_index,
+        specs: args.specs,
+    })
+}
+
+fn execution_start_tool_outcome(err: StartE2eExecutionError) -> Result<ToolCallResult, String> {
+    match err {
+        StartE2eExecutionError::BadRequest(message)
+        | StartE2eExecutionError::ServiceUnavailable(message) => Ok(tool_error(message)),
+        StartE2eExecutionError::Internal(message) => Err(message),
+    }
+}
+
+fn load_execution_start_tool_outcome(
+    err: StartLoadExecutionError,
+) -> Result<ToolCallResult, String> {
+    match err {
+        StartLoadExecutionError::BadRequest(message)
+        | StartLoadExecutionError::ServiceUnavailable(message) => Ok(tool_error(message)),
+        StartLoadExecutionError::Internal(message) => Err(message),
+    }
+}
+
+async fn execution_started_payload(state: &AppState, execution_id: &str, kind: &str) -> Value {
+    let init_payload = {
+        let executions = state.executions.read().await;
+        executions
+            .get(execution_id)
+            .map(|ctx| ctx.init_payload.clone())
+            .unwrap_or(Value::Null)
+    };
+    json!({
+        "executionId": execution_id,
+        "status": "running",
+        "kind": kind,
+        "initPayload": init_payload
+    })
+}
+
+async fn execution_snapshot(
+    state: &AppState,
+    project_id: &str,
+    execution_id: &str,
+) -> Result<Option<Value>, String> {
+    let active = {
+        let executions = state.executions.read().await;
+        executions.get(execution_id).cloned()
+    };
+
+    if let Some(execution) = active {
+        if execution.project_id != project_id {
+            return Ok(None);
+        }
+        let kind = match execution.kind {
+            ExecutionKind::E2e => "e2e",
+            ExecutionKind::Load => "load",
+        };
+        return Ok(Some(json!({
+            "executionId": execution_id,
+            "projectId": project_id,
+            "active": true,
+            "kind": kind,
+            "initPayload": execution.init_payload,
+        })));
+    }
+
+    if let Some(record) = load_e2e_history_record_by_id(&state.db, project_id, execution_id)
+        .await
+        .map_err(|err| format!("failed to load e2e execution: {err}"))?
+    {
+        return Ok(Some(json!({
+            "executionId": execution_id,
+            "projectId": project_id,
+            "active": false,
+            "kind": "e2e",
+            "result": record
+        })));
+    }
+
+    if let Some(record) = load_load_history_record_by_id(&state.db, project_id, execution_id)
+        .await
+        .map_err(|err| format!("failed to load load execution: {err}"))?
+    {
+        return Ok(Some(json!({
+            "executionId": execution_id,
+            "projectId": project_id,
+            "active": false,
+            "kind": "load",
+            "result": record
+        })));
+    }
+
+    Ok(None)
+}
+
+async fn cancel_execution_payload(
+    state: &AppState,
+    execution_id: &str,
+) -> Result<Option<Value>, String> {
+    let execution = {
+        let executions = state.executions.read().await;
+        executions.get(execution_id).cloned()
+    };
+
+    let Some(execution) = execution else {
+        return Ok(None);
+    };
+    let already_cancelled = execution.cancel.is_cancelled();
+    execution.cancel.cancel();
+    Ok(Some(json!({
+        "executionId": execution_id,
+        "cancelled": true,
+        "alreadyCancelled": already_cancelled,
+        "message": if already_cancelled {
+            "cancellation already requested"
+        } else {
+            "cancellation requested"
+        }
+    })))
+}
+
+async fn delete_history_rows(
+    db: &sqlx::SqlitePool,
+    table: &str,
+    project_id: &str,
+    pipeline_index: Option<i64>,
+) -> Result<u64, String> {
+    let mut query = format!("DELETE FROM {table} WHERE project_id = ?");
+    if pipeline_index.is_some() {
+        query.push_str(" AND pipeline_index = ?");
+    }
+    let mut statement = sqlx::query(&query).bind(project_id);
+    if let Some(pipeline_index) = pipeline_index {
+        statement = statement.bind(pipeline_index);
+    }
+    statement
+        .execute(db)
+        .await
+        .map(|result| result.rows_affected())
+        .map_err(|err| format!("failed to delete history from {table}: {err}"))
+}
+
+fn render_proxy_request(payload: ProxyRequest) -> Result<ProxyRequest, String> {
+    let value = serde_json::to_value(payload).map_err(|err| {
+        format!(
+            "failed to serialize proxy payload for template render: {}",
+            err
+        )
+    })?;
+    let rendered = previa_runner::render_template_value_simple(&value);
+    serde_json::from_value(rendered)
+        .map_err(|err| format!("failed to parse rendered proxy payload: {}", err))
+}
+
+async fn proxy_tool_request(
+    state: &AppState,
+    payload: ProxyRequest,
+    max_events: usize,
+    timeout_ms: u64,
+) -> Result<Value, String> {
+    let method = Method::from_bytes(payload.method.trim().as_bytes())
+        .map_err(|_| format!("invalid method: {}", payload.method))?;
+    let url = payload.url.trim();
+    if url.is_empty() {
+        return Err("url is required and cannot be empty".to_owned());
+    }
+    reqwest::Url::parse(url).map_err(|err| format!("invalid url: {}", err))?;
+
+    let mut request = state.client.request(method, url);
+    for (name, value) in &payload.headers {
+        let header_name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| format!("invalid header name: {}", name))?;
+        let header_value = HeaderValue::from_str(value)
+            .map_err(|_| format!("invalid header value for {}: {}", name, value))?;
+        request = request.header(header_name, header_value);
+    }
+    if let Some(body) = payload.body {
+        request = match body {
+            Value::Null => request,
+            Value::String(raw) => request.body(raw),
+            value => request.json(&value),
+        };
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("proxy request failed: {err}"))?;
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.to_string(), Value::String(v.to_owned())))
+        })
+        .collect::<serde_json::Map<String, Value>>();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if content_type.contains("text/event-stream") {
+        let collected = collect_sse_events(response, max_events, timeout_ms).await?;
+        return Ok(json!({
+            "status": status,
+            "headers": headers,
+            "sse": true,
+            "events": collected.events,
+            "truncated": collected.truncated,
+            "timedOut": collected.timed_out
+        }));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("failed to read upstream response body: {err}"))?;
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    let json_body = serde_json::from_slice::<Value>(&bytes).ok();
+    Ok(json!({
+        "status": status,
+        "headers": headers,
+        "sse": false,
+        "bodyText": text,
+        "bodyJson": json_body
+    }))
+}
+
+struct CollectedSseEvents {
+    events: Vec<Value>,
+    truncated: bool,
+    timed_out: bool,
+}
+
+async fn collect_sse_events(
+    response: reqwest::Response,
+    max_events: usize,
+    timeout_ms: u64,
+) -> Result<CollectedSseEvents, String> {
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut events = Vec::new();
+    let mut timed_out = false;
+
+    loop {
+        let next = timeout(Duration::from_millis(timeout_ms), stream.next()).await;
+        match next {
+            Ok(Some(chunk_result)) => {
+                let chunk = chunk_result
+                    .map_err(|err| format!("failed to read upstream SSE stream: {}", err))?;
+                buffer.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
+
+                while let Some(idx) = buffer.find("\n\n") {
+                    let block = buffer[..idx].to_owned();
+                    buffer = buffer[idx + 2..].to_owned();
+                    if let Some((event, data_text)) = parse_sse_block(&block) {
+                        let parsed = serde_json::from_str::<Value>(&data_text)
+                            .unwrap_or_else(|_| Value::String(data_text));
+                        events.push(json!({ "event": event, "data": parsed }));
+                        if events.len() >= max_events {
+                            return Ok(CollectedSseEvents {
+                                events,
+                                truncated: true,
+                                timed_out: false,
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(_) => {
+                timed_out = true;
+                break;
+            }
+        }
+    }
+
+    if !buffer.trim().is_empty() {
+        if let Some((event, data_text)) = parse_sse_block(&buffer) {
+            let parsed = serde_json::from_str::<Value>(&data_text)
+                .unwrap_or_else(|_| Value::String(data_text));
+            events.push(json!({ "event": event, "data": parsed }));
+        }
+    }
+
+    Ok(CollectedSseEvents {
+        events,
+        truncated: false,
+        timed_out,
+    })
 }
 
 fn validate_pipeline_input(pipeline: &Pipeline) -> Result<(), String> {
@@ -1417,7 +2375,7 @@ mod tests {
         insert_project_pipeline, load_e2e_queue_record, upsert_project_metadata,
     };
     use crate::server::mcp::models::{
-        CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, ProjectByIdArgs,
+        CreateProjectArgs, CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, ProjectByIdArgs,
         ProjectHistoryToolArgs, ToolCallParams,
     };
     use crate::server::models::ProjectMetadataUpsertRequest;
@@ -1493,6 +2451,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_create_project_arguments() {
+        let args = parse_tool_arguments::<CreateProjectArgs>(json!({
+            "project": {
+                "name": "Project A",
+                "description": "desc",
+                "pipelines": []
+            }
+        }))
+        .expect("valid create project args");
+
+        assert_eq!(args.project.name, "Project A");
+    }
+
+    #[test]
     fn validate_pipeline_requires_name() {
         let pipeline = Pipeline {
             id: None,
@@ -1534,10 +2506,28 @@ mod tests {
         let tools = tool_definitions();
 
         for name in [
+            "create_project",
+            "update_project",
+            "delete_project",
+            "export_project",
+            "import_project",
+            "get_project_spec",
+            "create_project_spec",
+            "update_project_spec",
+            "delete_project_spec",
             "create_project_e2e_queue",
             "get_current_project_e2e_queue",
             "get_project_e2e_queue",
             "cancel_project_e2e_queue",
+            "run_project_e2e_test",
+            "run_project_load_test",
+            "get_execution",
+            "cancel_execution",
+            "delete_e2e_history",
+            "delete_e2e_test",
+            "delete_load_history",
+            "delete_load_test",
+            "proxy_request",
         ] {
             assert!(
                 tools.iter().any(|tool| tool.name == name),
@@ -1722,6 +2712,87 @@ mod tests {
             result.content[0].text,
             "no active e2e queue for project".to_owned()
         );
+    }
+
+    #[tokio::test]
+    async fn project_and_spec_crud_tools_work() {
+        let state = test_state().await;
+
+        let created = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "create_project".to_owned(),
+                arguments: json!({
+                    "project": {
+                        "name": "Project A",
+                        "description": "desc",
+                        "pipelines": []
+                    }
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("create project");
+        assert!(!created.is_error);
+        let project = created.structured_content.expect("project body");
+        let project_id = project["id"].as_str().expect("project id").to_owned();
+
+        let created_spec = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "create_project_spec".to_owned(),
+                arguments: json!({
+                    "projectId": project_id,
+                    "spec": {
+                        "spec": {
+                            "openapi": "3.0.0",
+                            "info": { "title": "API", "version": "1.0.0" },
+                            "paths": {}
+                        },
+                        "slug": "users",
+                        "urls": [{"name":"hml","url":"https://example.com"}],
+                        "sync": false,
+                        "live": false
+                    }
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("create spec");
+        assert!(!created_spec.is_error);
+        let spec = created_spec.structured_content.expect("spec body");
+        let spec_id = spec["id"].as_str().expect("spec id").to_owned();
+
+        let deleted_spec = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "delete_project_spec".to_owned(),
+                arguments: json!({
+                    "projectId": project["id"],
+                    "specId": spec_id
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("delete spec");
+        assert!(!deleted_spec.is_error);
+
+        let deleted_project = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "delete_project".to_owned(),
+                arguments: json!({
+                    "projectId": project["id"]
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("delete project");
+        assert!(!deleted_project.is_error);
     }
 
     async fn test_state() -> AppState {

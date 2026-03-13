@@ -2,7 +2,10 @@ use previa_runner::Pipeline;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::server::models::HistoryOrder;
+use crate::server::models::{
+    HistoryOrder, LoadTestConfig, ProjectExportEnvelope, ProjectMetadataUpsertRequest,
+    ProjectSpecUpsertRequest, ProjectUpsertRequest, ProxyRequest,
+};
 
 pub const JSON_RPC_VERSION: &str = "2.0";
 pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-03-26"];
@@ -258,6 +261,41 @@ pub struct ProjectByIdArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateProjectArgs {
+    pub project: ProjectUpsertRequest,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateProjectArgs {
+    pub project_id: String,
+    pub project: ProjectMetadataUpsertRequest,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportProjectArgs {
+    pub project_id: String,
+    pub include_history: Option<bool>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ImportProjectArgs {
+    pub bundle: ProjectExportEnvelope,
+    pub include_history: Option<bool>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateProjectE2eQueueArgs {
     pub project_id: String,
     pub pipeline_ids: Vec<String>,
@@ -297,6 +335,34 @@ pub struct ProjectPipelineByIdArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectSpecByIdArgs {
+    pub project_id: String,
+    pub spec_id: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateProjectSpecArgs {
+    pub project_id: String,
+    pub spec: ProjectSpecUpsertRequest,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateProjectSpecArgs {
+    pub project_id: String,
+    pub spec_id: String,
+    pub spec: ProjectSpecUpsertRequest,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateProjectPipelineArgs {
     pub project_id: String,
     pub pipeline: Pipeline,
@@ -310,6 +376,64 @@ pub struct UpdateProjectPipelineArgs {
     pub project_id: String,
     pub pipeline_id: String,
     pub pipeline: Pipeline,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunProjectE2eTestArgs {
+    pub project_id: String,
+    pub pipeline_id: Option<String>,
+    pub pipeline: Option<Pipeline>,
+    pub selected_base_url_key: Option<String>,
+    pub pipeline_index: Option<i64>,
+    #[serde(default)]
+    pub specs: Vec<previa_runner::RuntimeSpec>,
+    pub transaction_id: Option<String>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunProjectLoadTestArgs {
+    pub project_id: String,
+    pub pipeline_id: Option<String>,
+    pub pipeline: Option<Pipeline>,
+    pub config: LoadTestConfig,
+    pub selected_base_url_key: Option<String>,
+    pub pipeline_index: Option<i64>,
+    #[serde(default)]
+    pub specs: Vec<previa_runner::RuntimeSpec>,
+    pub transaction_id: Option<String>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionByIdArgs {
+    pub project_id: String,
+    pub execution_id: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionCancelArgs {
+    pub execution_id: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProxyToolArgs {
+    pub request: ProxyRequest,
+    pub max_events: Option<usize>,
+    pub timeout_ms: Option<u64>,
     #[serde(default, rename = "_meta")]
     pub meta: Option<Value>,
 }
