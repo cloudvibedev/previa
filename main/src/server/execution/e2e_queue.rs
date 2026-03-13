@@ -34,7 +34,7 @@ pub async fn create_e2e_queue(
     state: AppState,
     project_id: String,
     request: ProjectE2eQueueRequest,
-) -> Result<String, QueueError> {
+) -> Result<E2eQueueRecord, QueueError> {
     let pipeline_ids = request
         .pipeline_ids
         .iter()
@@ -101,7 +101,10 @@ pub async fn create_e2e_queue(
         previous,
     ));
 
-    Ok(queue_id)
+    Ok(E2eQueueRecord {
+        id: queue_id,
+        ..runtime.snapshot().await
+    })
 }
 
 pub async fn get_e2e_queue_response(

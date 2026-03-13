@@ -20,7 +20,7 @@ use crate::server::state::AppState;
     ),
     request_body = ProjectE2eQueueRequest,
     responses(
-        (status = 204, description = "Fila E2E criada"),
+        (status = 202, description = "Fila E2E criada", body = E2eQueueRecord),
         (status = 400, description = "Request inválido", body = ErrorResponse),
         (status = 500, description = "Erro ao criar fila", body = ErrorResponse)
     )
@@ -36,15 +36,16 @@ pub async fn create_e2e_queue_for_project(
     };
 
     match create_e2e_queue(state, project_id.clone(), payload).await {
-        Ok(queue_id) => {
-            let location = format!("/api/v1/projects/{project_id}/tests/e2e/queue/{queue_id}");
-            let mut response = StatusCode::NO_CONTENT.into_response();
+        Ok(snapshot) => {
+            let location =
+                format!("/api/v1/projects/{project_id}/tests/e2e/queue/{}", snapshot.id);
+            let mut response = (StatusCode::ACCEPTED, Json(snapshot.clone())).into_response();
             response
                 .headers_mut()
                 .insert(header::LOCATION, HeaderValue::from_str(&location).unwrap_or_else(|_| HeaderValue::from_static("")));
             response.headers_mut().insert(
                 "x-queue-id",
-                HeaderValue::from_str(&queue_id).unwrap_or_else(|_| HeaderValue::from_static("")),
+                HeaderValue::from_str(&snapshot.id).unwrap_or_else(|_| HeaderValue::from_static("")),
             );
             response
         }
@@ -159,18 +160,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(create.status(), StatusCode::NO_CONTENT);
-        let queue_id = create
-            .headers()
-            .get("x-queue-id")
-            .and_then(|value| value.to_str().ok())
-            .unwrap()
-            .to_owned();
-        let location = create
-            .headers()
-            .get(header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .unwrap();
+        assert_eq!(create.status(), StatusCode::ACCEPTED);
+        let (queue_id, location) = queue_id_and_location_from_response(create).await;
         assert!(location.ends_with(&queue_id));
 
         let response = app
@@ -229,7 +220,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let queue_id = queue_id_from_headers(&create);
+        let (queue_id, _) = queue_id_and_location_from_response(create).await;
 
         let snapshot = wait_for_terminal_queue(&app, "project-1", &queue_id).await;
         assert_eq!(snapshot["status"], json!("failed"));
@@ -262,7 +253,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let queue_id = queue_id_from_headers(&create);
+        let (queue_id, _) = queue_id_and_location_from_response(create).await;
 
         let delete = app
             .clone()
@@ -307,7 +298,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let first_queue_id = queue_id_from_headers(&first);
+        let (first_queue_id, _) = queue_id_and_location_from_response(first).await;
 
         let second = app
             .clone()
@@ -323,7 +314,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let second_queue_id = queue_id_from_headers(&second);
+        let (second_queue_id, _) = queue_id_and_location_from_response(second).await;
 
         let first_snapshot = wait_for_terminal_queue(&app, "project-1", &first_queue_id).await;
         let second_snapshot = wait_for_terminal_queue(&app, "project-1", &second_queue_id).await;
@@ -333,13 +324,23 @@ mod tests {
         assert_eq!(second_snapshot["pipelines"][0]["status"], json!("completed"));
     }
 
-    fn queue_id_from_headers(response: &Response) -> String {
-        response
+    async fn queue_id_and_location_from_response(response: Response) -> (String, String) {
+        let header_queue_id = response
             .headers()
             .get("x-queue-id")
             .and_then(|value| value.to_str().ok())
-            .unwrap()
-            .to_owned()
+            .map(str::to_owned)
+            .unwrap();
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+            .unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let snapshot = serde_json::from_slice::<Value>(&body).unwrap();
+        assert_eq!(snapshot["id"], json!(header_queue_id));
+        (header_queue_id, location)
     }
 
     async fn wait_for_terminal_queue(app: &Router, project_id: &str, queue_id: &str) -> Value {
