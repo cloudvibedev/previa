@@ -593,3 +593,177 @@ fn build_runner_load_plan(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::convert::Infallible;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use axum::body::{Body, Bytes};
+    use axum::extract::State;
+    use axum::http::{StatusCode, header};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::{get, post};
+    use axum::{Json, Router};
+    use previa_runner::{Pipeline, PipelineStep};
+    use serde_json::{Value, json};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tokio::net::TcpListener;
+    use tokio::sync::{RwLock, mpsc};
+    use tokio_stream::wrappers::ReceiverStream;
+
+    use super::start_load_execution;
+    use crate::server::execution::ExecutionScheduler;
+    use crate::server::models::{LoadTestConfig, LoadTestRequest};
+    use crate::server::state::AppState;
+
+    #[tokio::test]
+    async fn second_load_execution_is_marked_queued_when_runner_capacity_is_busy() {
+        let runner = spawn_busy_runner().await;
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory db");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations");
+
+        let state = AppState {
+            client: reqwest::Client::new(),
+            db,
+            context_name: "test".to_owned(),
+            runner_endpoints: vec![runner],
+            rps_per_node: 1,
+            scheduler: ExecutionScheduler::new(Default::default()),
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            e2e_queues: Arc::new(RwLock::new(HashMap::new())),
+            mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+        };
+
+        let first = start_load_execution(
+            state.clone(),
+            LoadTestRequest {
+                pipeline: test_pipeline("pipe-1"),
+                config: test_config(),
+                selected_base_url_key: None,
+                project_id: Some("project-1".to_owned()),
+                pipeline_index: Some(0),
+                specs: Vec::new(),
+            },
+            None,
+        )
+        .await
+        .expect("first execution");
+        let second = start_load_execution(
+            state.clone(),
+            LoadTestRequest {
+                pipeline: test_pipeline("pipe-1"),
+                config: test_config(),
+                selected_base_url_key: None,
+                project_id: Some("project-1".to_owned()),
+                pipeline_index: Some(0),
+                specs: Vec::new(),
+            },
+            None,
+        )
+        .await
+        .expect("second execution");
+
+        let init_payload = {
+            let executions = state.executions.read().await;
+            executions
+                .get(&second.execution_id)
+                .expect("second execution context")
+                .init_payload
+                .get()
+                .await
+        };
+        assert_eq!(init_payload["status"], json!("queued"));
+        assert_eq!(init_payload["queuePosition"], json!(1));
+
+        {
+            let executions = state.executions.read().await;
+            executions
+                .get(&first.execution_id)
+                .expect("first execution context")
+                .cancel
+                .cancel();
+            executions
+                .get(&second.execution_id)
+                .expect("second execution context")
+                .cancel
+                .cancel();
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    async fn spawn_busy_runner() -> String {
+        async fn health() -> impl IntoResponse {
+            Json(json!({ "status": "ok" }))
+        }
+
+        async fn load(State(()): State<()>, Json(_payload): Json<Value>) -> Response {
+            let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(8);
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(Ok(Bytes::from(
+                        "event: execution:init\ndata: {\"status\":\"running\"}\n\n",
+                    )))
+                    .await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            });
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(ReceiverStream::new(rx)))
+                .unwrap()
+        }
+
+        let app = Router::new()
+            .route("/health", get(health))
+            .route("/api/v1/tests/load", post(load))
+            .with_state(());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("runner server");
+        });
+        format!("http://{}", addr)
+    }
+
+    fn test_pipeline(id: &str) -> Pipeline {
+        Pipeline {
+            id: Some(id.to_owned()),
+            name: "Pipeline".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "step-1".to_owned(),
+                name: "Step 1".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: "https://example.com".to_owned(),
+                headers: Default::default(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: Vec::new(),
+            }],
+        }
+    }
+
+    fn test_config() -> LoadTestConfig {
+        LoadTestConfig {
+            total_requests: 10,
+            concurrency: 1,
+            ramp_up_seconds: 0.0,
+        }
+    }
+}
