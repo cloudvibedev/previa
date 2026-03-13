@@ -27,7 +27,8 @@ use crate::server::handlers::specs::{
 };
 use crate::server::handlers::tests_e2e::run_e2e_test_for_project;
 use crate::server::handlers::tests_e2e_queue::{
-    create_e2e_queue_for_project, delete_e2e_queue_for_project, get_e2e_queue_for_project,
+    create_e2e_queue_for_project, delete_e2e_queue_for_project, get_current_e2e_queue_for_project,
+    get_e2e_queue_for_project,
 };
 use crate::server::handlers::tests_load::run_load_test_for_project;
 use crate::server::handlers::transfers::{export_project, import_project};
@@ -105,7 +106,7 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
         )
         .route(
             "/api/v1/projects/{projectId}/tests/e2e/queue",
-            post(create_e2e_queue_for_project),
+            get(get_current_e2e_queue_for_project).post(create_e2e_queue_for_project),
         )
         .route(
             "/api/v1/projects/{projectId}/tests/e2e/queue/{queueId}",

@@ -7,10 +7,33 @@ use axum::response::{IntoResponse, Response};
 
 use crate::server::errors::bad_request_response;
 use crate::server::execution::e2e_queue::{
-    QueueError, cancel_e2e_queue, create_e2e_queue, get_e2e_queue_response, queue_error_response,
+    QueueError, cancel_e2e_queue, create_e2e_queue, get_current_e2e_queue_response,
+    get_e2e_queue_response, queue_error_response,
 };
 use crate::server::models::{E2eQueueRecord, ErrorResponse, OrchestratorSseEventData, ProjectE2eQueueRequest};
 use crate::server::state::AppState;
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/projects/{projectId}/tests/e2e/queue",
+    params(
+        ("projectId" = String, Path, description = "ID do projeto")
+    ),
+    responses(
+        (status = 200, description = "Snapshot da fila E2E ativa do projeto.", body = E2eQueueRecord),
+        (status = 404, description = "Nenhuma fila ativa encontrada", body = ErrorResponse),
+        (status = 500, description = "Erro ao consultar fila ativa", body = ErrorResponse)
+    )
+)]
+pub async fn get_current_e2e_queue_for_project(
+    State(state): State<AppState>,
+    Path(project_id): Path<String>,
+) -> Response {
+    match get_current_e2e_queue_response(state, project_id).await {
+        Ok(response) => response,
+        Err(err) => queue_error_response(err),
+    }
+}
 
 #[utoipa::path(
     post,
@@ -194,6 +217,65 @@ mod tests {
         let payload = String::from_utf8(first_chunk.to_vec()).unwrap();
         assert!(payload.contains("event: queue:update"));
         assert!(payload.contains("\"status\":\"pending\"") || payload.contains("\"status\":\"running\""));
+    }
+
+    #[tokio::test]
+    async fn get_current_queue_returns_active_snapshot() {
+        let (runner_url, _runner_task) = spawn_runner_server().await;
+        let app = test_app(vec![runner_url], "project-1", vec![pipeline("slow"), pipeline("ok")]).await;
+
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/projects/project-1/tests/e2e/queue")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({ "pipelineIds": ["slow", "ok"] })).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let (queue_id, _) = queue_id_and_location_from_response(create).await;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/projects/project-1/tests/e2e/queue")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let snapshot = serde_json::from_slice::<Value>(&body).unwrap();
+        assert_eq!(snapshot["id"], json!(queue_id));
+        assert!(snapshot["status"] == json!("pending") || snapshot["status"] == json!("running"));
+    }
+
+    #[tokio::test]
+    async fn get_current_queue_returns_not_found_without_active_queue() {
+        let app = test_app(Vec::new(), "project-1", vec![pipeline("ok")]).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/projects/project-1/tests/e2e/queue")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

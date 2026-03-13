@@ -133,6 +133,24 @@ pub async fn get_e2e_queue_response(
     Ok(axum::Json(snapshot).into_response())
 }
 
+pub async fn get_current_e2e_queue_response(
+    state: AppState,
+    project_id: String,
+) -> Result<Response, QueueError> {
+    let runtime = {
+        let queues = state.e2e_queues.read().await;
+        queues.get(&project_id).cloned()
+    };
+
+    let Some(runtime) = runtime else {
+        return Err(QueueError::NotFound(
+            "no active e2e queue for project".to_owned(),
+        ));
+    };
+
+    Ok(axum::Json(runtime.snapshot().await).into_response())
+}
+
 pub async fn cancel_e2e_queue(
     state: AppState,
     project_id: String,

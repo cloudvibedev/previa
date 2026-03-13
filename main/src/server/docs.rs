@@ -46,6 +46,7 @@ use crate::server::models::{
         crate::server::handlers::history_load::get_load_test_by_id,
         crate::server::handlers::history_load::delete_load_test_by_id,
         crate::server::handlers::tests_e2e::run_e2e_test_for_project,
+        crate::server::handlers::tests_e2e_queue::get_current_e2e_queue_for_project,
         crate::server::handlers::tests_e2e_queue::create_e2e_queue_for_project,
         crate::server::handlers::tests_e2e_queue::get_e2e_queue_for_project,
         crate::server::handlers::tests_e2e_queue::delete_e2e_queue_for_project,
