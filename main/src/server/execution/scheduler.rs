@@ -30,6 +30,7 @@ impl Default for SchedulerConfig {
 pub struct SchedulerSnapshot {
     pub queued: usize,
     pub project_locks: HashMap<String, String>,
+    pub load_locks: HashMap<String, String>,
     pub runner_usage: HashMap<String, RunnerUsage>,
 }
 
@@ -45,6 +46,7 @@ struct QueueRequest {
     kind: ScheduledExecutionKind,
     project_id: String,
     requested_nodes: usize,
+    lock_key: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +54,7 @@ struct ActiveReservation {
     kind: ScheduledExecutionKind,
     project_id: String,
     runners: Vec<String>,
+    lock_key: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -59,6 +62,7 @@ struct SchedulerState {
     queued: VecDeque<QueueRequest>,
     active: HashMap<String, ActiveReservation>,
     project_locks: HashMap<String, String>,
+    load_locks: HashMap<String, String>,
     runner_usage: HashMap<String, RunnerUsage>,
 }
 
@@ -92,6 +96,18 @@ impl ExecutionScheduler {
         project_id: String,
         requested_nodes: usize,
     ) -> usize {
+        self.enqueue_with_lock(execution_id, kind, project_id, requested_nodes, None)
+            .await
+    }
+
+    pub async fn enqueue_with_lock(
+        &self,
+        execution_id: String,
+        kind: ScheduledExecutionKind,
+        project_id: String,
+        requested_nodes: usize,
+        lock_key: Option<String>,
+    ) -> usize {
         let mut state = self.state.lock().await;
         if let Some((index, _)) = state
             .queued
@@ -106,6 +122,7 @@ impl ExecutionScheduler {
             kind,
             project_id,
             requested_nodes: requested_nodes.max(1),
+            lock_key,
         });
         let position = state.queued.len();
         self.notify.notify_waiters();
@@ -138,6 +155,14 @@ impl ExecutionScheduler {
                 .project_locks
                 .get(&request.project_id)
                 .is_some_and(|holder| holder != execution_id)
+        {
+            return AcquireOutcome::Pending { position: 1 };
+        }
+        if request
+            .lock_key
+            .as_ref()
+            .and_then(|key| state.load_locks.get(key))
+            .is_some_and(|holder| holder != execution_id)
         {
             return AcquireOutcome::Pending { position: 1 };
         }
@@ -174,12 +199,18 @@ impl ExecutionScheduler {
                 .project_locks
                 .insert(request.project_id.clone(), request.execution_id.clone());
         }
+        if let Some(lock_key) = request.lock_key.clone() {
+            state
+                .load_locks
+                .insert(lock_key, request.execution_id.clone());
+        }
         state.active.insert(
             request.execution_id.clone(),
             ActiveReservation {
                 kind: request.kind,
                 project_id: request.project_id,
                 runners: selected.clone(),
+                lock_key: request.lock_key,
             },
         );
         AcquireOutcome::Reserved(selected)
@@ -218,6 +249,9 @@ impl ExecutionScheduler {
         if active.kind == ScheduledExecutionKind::E2e {
             state.project_locks.remove(&active.project_id);
         }
+        if let Some(lock_key) = active.lock_key {
+            state.load_locks.remove(&lock_key);
+        }
         self.notify.notify_waiters();
     }
 
@@ -244,6 +278,7 @@ impl ExecutionScheduler {
         SchedulerSnapshot {
             queued: state.queued.len(),
             project_locks: state.project_locks.clone(),
+            load_locks: state.load_locks.clone(),
             runner_usage: state.runner_usage.clone(),
         }
     }
@@ -352,6 +387,57 @@ mod tests {
             AcquireOutcome::Reserved(runners) => {
                 assert_eq!(runners, vec!["runner-1".to_owned(), "runner-2".to_owned()])
             }
+            other => panic!("unexpected acquire result: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn blocks_parallel_load_for_same_pipeline_even_with_free_runner() {
+        let scheduler = ExecutionScheduler::new(SchedulerConfig {
+            e2e_per_runner_limit: 1,
+            load_per_runner_limit: 1,
+        });
+        scheduler
+            .enqueue_with_lock(
+                "load-1".to_owned(),
+                ScheduledExecutionKind::Load,
+                "project-1".to_owned(),
+                1,
+                Some("project-1:pipeline-1".to_owned()),
+            )
+            .await;
+        scheduler
+            .enqueue_with_lock(
+                "load-2".to_owned(),
+                ScheduledExecutionKind::Load,
+                "project-1".to_owned(),
+                1,
+                Some("project-1:pipeline-1".to_owned()),
+            )
+            .await;
+
+        match scheduler
+            .try_acquire("load-1", &["runner-1".to_owned(), "runner-2".to_owned()])
+            .await
+        {
+            AcquireOutcome::Reserved(runners) => assert_eq!(runners, vec!["runner-1".to_owned()]),
+            other => panic!("unexpected acquire result: {other:?}"),
+        }
+
+        match scheduler
+            .try_acquire("load-2", &["runner-1".to_owned(), "runner-2".to_owned()])
+            .await
+        {
+            AcquireOutcome::Pending { position } => assert_eq!(position, 1),
+            other => panic!("unexpected acquire result: {other:?}"),
+        }
+
+        scheduler.release("load-1").await;
+        match scheduler
+            .try_acquire("load-2", &["runner-1".to_owned(), "runner-2".to_owned()])
+            .await
+        {
+            AcquireOutcome::Reserved(runners) => assert_eq!(runners, vec!["runner-1".to_owned()]),
             other => panic!("unexpected acquire result: {other:?}"),
         }
     }

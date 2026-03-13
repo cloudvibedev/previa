@@ -139,13 +139,20 @@ pub async fn start_load_execution(
         ));
     };
     let orchestrator_execution_id = new_uuid_v7();
+    let pipeline_lock_key = load_pipeline_lock_key(
+        &project_id_for_execution,
+        &payload.pipeline.id,
+        payload.pipeline_index,
+        &payload.pipeline.name,
+    );
     let queue_position = state
         .scheduler
-        .enqueue(
+        .enqueue_with_lock(
             orchestrator_execution_id.clone(),
             ScheduledExecutionKind::Load,
             project_id_for_execution.clone(),
             plan.nodes_used.max(1),
+            Some(pipeline_lock_key),
         )
         .await;
     let initial_acquire = state
@@ -594,6 +601,21 @@ fn build_runner_load_plan(
         .collect()
 }
 
+fn load_pipeline_lock_key(
+    project_id: &str,
+    pipeline_id: &Option<String>,
+    pipeline_index: Option<i64>,
+    pipeline_name: &str,
+) -> String {
+    if let Some(pipeline_id) = pipeline_id.as_deref() {
+        return format!("project:{project_id}:pipeline-id:{pipeline_id}");
+    }
+    if let Some(pipeline_index) = pipeline_index {
+        return format!("project:{project_id}:pipeline-index:{pipeline_index}");
+    }
+    format!("project:{project_id}:pipeline-name:{pipeline_name}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -637,6 +659,90 @@ mod tests {
             db,
             context_name: "test".to_owned(),
             runner_endpoints: vec![runner],
+            rps_per_node: 1,
+            scheduler: ExecutionScheduler::new(Default::default()),
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            e2e_queues: Arc::new(RwLock::new(HashMap::new())),
+            mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+        };
+
+        let first = start_load_execution(
+            state.clone(),
+            LoadTestRequest {
+                pipeline: test_pipeline("pipe-1"),
+                config: test_config(),
+                selected_base_url_key: None,
+                project_id: Some("project-1".to_owned()),
+                pipeline_index: Some(0),
+                specs: Vec::new(),
+            },
+            None,
+        )
+        .await
+        .expect("first execution");
+        let second = start_load_execution(
+            state.clone(),
+            LoadTestRequest {
+                pipeline: test_pipeline("pipe-1"),
+                config: test_config(),
+                selected_base_url_key: None,
+                project_id: Some("project-1".to_owned()),
+                pipeline_index: Some(0),
+                specs: Vec::new(),
+            },
+            None,
+        )
+        .await
+        .expect("second execution");
+
+        let init_payload = {
+            let executions = state.executions.read().await;
+            executions
+                .get(&second.execution_id)
+                .expect("second execution context")
+                .init_payload
+                .get()
+                .await
+        };
+        assert_eq!(init_payload["status"], json!("queued"));
+        assert_eq!(init_payload["queuePosition"], json!(1));
+
+        {
+            let executions = state.executions.read().await;
+            executions
+                .get(&first.execution_id)
+                .expect("first execution context")
+                .cancel
+                .cancel();
+            executions
+                .get(&second.execution_id)
+                .expect("second execution context")
+                .cancel
+                .cancel();
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    #[tokio::test]
+    async fn second_load_execution_for_same_pipeline_is_queued_even_with_free_runner_capacity() {
+        let first_runner = spawn_busy_runner().await;
+        let second_runner = spawn_busy_runner().await;
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory db");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations");
+
+        let state = AppState {
+            client: reqwest::Client::new(),
+            db,
+            context_name: "test".to_owned(),
+            runner_endpoints: vec![first_runner, second_runner],
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),
