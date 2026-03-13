@@ -1,3 +1,5 @@
+pub mod e2e;
+pub mod e2e_queue;
 pub mod forward;
 pub mod history_capture;
 pub mod load_batch;
@@ -5,6 +7,9 @@ pub mod node_plan;
 pub mod runtime_specs;
 pub mod sse_stream;
 
+pub use e2e::{
+    StartE2eExecutionError, sse_response_for_started_execution, start_e2e_execution,
+};
 pub use forward::{add_context_fields, forward_runner_stream, send_sse_best_effort};
 pub use history_capture::{determine_e2e_history_status, determine_load_history_status};
 pub use load_batch::{

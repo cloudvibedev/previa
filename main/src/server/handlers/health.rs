@@ -67,6 +67,7 @@ mod tests {
             runner_endpoints: Vec::new(),
             rps_per_node: 1000,
             executions: Arc::new(RwLock::new(HashMap::new())),
+            e2e_queues: Arc::new(RwLock::new(HashMap::new())),
             mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
         };
 

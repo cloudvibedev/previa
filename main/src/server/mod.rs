@@ -26,6 +26,9 @@ use crate::server::handlers::specs::{
     upsert_project_spec, validate_openapi_spec,
 };
 use crate::server::handlers::tests_e2e::run_e2e_test_for_project;
+use crate::server::handlers::tests_e2e_queue::{
+    create_e2e_queue_for_project, delete_e2e_queue_for_project, get_e2e_queue_for_project,
+};
 use crate::server::handlers::tests_load::run_load_test_for_project;
 use crate::server::handlers::transfers::{export_project, import_project};
 use crate::server::mcp::handlers::{delete_http_session, handle_http, preflight};
@@ -101,6 +104,14 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
             get(get_e2e_test_by_id).delete(delete_e2e_test_by_id),
         )
         .route(
+            "/api/v1/projects/{projectId}/tests/e2e/queue",
+            post(create_e2e_queue_for_project),
+        )
+        .route(
+            "/api/v1/projects/{projectId}/tests/e2e/queue/{queueId}",
+            get(get_e2e_queue_for_project).delete(delete_e2e_queue_for_project),
+        )
+        .route(
             "/api/v1/projects/{projectId}/tests/load",
             get(list_load_history)
                 .post(run_load_test_for_project)
@@ -164,6 +175,7 @@ mod tests {
             runner_endpoints: Vec::new(),
             rps_per_node: 1000,
             executions: Arc::new(RwLock::new(HashMap::new())),
+            e2e_queues: Arc::new(RwLock::new(HashMap::new())),
             mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
         };
         let app = build_app(

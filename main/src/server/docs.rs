@@ -1,15 +1,15 @@
 use utoipa::OpenApi;
 
 use crate::server::models::{
-    CancelExecutionResponse, ConsolidatedLoadMetrics, E2eHistoryRecord, ErrorResponse,
-    HistoryOrder, HistoryQuery, LoadHistoryRecord, LoadTestConfig, OpenApiValidationPoint,
-    OpenApiValidationRequest, OpenApiValidationResponse, OpenApiValidationSeverity,
-    OpenApiValidationStatus, OrchestratorInfoResponse, OrchestratorSseEventData, PipelineInput,
+    CancelExecutionResponse, ConsolidatedLoadMetrics, E2eHistoryRecord, E2eQueuePipelineRecord,
+    E2eQueueRecord, E2eQueueStatus, ErrorResponse, HistoryOrder, HistoryQuery,
+    LoadHistoryRecord, LoadTestConfig, OpenApiValidationPoint, OpenApiValidationRequest,
+    OpenApiValidationResponse, OpenApiValidationSeverity, OpenApiValidationStatus,
+    OrchestratorInfoResponse, OrchestratorSseEventData, PipelineInput, ProjectE2eQueueRequest,
     ProjectE2eTestRequest, ProjectExportEnvelope, ProjectExportProject, ProjectHistoryExport,
     ProjectImportResponse, ProjectListQuery, ProjectLoadTestRequest, ProjectMetadataUpsertRequest,
     ProjectRecord, ProjectSpecRecord, ProjectSpecUpsertRequest, ProjectTransferQuery,
-    ProjectUpsertRequest, ProxyRequest, RunnerInfo, RunnerLoadLine, RunnerRuntimeInfo,
-    SpecUrlEntry,
+    ProjectUpsertRequest, ProxyRequest, RunnerInfo, RunnerLoadLine, RunnerRuntimeInfo, SpecUrlEntry,
 };
 
 #[derive(OpenApi)]
@@ -46,6 +46,9 @@ use crate::server::models::{
         crate::server::handlers::history_load::get_load_test_by_id,
         crate::server::handlers::history_load::delete_load_test_by_id,
         crate::server::handlers::tests_e2e::run_e2e_test_for_project,
+        crate::server::handlers::tests_e2e_queue::create_e2e_queue_for_project,
+        crate::server::handlers::tests_e2e_queue::get_e2e_queue_for_project,
+        crate::server::handlers::tests_e2e_queue::delete_e2e_queue_for_project,
         crate::server::handlers::tests_load::run_load_test_for_project,
         crate::server::handlers::executions::stream_execution,
         crate::server::handlers::executions::cancel_execution,
@@ -56,6 +59,7 @@ use crate::server::models::{
     ),
     components(schemas(
         ProjectE2eTestRequest,
+        ProjectE2eQueueRequest,
         ProjectLoadTestRequest,
         previa_runner::RuntimeSpec,
         LoadTestConfig,
@@ -83,6 +87,9 @@ use crate::server::models::{
         ErrorResponse,
         CancelExecutionResponse,
         E2eHistoryRecord,
+        E2eQueueStatus,
+        E2eQueuePipelineRecord,
+        E2eQueueRecord,
         LoadHistoryRecord,
         RunnerRuntimeInfo,
         RunnerInfo,

@@ -41,6 +41,15 @@ pub struct ProjectE2eTestRequest {
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectE2eQueueRequest {
+    pub pipeline_ids: Vec<String>,
+    pub selected_base_url_key: Option<String>,
+    #[serde(default)]
+    pub specs: Vec<RuntimeSpec>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectLoadTestRequest {
     pub pipeline_id: Option<String>,
     pub pipeline: Option<Pipeline>,
@@ -261,6 +270,49 @@ pub struct OpenApiValidationResponse {
 pub enum HistoryOrder {
     Asc,
     Desc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum E2eQueueStatus {
+    Pending,
+    Running,
+    Failed,
+    Completed,
+    Cancelled,
+}
+
+impl E2eQueueStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Failed => "failed",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Failed | Self::Completed | Self::Cancelled)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct E2eQueuePipelineRecord {
+    pub id: String,
+    pub status: E2eQueueStatus,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct E2eQueueRecord {
+    pub id: String,
+    pub status: E2eQueueStatus,
+    pub pipelines: Vec<E2eQueuePipelineRecord>,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

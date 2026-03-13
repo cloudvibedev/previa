@@ -11,10 +11,11 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::server::build_app;
-use crate::server::db::backfill_project_spec_md5_hashes;
+use crate::server::db::{backfill_project_spec_md5_hashes, cancel_stale_e2e_queues};
 use crate::server::execution::parse_runner_endpoints;
 use crate::server::mcp::models::McpConfig;
 use crate::server::state::{AppState, DB_SCHEMA_VERSION};
+use crate::server::utils::now_iso;
 
 fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
     args.into_iter().skip(1).any(|arg| arg == "--version" || arg == "-v")
@@ -66,6 +67,9 @@ async fn main() {
     let backfilled_spec_hashes = backfill_project_spec_md5_hashes(&db)
         .await
         .expect("failed to backfill OpenAPI spec md5 hashes");
+    let cancelled_stale_queues = cancel_stale_e2e_queues(&db, &now_iso())
+        .await
+        .expect("failed to cancel stale e2e queues");
 
     let state = AppState {
         client: Client::new(),
@@ -74,6 +78,7 @@ async fn main() {
         runner_endpoints,
         rps_per_node,
         executions: Arc::new(RwLock::new(HashMap::new())),
+        e2e_queues: Arc::new(RwLock::new(HashMap::new())),
         mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
     };
 
@@ -101,6 +106,9 @@ async fn main() {
             "backfilled {} OpenAPI specs without md5 hash",
             backfilled_spec_hashes
         );
+    }
+    if cancelled_stale_queues > 0 {
+        info!("cancelled {} stale e2e queues from previous startup", cancelled_stale_queues);
     }
 
     axum::serve(listener, app)
