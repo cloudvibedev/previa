@@ -203,7 +203,10 @@ pub async fn cancel_non_terminal_e2e_queue(
     Ok(())
 }
 
-pub async fn cancel_stale_e2e_queues(db: &SqlitePool, updated_at: &str) -> Result<u64, sqlx::Error> {
+pub async fn cancel_stale_e2e_queues(
+    db: &SqlitePool,
+    updated_at: &str,
+) -> Result<u64, sqlx::Error> {
     let mut tx = db.begin().await?;
     let result = sqlx::query(
         "UPDATE e2e_queues
@@ -324,9 +327,11 @@ mod tests {
             .expect("load queue")
             .expect("queue exists");
         assert_eq!(snapshot.status, E2eQueueStatus::Cancelled);
-        assert!(snapshot
-            .pipelines
-            .iter()
-            .all(|item| item.status == E2eQueueStatus::Cancelled));
+        assert!(
+            snapshot
+                .pipelines
+                .iter()
+                .all(|item| item.status == E2eQueueStatus::Cancelled)
+        );
     }
 }

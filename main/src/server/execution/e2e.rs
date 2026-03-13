@@ -158,7 +158,9 @@ pub async fn start_e2e_execution(
         },
     )
     .await
-    .map_err(|err| StartE2eExecutionError::Internal(format!("failed to save e2e running history: {err}")))?;
+    .map_err(|err| {
+        StartE2eExecutionError::Internal(format!("failed to save e2e running history: {err}"))
+    })?;
 
     let state_clone = state.clone();
     let execution_id_for_cleanup = orchestrator_execution_id.clone();
@@ -233,7 +235,9 @@ pub async fn start_e2e_execution(
     })
 }
 
-pub fn sse_response_for_started_execution(started: StartedE2eExecution) -> axum::response::Response {
+pub fn sse_response_for_started_execution(
+    started: StartedE2eExecution,
+) -> axum::response::Response {
     let (tx, rx) = mpsc::unbounded_channel();
     spawn_broadcast_bridge(started.subscriber, tx, false);
     crate::server::execution::sse_response_from_rx(rx)

@@ -94,9 +94,7 @@ pub async fn load_existing_project_pipeline_ids(
         return Ok(HashSet::new());
     }
 
-    let mut qb = QueryBuilder::<Sqlite>::new(
-        "SELECT id FROM pipelines WHERE project_id = ",
-    );
+    let mut qb = QueryBuilder::<Sqlite>::new("SELECT id FROM pipelines WHERE project_id = ");
     qb.push_bind(project_id);
     qb.push(" AND id IN (");
     {

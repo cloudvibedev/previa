@@ -12,7 +12,9 @@ use crate::server::execution::{
     StartE2eExecutionError, sse_response_for_started_execution, start_e2e_execution,
 };
 use crate::server::middleware::transaction::extract_transaction_id;
-use crate::server::models::{E2eTestRequest, ErrorResponse, OrchestratorSseEventData, ProjectE2eTestRequest};
+use crate::server::models::{
+    E2eTestRequest, ErrorResponse, OrchestratorSseEventData, ProjectE2eTestRequest,
+};
 use crate::server::state::AppState;
 
 pub async fn run_e2e_test_internal(
@@ -27,9 +29,7 @@ pub async fn run_e2e_test_internal(
     let transaction_id = extract_transaction_id(&headers);
     match start_e2e_execution(state, payload, transaction_id).await {
         Ok(started) => sse_response_for_started_execution(started),
-        Err(StartE2eExecutionError::BadRequest(message)) => {
-            bad_request_message_response(&message)
-        }
+        Err(StartE2eExecutionError::BadRequest(message)) => bad_request_message_response(&message),
         Err(StartE2eExecutionError::ServiceUnavailable(message)) => {
             crate::server::errors::service_unavailable_response(&message)
         }

@@ -10,7 +10,9 @@ use crate::server::execution::e2e_queue::{
     QueueError, cancel_e2e_queue, create_e2e_queue, get_current_e2e_queue_response,
     get_e2e_queue_response, queue_error_response,
 };
-use crate::server::models::{E2eQueueRecord, ErrorResponse, OrchestratorSseEventData, ProjectE2eQueueRequest};
+use crate::server::models::{
+    E2eQueueRecord, ErrorResponse, OrchestratorSseEventData, ProjectE2eQueueRequest,
+};
 use crate::server::state::AppState;
 
 #[utoipa::path(
@@ -60,15 +62,19 @@ pub async fn create_e2e_queue_for_project(
 
     match create_e2e_queue(state, project_id.clone(), payload).await {
         Ok(snapshot) => {
-            let location =
-                format!("/api/v1/projects/{project_id}/tests/e2e/queue/{}", snapshot.id);
+            let location = format!(
+                "/api/v1/projects/{project_id}/tests/e2e/queue/{}",
+                snapshot.id
+            );
             let mut response = (StatusCode::ACCEPTED, Json(snapshot.clone())).into_response();
-            response
-                .headers_mut()
-                .insert(header::LOCATION, HeaderValue::from_str(&location).unwrap_or_else(|_| HeaderValue::from_static("")));
+            response.headers_mut().insert(
+                header::LOCATION,
+                HeaderValue::from_str(&location).unwrap_or_else(|_| HeaderValue::from_static("")),
+            );
             response.headers_mut().insert(
                 "x-queue-id",
-                HeaderValue::from_str(&snapshot.id).unwrap_or_else(|_| HeaderValue::from_static("")),
+                HeaderValue::from_str(&snapshot.id)
+                    .unwrap_or_else(|_| HeaderValue::from_static("")),
             );
             response
         }
@@ -128,7 +134,9 @@ pub async fn delete_e2e_queue_for_project(
 ) -> Response {
     match cancel_e2e_queue(state, project_id, queue_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(QueueError::BadRequest(message)) => queue_error_response(QueueError::BadRequest(message)),
+        Err(QueueError::BadRequest(message)) => {
+            queue_error_response(QueueError::BadRequest(message))
+        }
         Err(err) => queue_error_response(err),
     }
 }
@@ -166,7 +174,12 @@ mod tests {
     #[tokio::test]
     async fn post_queue_returns_headers_and_get_active_returns_sse() {
         let (runner_url, _runner_task) = spawn_runner_server().await;
-        let app = test_app(vec![runner_url], "project-1", vec![pipeline("slow"), pipeline("ok")]).await;
+        let app = test_app(
+            vec![runner_url],
+            "project-1",
+            vec![pipeline("slow"), pipeline("ok")],
+        )
+        .await;
 
         let create = app
             .clone()
@@ -192,7 +205,9 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
-                    .uri(format!("/api/v1/projects/project-1/tests/e2e/queue/{queue_id}"))
+                    .uri(format!(
+                        "/api/v1/projects/project-1/tests/e2e/queue/{queue_id}"
+                    ))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -216,13 +231,21 @@ mod tests {
             .expect("body chunk");
         let payload = String::from_utf8(first_chunk.to_vec()).unwrap();
         assert!(payload.contains("event: queue:update"));
-        assert!(payload.contains("\"status\":\"pending\"") || payload.contains("\"status\":\"running\""));
+        assert!(
+            payload.contains("\"status\":\"pending\"")
+                || payload.contains("\"status\":\"running\"")
+        );
     }
 
     #[tokio::test]
     async fn get_current_queue_returns_active_snapshot() {
         let (runner_url, _runner_task) = spawn_runner_server().await;
-        let app = test_app(vec![runner_url], "project-1", vec![pipeline("slow"), pipeline("ok")]).await;
+        let app = test_app(
+            vec![runner_url],
+            "project-1",
+            vec![pipeline("slow"), pipeline("ok")],
+        )
+        .await;
 
         let create = app
             .clone()
@@ -296,7 +319,8 @@ mod tests {
                     .uri("/api/v1/projects/project-1/tests/e2e/queue")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
-                        serde_json::to_vec(&json!({ "pipelineIds": ["ok", "fail", "after"] })).unwrap(),
+                        serde_json::to_vec(&json!({ "pipelineIds": ["ok", "fail", "after"] }))
+                            .unwrap(),
                     ))
                     .unwrap(),
             )
@@ -342,7 +366,9 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::DELETE)
-                    .uri(format!("/api/v1/projects/project-1/tests/e2e/queue/{queue_id}"))
+                    .uri(format!(
+                        "/api/v1/projects/project-1/tests/e2e/queue/{queue_id}"
+                    ))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -403,7 +429,10 @@ mod tests {
 
         assert_eq!(first_snapshot["status"], json!("cancelled"));
         assert_eq!(second_snapshot["status"], json!("completed"));
-        assert_eq!(second_snapshot["pipelines"][0]["status"], json!("completed"));
+        assert_eq!(
+            second_snapshot["pipelines"][0]["status"],
+            json!("completed")
+        );
     }
 
     async fn queue_id_and_location_from_response(response: Response) -> (String, String) {
@@ -432,7 +461,9 @@ mod tests {
                 .oneshot(
                     Request::builder()
                         .method(Method::GET)
-                        .uri(format!("/api/v1/projects/{project_id}/tests/e2e/queue/{queue_id}"))
+                        .uri(format!(
+                            "/api/v1/projects/{project_id}/tests/e2e/queue/{queue_id}"
+                        ))
                         .body(Body::empty())
                         .unwrap(),
                 )
@@ -556,7 +587,10 @@ mod tests {
         }
 
         async fn e2e(State(()): State<()>, Json(payload): Json<Value>) -> Response {
-            let pipeline_id = payload["pipeline"]["id"].as_str().unwrap_or_default().to_owned();
+            let pipeline_id = payload["pipeline"]["id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
             let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(8);
 
             tokio::spawn(async move {

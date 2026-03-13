@@ -7,7 +7,9 @@ use crate::server::build_app;
 use crate::server::state::AppState;
 
 fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
-    args.into_iter().skip(1).any(|arg| arg == "--version" || arg == "-v")
+    args.into_iter()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-v")
 }
 
 #[tokio::main]

@@ -18,7 +18,9 @@ use crate::server::state::{AppState, DB_SCHEMA_VERSION};
 use crate::server::utils::now_iso;
 
 fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
-    args.into_iter().skip(1).any(|arg| arg == "--version" || arg == "-v")
+    args.into_iter()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-v")
 }
 
 #[tokio::main]
@@ -108,7 +110,10 @@ async fn main() {
         );
     }
     if cancelled_stale_queues > 0 {
-        info!("cancelled {} stale e2e queues from previous startup", cancelled_stale_queues);
+        info!(
+            "cancelled {} stale e2e queues from previous startup",
+            cancelled_stale_queues
+        );
     }
 
     axum::serve(listener, app)
