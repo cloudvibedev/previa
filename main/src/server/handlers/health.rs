@@ -49,6 +49,7 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use tokio::sync::RwLock;
 
+    use crate::server::execution::ExecutionScheduler;
     use crate::server::state::AppState;
 
     use super::get_info;
@@ -66,6 +67,7 @@ mod tests {
             context_name: "other".to_owned(),
             runner_endpoints: Vec::new(),
             rps_per_node: 1000,
+            scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),
             e2e_queues: Arc::new(RwLock::new(HashMap::new())),
             mcp_sessions: Arc::new(RwLock::new(HashMap::new())),

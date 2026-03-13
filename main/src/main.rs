@@ -12,7 +12,7 @@ use tracing::info;
 
 use crate::server::build_app;
 use crate::server::db::{backfill_project_spec_md5_hashes, cancel_stale_e2e_queues};
-use crate::server::execution::parse_runner_endpoints;
+use crate::server::execution::{SchedulerConfig, parse_runner_endpoints};
 use crate::server::mcp::models::McpConfig;
 use crate::server::state::{AppState, DB_SCHEMA_VERSION};
 use crate::server::utils::now_iso;
@@ -45,6 +45,16 @@ async fn main() {
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(1000);
+    let e2e_per_runner_limit = std::env::var("E2E_EXECUTIONS_PER_RUNNER")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
+    let load_per_runner_limit = std::env::var("LOAD_EXECUTIONS_PER_RUNNER")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
     let address = std::env::var("ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_owned());
     let port = std::env::var("PORT")
         .ok()
@@ -79,6 +89,10 @@ async fn main() {
         context_name: context_name.clone(),
         runner_endpoints,
         rps_per_node,
+        scheduler: crate::server::execution::ExecutionScheduler::new(SchedulerConfig {
+            e2e_per_runner_limit,
+            load_per_runner_limit,
+        }),
         executions: Arc::new(RwLock::new(HashMap::new())),
         e2e_queues: Arc::new(RwLock::new(HashMap::new())),
         mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -115,6 +129,10 @@ async fn main() {
             cancelled_stale_queues
         );
     }
+    info!(
+        "execution scheduler configured (e2e_per_runner_limit: {}, load_per_runner_limit: {})",
+        e2e_per_runner_limit, load_per_runner_limit
+    );
 
     axum::serve(listener, app)
         .await

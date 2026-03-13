@@ -166,6 +166,7 @@ mod tests {
 
     use crate::server::build_app;
     use crate::server::db::insert_project_pipeline;
+    use crate::server::execution::ExecutionScheduler;
     use crate::server::mcp::models::McpConfig;
     use crate::server::state::AppState;
 
@@ -534,6 +535,7 @@ mod tests {
             context_name: "default".to_owned(),
             runner_endpoints,
             rps_per_node: 1000,
+            scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),
             e2e_queues: Arc::new(RwLock::new(HashMap::new())),
             mcp_sessions: Arc::new(RwLock::new(HashMap::new())),

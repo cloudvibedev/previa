@@ -6,6 +6,7 @@ pub mod load;
 pub mod load_batch;
 pub mod node_plan;
 pub mod runtime_specs;
+pub mod scheduler;
 pub mod sse_stream;
 
 pub use e2e::{StartE2eExecutionError, sse_response_for_started_execution, start_e2e_execution};
@@ -23,4 +24,5 @@ pub use node_plan::{
     split_even,
 };
 pub use runtime_specs::resolve_runtime_specs_for_execution;
+pub use scheduler::{AcquireOutcome, ExecutionScheduler, ScheduledExecutionKind, SchedulerConfig};
 pub use sse_stream::{spawn_broadcast_bridge, sse_response_from_rx};

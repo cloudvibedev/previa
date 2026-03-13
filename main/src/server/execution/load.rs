@@ -8,9 +8,10 @@ use tracing::error;
 
 use crate::server::db::{save_load_history, upsert_load_history};
 use crate::server::execution::{
-    add_load_context_fields, calculate_node_plan, determine_load_history_status,
-    flush_load_batches, forward_runner_stream_load_chunked, resolve_runtime_specs_for_execution,
-    send_sse_best_effort, snapshot_consolidated_metrics, snapshot_latest_lines, split_even,
+    AcquireOutcome, ScheduledExecutionKind, add_load_context_fields, calculate_node_plan,
+    determine_load_history_status, flush_load_batches, forward_runner_stream_load_chunked,
+    resolve_runtime_specs_for_execution, send_sse_best_effort, snapshot_consolidated_metrics,
+    snapshot_latest_lines, split_even,
 };
 use crate::server::models::{
     HistoryMetadata, LoadEventContext, LoadHistoryWrite, LoadLatencyAccumulator, LoadTestRequest,
@@ -96,7 +97,6 @@ pub async fn start_load_execution(
     }
 
     let transaction_id_for_children = transaction_id.clone();
-    let started_at_ms = now_ms() as i64;
     let history_metadata = HistoryMetadata {
         project_id: payload.project_id.clone(),
         pipeline_index: payload.pipeline_index,
@@ -133,66 +133,51 @@ pub async fn start_load_execution(
         "projectId": history_metadata.project_id.clone(),
         "pipelineIndex": history_metadata.pipeline_index
     });
-
-    let split_requests = split_even(runner_config.total_requests.max(1), plan.nodes_used);
-    let split_concurrency = split_even(runner_config.concurrency.max(1), plan.nodes_used);
-    let desired_total_requests = runner_config
-        .total_requests
-        .max(1)
-        .div_ceil(plan.requested_nodes.max(1));
-    let runner_load_plan = selected_nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| {
-            let total_requests = split_requests[index];
-            let concurrency = split_concurrency[index];
-            RunnerLoadPlanItem {
-                node: node.clone(),
-                total_requests,
-                concurrency,
-                desired_total_requests,
-                above_desired: total_requests > desired_total_requests,
-            }
-        })
-        .collect::<Vec<_>>();
-    let overloaded_nodes = runner_load_plan
-        .iter()
-        .filter(|item| item.above_desired)
-        .map(|item| item.node.clone())
-        .collect::<Vec<_>>();
-    let overloaded_warning = (!overloaded_nodes.is_empty()).then(|| {
-        format!(
-            "Configured load above desired per-runner totalRequests (desired <= {}): {}.",
-            desired_total_requests,
-            overloaded_nodes.join(", ")
-        )
-    });
-    let warning = match (plan.warning.clone(), overloaded_warning) {
-        (Some(plan_warning), Some(overloaded)) => Some(format!("{plan_warning} {overloaded}")),
-        (Some(plan_warning), None) => Some(plan_warning),
-        (None, Some(overloaded)) => Some(overloaded),
-        (None, None) => None,
-    };
     let Some(project_id_for_execution) = payload.project_id.clone() else {
         return Err(StartLoadExecutionError::BadRequest(
             "projectId is required".to_owned(),
         ));
     };
-    let load_context = Arc::new(LoadEventContext {
-        plan: plan.clone(),
-        warning,
-        registered_nodes,
-        active_nodes: active_nodes.clone(),
-        used_nodes: selected_nodes.clone(),
-        runner_load_plan,
-        batch_window_ms: LOAD_BATCH_WINDOW_MS,
-    });
-
     let orchestrator_execution_id = new_uuid_v7();
-    let init_payload = add_load_context_fields(
-        json!({ "executionId": orchestrator_execution_id }),
-        load_context.as_ref(),
-    );
+    let queue_position = state
+        .scheduler
+        .enqueue(
+            orchestrator_execution_id.clone(),
+            ScheduledExecutionKind::Load,
+            project_id_for_execution.clone(),
+            plan.nodes_used.max(1),
+        )
+        .await;
+    let initial_acquire = state
+        .scheduler
+        .try_acquire(&orchestrator_execution_id, &active_nodes)
+        .await;
+    let init_payload = match &initial_acquire {
+        AcquireOutcome::Reserved(runners) => build_running_load_payload(
+            &orchestrator_execution_id,
+            &registered_nodes,
+            &active_nodes,
+            runners,
+            &runner_config,
+            &plan,
+        ),
+        AcquireOutcome::Pending { position } => build_queued_load_payload(
+            &orchestrator_execution_id,
+            &registered_nodes,
+            &active_nodes,
+            &runner_config,
+            &plan,
+            *position.max(&queue_position),
+        ),
+        AcquireOutcome::Missing => build_queued_load_payload(
+            &orchestrator_execution_id,
+            &registered_nodes,
+            &active_nodes,
+            &runner_config,
+            &plan,
+            1,
+        ),
+    };
     let (sse_tx, _) = broadcast::channel(EXECUTION_SSE_BUFFER_SIZE);
     let response_subscriber = sse_tx.subscribe();
     let exec_ctx = Arc::new(ExecutionCtx {
@@ -200,7 +185,7 @@ pub async fn start_load_execution(
         project_id: project_id_for_execution,
         kind: ExecutionKind::Load,
         sse_tx: sse_tx.clone(),
-        init_payload: init_payload.clone(),
+        init_payload: crate::server::execution::scheduler::SharedValue::new(init_payload.clone()),
     });
 
     {
@@ -211,47 +196,178 @@ pub async fn start_load_execution(
     let state_clone = state.clone();
     let execution_id_for_cleanup = orchestrator_execution_id.clone();
     let history_execution_id = orchestrator_execution_id.clone();
-    let history_record_id = new_uuid_v7();
     let runtime_specs_for_runner = runtime_specs.clone().unwrap_or_default();
-    let running_context_payload = add_load_context_fields(json!({}), load_context.as_ref());
-    let running_requested_config = serde_json::to_value(&runner_config).unwrap_or(Value::Null);
     let (completion_tx, completion_rx) = oneshot::channel();
-    save_load_history(
-        &state.db,
-        LoadHistoryWrite {
-            id: history_record_id.clone(),
-            execution_id: history_execution_id.clone(),
-            transaction_id: transaction_id.clone(),
-            metadata: history_metadata.clone(),
-            pipeline_id: history_pipeline_id.clone(),
-            pipeline_name: history_pipeline_name.clone(),
-            selected_base_url_key: history_selected_base_url_key.clone(),
-            status: "running".to_owned(),
-            started_at_ms,
-            finished_at_ms: started_at_ms,
-            duration_ms: 0,
-            requested_config: running_requested_config,
-            final_consolidated: None,
-            final_lines: Vec::new(),
-            errors: Vec::new(),
-            request: history_request.clone(),
-            context: running_context_payload,
-        },
-    )
-    .await
-    .map_err(|err| {
-        StartLoadExecutionError::Internal(format!("failed to save load running history: {err}"))
-    })?;
-    let load_chunk: Arc<Mutex<HashMap<String, RunnerLoadLine>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-    let load_latest: Arc<Mutex<HashMap<String, RunnerLoadLine>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-    let load_latency: Arc<Mutex<LoadLatencyAccumulator>> =
-        Arc::new(Mutex::new(LoadLatencyAccumulator::default()));
-    let load_errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
     tokio::spawn(async move {
         let _ = send_sse_best_effort(&sse_tx, "execution:init", init_payload);
+
+        let (selected_nodes, active_nodes_for_run, emitted_running_status) = match initial_acquire {
+            AcquireOutcome::Reserved(runners) => (runners, active_nodes.clone(), false),
+            AcquireOutcome::Pending { .. } | AcquireOutcome::Missing => loop {
+                if exec_ctx.cancel.is_cancelled() {
+                    let _ = state_clone.scheduler.cancel_queued(&history_execution_id).await;
+                    let cancelled_payload = json!({
+                        "executionId": history_execution_id,
+                        "status": "cancelled",
+                        "message": "execution cancelled while queued"
+                    });
+                    let _ = send_sse_best_effort(&sse_tx, "execution:status", cancelled_payload);
+                    let mut executions = state_clone.executions.write().await;
+                    executions.remove(&execution_id_for_cleanup);
+                    let _ = completion_tx.send(LoadExecutionOutcome {
+                        execution_id: history_execution_id,
+                        status: "cancelled".to_owned(),
+                    });
+                    return;
+                }
+
+                let runner_statuses = crate::server::execution::collect_runner_statuses(
+                    &state_clone.client,
+                    &state_clone.runner_endpoints,
+                )
+                .await;
+                let active_nodes = runner_statuses
+                    .into_iter()
+                    .filter(|runner| runner.active)
+                    .map(|runner| runner.endpoint)
+                    .collect::<Vec<_>>();
+                match state_clone
+                    .scheduler
+                    .try_acquire(&history_execution_id, &active_nodes)
+                    .await
+                {
+                    AcquireOutcome::Reserved(runners) => break (runners, active_nodes, true),
+                    AcquireOutcome::Pending { position } => {
+                        let queued_payload = build_queued_load_payload(
+                            &history_execution_id,
+                            &registered_nodes,
+                            &active_nodes,
+                            &runner_config,
+                            &plan,
+                            position,
+                        );
+                        exec_ctx.init_payload.set(queued_payload.clone()).await;
+                        let _ = send_sse_best_effort(
+                            &sse_tx,
+                            "execution:status",
+                            queued_payload,
+                        );
+                        if !state_clone.scheduler.wait_for_change(&exec_ctx.cancel).await {
+                            continue;
+                        }
+                    }
+                    AcquireOutcome::Missing => {
+                        let mut executions = state_clone.executions.write().await;
+                        executions.remove(&execution_id_for_cleanup);
+                        let _ = completion_tx.send(LoadExecutionOutcome {
+                            execution_id: history_execution_id,
+                            status: "cancelled".to_owned(),
+                        });
+                        return;
+                    }
+                }
+            },
+        };
+
+        let plan = calculate_node_plan(
+            (runner_config.concurrency as u64).max(1),
+            state_clone.rps_per_node,
+            active_nodes_for_run.len(),
+            runner_config.total_requests.max(1),
+            runner_config.concurrency.max(1),
+        );
+        let split_requests = split_even(runner_config.total_requests.max(1), selected_nodes.len());
+        let split_concurrency = split_even(runner_config.concurrency.max(1), selected_nodes.len());
+        let desired_total_requests = runner_config
+            .total_requests
+            .max(1)
+            .div_ceil(plan.requested_nodes.max(1));
+        let runner_load_plan = selected_nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| RunnerLoadPlanItem {
+                node: node.clone(),
+                total_requests: split_requests[index],
+                concurrency: split_concurrency[index],
+                desired_total_requests,
+                above_desired: split_requests[index] > desired_total_requests,
+            })
+            .collect::<Vec<_>>();
+        let overloaded_nodes = runner_load_plan
+            .iter()
+            .filter(|item| item.above_desired)
+            .map(|item| item.node.clone())
+            .collect::<Vec<_>>();
+        let overloaded_warning = (!overloaded_nodes.is_empty()).then(|| {
+            format!(
+                "Configured load above desired per-runner totalRequests (desired <= {}): {}.",
+                desired_total_requests,
+                overloaded_nodes.join(", ")
+            )
+        });
+        let warning = match (plan.warning.clone(), overloaded_warning) {
+            (Some(plan_warning), Some(overloaded)) => Some(format!("{plan_warning} {overloaded}")),
+            (Some(plan_warning), None) => Some(plan_warning),
+            (None, Some(overloaded)) => Some(overloaded),
+            (None, None) => None,
+        };
+        let load_context = Arc::new(LoadEventContext {
+            plan: plan.clone(),
+            warning,
+            registered_nodes: registered_nodes.clone(),
+            active_nodes: active_nodes_for_run.clone(),
+            used_nodes: selected_nodes.clone(),
+            runner_load_plan,
+            batch_window_ms: LOAD_BATCH_WINDOW_MS,
+        });
+        if emitted_running_status {
+            let payload = add_load_context_fields(
+                json!({ "executionId": history_execution_id, "status": "running" }),
+                load_context.as_ref(),
+            );
+            exec_ctx.init_payload.set(payload.clone()).await;
+            let _ = send_sse_best_effort(&sse_tx, "execution:status", payload);
+        }
+
+        let started_at_ms = now_ms() as i64;
+        let history_record_id = new_uuid_v7();
+        let running_context_payload = add_load_context_fields(json!({}), load_context.as_ref());
+        let running_requested_config = serde_json::to_value(&runner_config).unwrap_or(Value::Null);
+        if let Err(err) = save_load_history(
+            &state_clone.db,
+            LoadHistoryWrite {
+                id: history_record_id.clone(),
+                execution_id: history_execution_id.clone(),
+                transaction_id: transaction_id.clone(),
+                metadata: history_metadata.clone(),
+                pipeline_id: history_pipeline_id.clone(),
+                pipeline_name: history_pipeline_name.clone(),
+                selected_base_url_key: history_selected_base_url_key.clone(),
+                status: "running".to_owned(),
+                started_at_ms,
+                finished_at_ms: started_at_ms,
+                duration_ms: 0,
+                requested_config: running_requested_config,
+                final_consolidated: None,
+                final_lines: Vec::new(),
+                errors: Vec::new(),
+                request: history_request.clone(),
+                context: running_context_payload,
+            },
+        )
+        .await
+        {
+            error!("failed to save load running history: {}", err);
+        }
+
+        let load_chunk: Arc<Mutex<HashMap<String, RunnerLoadLine>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let load_latest: Arc<Mutex<HashMap<String, RunnerLoadLine>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let load_latency: Arc<Mutex<LoadLatencyAccumulator>> =
+            Arc::new(Mutex::new(LoadLatencyAccumulator::default()));
+        let load_errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
         let flush_stop = CancellationToken::new();
         let flush_handle = tokio::spawn(flush_load_batches(
@@ -372,6 +488,7 @@ pub async fn start_load_execution(
             error!("failed to save load history: {}", err);
         }
 
+        state_clone.scheduler.release(&history_execution_id).await;
         let mut executions = state_clone.executions.write().await;
         executions.remove(&execution_id_for_cleanup);
         let _ = completion_tx.send(LoadExecutionOutcome {
@@ -393,4 +510,86 @@ pub fn sse_response_for_started_load_execution(
     let (tx, rx) = mpsc::unbounded_channel();
     crate::server::execution::spawn_broadcast_bridge(started.subscriber, tx, false);
     crate::server::execution::sse_response_from_rx(rx)
+}
+
+fn build_running_load_payload(
+    execution_id: &str,
+    registered_nodes: &[String],
+    active_nodes: &[String],
+    used_nodes: &[String],
+    config: &crate::server::models::LoadTestConfig,
+    plan: &crate::server::models::NodePlan,
+) -> Value {
+    let runner_load_plan = build_runner_load_plan(config, used_nodes, plan.requested_nodes);
+    add_load_context_fields(
+        json!({
+            "executionId": execution_id,
+            "status": "running"
+        }),
+        &LoadEventContext {
+            plan: plan.clone(),
+            warning: None,
+            registered_nodes: registered_nodes.to_vec(),
+            active_nodes: active_nodes.to_vec(),
+            used_nodes: used_nodes.to_vec(),
+            runner_load_plan,
+            batch_window_ms: LOAD_BATCH_WINDOW_MS,
+        },
+    )
+}
+
+fn build_queued_load_payload(
+    execution_id: &str,
+    registered_nodes: &[String],
+    active_nodes: &[String],
+    config: &crate::server::models::LoadTestConfig,
+    plan: &crate::server::models::NodePlan,
+    queue_position: usize,
+) -> Value {
+    add_load_context_fields(
+        json!({
+            "executionId": execution_id,
+            "status": "queued",
+            "queuePosition": queue_position,
+            "message": "execution queued waiting for scheduler capacity"
+        }),
+        &LoadEventContext {
+            plan: crate::server::models::NodePlan {
+                requested_nodes: plan.requested_nodes,
+                nodes_found: plan.nodes_found,
+                nodes_used: 0,
+                warning: plan.warning.clone(),
+            },
+            warning: None,
+            registered_nodes: registered_nodes.to_vec(),
+            active_nodes: active_nodes.to_vec(),
+            used_nodes: Vec::new(),
+            runner_load_plan: build_runner_load_plan(config, &[], plan.requested_nodes),
+            batch_window_ms: LOAD_BATCH_WINDOW_MS,
+        },
+    )
+}
+
+fn build_runner_load_plan(
+    config: &crate::server::models::LoadTestConfig,
+    used_nodes: &[String],
+    requested_nodes: usize,
+) -> Vec<RunnerLoadPlanItem> {
+    if used_nodes.is_empty() {
+        return Vec::new();
+    }
+    let split_requests = split_even(config.total_requests.max(1), used_nodes.len());
+    let split_concurrency = split_even(config.concurrency.max(1), used_nodes.len());
+    let desired_total_requests = config.total_requests.max(1).div_ceil(requested_nodes.max(1));
+    used_nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| RunnerLoadPlanItem {
+            node: node.clone(),
+            total_requests: split_requests[index],
+            concurrency: split_concurrency[index],
+            desired_total_requests,
+            above_desired: split_requests[index] > desired_total_requests,
+        })
+        .collect()
 }

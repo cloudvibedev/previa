@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use tokio::sync::{RwLock, broadcast};
 use tokio_util::sync::CancellationToken;
 
+use crate::server::execution::scheduler::{ExecutionScheduler, SharedValue};
 use crate::server::mcp::models::McpSession;
 use crate::server::models::{E2eQueueRecord, SseMessage};
 
@@ -17,6 +18,7 @@ pub struct AppState {
     pub context_name: String,
     pub runner_endpoints: Vec<String>,
     pub rps_per_node: u64,
+    pub scheduler: ExecutionScheduler,
     pub executions: Arc<RwLock<HashMap<String, Arc<ExecutionCtx>>>>,
     pub e2e_queues: Arc<RwLock<HashMap<String, Arc<E2eQueueRuntime>>>>,
     pub mcp_sessions: Arc<RwLock<HashMap<String, McpSession>>>,
@@ -34,7 +36,7 @@ pub struct ExecutionCtx {
     pub project_id: String,
     pub kind: ExecutionKind,
     pub sse_tx: broadcast::Sender<SseMessage>,
-    pub init_payload: Value,
+    pub init_payload: SharedValue<Value>,
 }
 
 #[derive(Debug)]

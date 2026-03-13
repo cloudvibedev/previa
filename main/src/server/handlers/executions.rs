@@ -228,9 +228,10 @@ pub async fn stream_execution(
             ExecutionKind::E2e | ExecutionKind::Load => true,
         };
         let (tx, rx) = mpsc::unbounded_channel::<SseMessage>();
+        let init_payload = execution.init_payload.get().await;
         let _ = tx.send(SseMessage {
             event: "execution:init".to_owned(),
-            data: execution.init_payload.clone(),
+            data: init_payload,
         });
         spawn_broadcast_bridge(execution.sse_tx.subscribe(), tx, skip_execution_init);
         return sse_response_from_rx(rx);

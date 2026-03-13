@@ -1820,15 +1820,22 @@ fn load_execution_start_tool_outcome(
 
 async fn execution_started_payload(state: &AppState, execution_id: &str, kind: &str) -> Value {
     let init_payload = {
-        let executions = state.executions.read().await;
-        executions
-            .get(execution_id)
-            .map(|ctx| ctx.init_payload.clone())
-            .unwrap_or(Value::Null)
+        let ctx = {
+            let executions = state.executions.read().await;
+            executions.get(execution_id).cloned()
+        };
+        match ctx {
+            Some(ctx) => ctx.init_payload.get().await,
+            None => Value::Null,
+        }
     };
+    let status = init_payload
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("running");
     json!({
         "executionId": execution_id,
-        "status": "running",
+        "status": status,
         "kind": kind,
         "initPayload": init_payload
     })
@@ -1852,12 +1859,13 @@ async fn execution_snapshot(
             ExecutionKind::E2e => "e2e",
             ExecutionKind::Load => "load",
         };
+        let init_payload = execution.init_payload.get().await;
         return Ok(Some(json!({
             "executionId": execution_id,
             "projectId": project_id,
             "active": true,
             "kind": kind,
-            "initPayload": execution.init_payload,
+            "initPayload": init_payload,
         })));
     }
 
@@ -2374,6 +2382,7 @@ mod tests {
     use crate::server::db::{
         insert_project_pipeline, load_e2e_queue_record, upsert_project_metadata,
     };
+    use crate::server::execution::ExecutionScheduler;
     use crate::server::mcp::models::{
         CreateProjectArgs, CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, ProjectByIdArgs,
         ProjectHistoryToolArgs, ToolCallParams,
@@ -2812,6 +2821,7 @@ mod tests {
             context_name: "test".to_owned(),
             runner_endpoints: Vec::new(),
             rps_per_node: 1,
+            scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),
             e2e_queues: Arc::new(RwLock::new(HashMap::new())),
             mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
