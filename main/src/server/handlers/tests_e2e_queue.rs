@@ -337,6 +337,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn queue_waits_for_existing_project_execution_before_starting() {
+        let (runner_url, _runner_task) = spawn_runner_server().await;
+        let app = test_app(
+            vec![runner_url],
+            "project-1",
+            vec![pipeline("slow"), pipeline("ok")],
+        )
+        .await;
+
+        let _load_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/projects/project-1/tests/load")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({
+                            "pipelineId": "slow",
+                            "config": {
+                                "totalRequests": 1,
+                                "concurrency": 1,
+                                "rampUpSeconds": 0.0
+                            }
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/projects/project-1/tests/e2e/queue")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({ "pipelineIds": ["ok"] })).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (queue_id, _) = queue_id_and_location_from_response(create).await;
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/projects/project-1/tests/e2e/queue")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let snapshot = serde_json::from_slice::<Value>(&body).unwrap();
+        assert_eq!(snapshot["id"], json!(queue_id));
+        assert_eq!(snapshot["status"], json!("pending"));
+        assert_eq!(snapshot["pipelines"][0]["status"], json!("pending"));
+
+        let terminal = wait_for_terminal_queue(&app, "project-1", &queue_id).await;
+        assert_eq!(terminal["status"], json!("completed"));
+        assert_eq!(terminal["pipelines"][0]["status"], json!("completed"));
+    }
+
+    #[tokio::test]
     async fn deleting_queue_cancels_running_and_pending_items() {
         let (runner_url, _runner_task) = spawn_runner_server().await;
         let app = test_app(
@@ -655,9 +731,51 @@ mod tests {
                 .unwrap()
         }
 
+        async fn load(State(()): State<()>, Json(payload): Json<Value>) -> Response {
+            let pipeline_id = payload["pipeline"]["id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(8);
+
+            tokio::spawn(async move {
+                send_event(
+                    &tx,
+                    "execution:init",
+                    json!({ "executionId": format!("runner-load-{pipeline_id}") }),
+                )
+                .await;
+
+                send_event(
+                    &tx,
+                    "metrics",
+                    json!({
+                        "sent": 1,
+                        "completed": 1,
+                        "failed": 0,
+                        "requestsPerSecond": 1.0,
+                        "avgLatencyMs": 1.0,
+                        "durationMs": 1
+                    }),
+                )
+                .await;
+
+                if pipeline_id == "slow" {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                }
+            });
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(ReceiverStream::new(rx)))
+                .unwrap()
+        }
+
         let app = Router::new()
             .route("/health", get(health))
             .route("/api/v1/tests/e2e", post(e2e))
+            .route("/api/v1/tests/load", post(load))
             .with_state(());
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

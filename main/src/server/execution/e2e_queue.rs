@@ -238,7 +238,14 @@ async fn run_e2e_queue(
 
     let mut terminal_status = E2eQueueStatus::Completed;
 
+    if !wait_for_project_executions_to_finish(&state, &project_id, &runtime).await {
+        terminal_status = E2eQueueStatus::Cancelled;
+    }
+
     for position in 0..snapshot.pipelines.len() {
+        if terminal_status == E2eQueueStatus::Cancelled {
+            break;
+        }
         if runtime.cancel.is_cancelled() {
             terminal_status = E2eQueueStatus::Cancelled;
             break;
@@ -565,5 +572,33 @@ async fn cancel_child_execution(state: &AppState, execution_id: &str) {
     };
     if let Some(execution) = execution {
         execution.cancel.cancel();
+    }
+}
+
+async fn wait_for_project_executions_to_finish(
+    state: &AppState,
+    project_id: &str,
+    runtime: &Arc<E2eQueueRuntime>,
+) -> bool {
+    loop {
+        if runtime.cancel.is_cancelled() {
+            return false;
+        }
+
+        let has_active_execution = {
+            let executions = state.executions.read().await;
+            executions
+                .values()
+                .any(|execution| execution.project_id == project_id)
+        };
+
+        if !has_active_execution {
+            return true;
+        }
+
+        tokio::select! {
+            _ = runtime.cancel.cancelled() => return false,
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+        }
     }
 }
