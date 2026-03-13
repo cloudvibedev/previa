@@ -140,6 +140,62 @@ pub struct PipelineInput {
     pub steps: Vec<previa_runner::PipelineStep>,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPipelineRecord {
+    pub id: Option<String>,
+    pub name: String,
+    pub description: Option<String>,
+    pub steps: Vec<previa_runner::PipelineStep>,
+    pub runtime: PipelineRuntimeState,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineRuntimeState {
+    pub status: PipelineRuntimeStatus,
+    pub active_execution: Option<PipelineExecutionRef>,
+    pub active_queue: Option<PipelineQueueRef>,
+}
+
+impl PipelineRuntimeState {
+    pub fn idle() -> Self {
+        Self {
+            status: PipelineRuntimeStatus::Idle,
+            active_execution: None,
+            active_queue: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PipelineRuntimeStatus {
+    Idle,
+    Queued,
+    Running,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum PipelineExecutionKind {
+    E2e,
+    Load,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineExecutionRef {
+    pub id: String,
+    pub kind: PipelineExecutionKind,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineQueueRef {
+    pub id: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SpecUrlEntry {

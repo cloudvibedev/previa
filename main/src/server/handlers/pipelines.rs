@@ -11,7 +11,8 @@ use crate::server::errors::{
     bad_request_message_response, internal_error_response, not_found_response,
 };
 use crate::server::execution::resolve_runtime_specs_for_execution;
-use crate::server::models::{ErrorResponse, PipelineInput};
+use crate::server::models::{ErrorResponse, PipelineInput, ProjectPipelineRecord};
+use crate::server::services::pipeline_runtime::build_project_pipeline_record;
 use crate::server::state::AppState;
 use crate::server::utils::new_uuid_v7;
 use crate::server::validation::pipelines::validate_pipeline_templates;
@@ -62,7 +63,7 @@ pub async fn list_project_pipelines(
         (
             status = 200,
             description = "Pipeline do projeto",
-            body = Pipeline
+            body = ProjectPipelineRecord
         ),
         (
             status = 404,
@@ -82,7 +83,9 @@ pub async fn get_project_pipeline(
     }
 
     match load_project_pipeline_record(&state.db, &project_id, &pipeline_id).await {
-        Ok(Some(pipeline)) => Json(pipeline).into_response(),
+        Ok(Some(pipeline)) => {
+            Json(build_project_pipeline_record(&state, &project_id, pipeline).await).into_response()
+        }
         Ok(None) => not_found_response("pipeline not found"),
         Err(err) => internal_error_response(format!("failed to load pipeline: {err}")),
     }
@@ -261,5 +264,190 @@ pub async fn delete_project_pipeline(
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found_response("pipeline not found"),
         Err(err) => internal_error_response(format!("failed to delete pipeline: {err}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use axum::Router;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Method, Request, StatusCode};
+    use previa_runner::{Pipeline, PipelineStep};
+    use serde_json::{Value, json};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tokio::sync::{RwLock, broadcast};
+    use tokio_util::sync::CancellationToken;
+    use tower::ServiceExt;
+
+    use crate::server::build_app;
+    use crate::server::db::insert_project_pipeline;
+    use crate::server::execution::scheduler::SharedValue;
+    use crate::server::execution::ExecutionScheduler;
+    use crate::server::mcp::models::McpConfig;
+    use crate::server::models::{E2eQueuePipelineRecord, E2eQueueRecord, E2eQueueStatus};
+    use crate::server::state::{AppState, E2eQueueRuntime, ExecutionCtx, ExecutionKind};
+
+    #[tokio::test]
+    async fn get_project_pipeline_returns_running_runtime_for_active_execution() {
+        let state = test_state().await;
+        seed_project_with_pipeline(&state, "project-1", pipeline("pipe-1")).await;
+        {
+            let mut executions = state.executions.write().await;
+            let (sse_tx, _) = broadcast::channel(8);
+            executions.insert(
+                "exec-1".to_owned(),
+                Arc::new(ExecutionCtx {
+                    cancel: CancellationToken::new(),
+                    project_id: "project-1".to_owned(),
+                    pipeline_id: Some("pipe-1".to_owned()),
+                    kind: ExecutionKind::Load,
+                    sse_tx,
+                    init_payload: SharedValue::new(json!({ "status": "running" })),
+                }),
+            );
+        }
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/projects/project-1/pipelines/pipe-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload = serde_json::from_slice::<Value>(&body).unwrap();
+        assert_eq!(payload["runtime"]["status"], json!("running"));
+        assert_eq!(payload["runtime"]["activeExecution"]["id"], json!("exec-1"));
+        assert_eq!(payload["runtime"]["activeExecution"]["kind"], json!("load"));
+    }
+
+    #[tokio::test]
+    async fn get_project_pipeline_returns_queued_runtime_for_pending_queue_item() {
+        let state = test_state().await;
+        seed_project_with_pipeline(&state, "project-1", pipeline("pipe-1")).await;
+        let queue = E2eQueueRuntime::new(
+            "queue-1".to_owned(),
+            "project-1".to_owned(),
+            E2eQueueRecord {
+                id: "queue-1".to_owned(),
+                status: E2eQueueStatus::Pending,
+                pipelines: vec![E2eQueuePipelineRecord {
+                    id: "pipe-1".to_owned(),
+                    status: E2eQueueStatus::Pending,
+                    updated_at: "2026-03-13T00:00:00.000Z".to_owned(),
+                }],
+                updated_at: "2026-03-13T00:00:00.000Z".to_owned(),
+            },
+        );
+        {
+            let mut queues = state.e2e_queues.write().await;
+            queues.insert("project-1".to_owned(), queue);
+        }
+        let app = app_with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/projects/project-1/pipelines/pipe-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload = serde_json::from_slice::<Value>(&body).unwrap();
+        assert_eq!(payload["runtime"]["status"], json!("queued"));
+        assert_eq!(payload["runtime"]["activeQueue"]["id"], json!("queue-1"));
+        assert!(payload["runtime"]["activeExecution"].is_null());
+    }
+
+    fn app_with_state(state: AppState) -> Router {
+        build_app(
+            state,
+            &McpConfig {
+                enabled: false,
+                path: "/mcp".to_owned(),
+            },
+        )
+    }
+
+    async fn test_state() -> AppState {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory db");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations");
+        sqlx::query(
+            "INSERT INTO projects (
+                id, name, description, created_at, updated_at, created_at_ms, updated_at_ms, spec_json, execution_backend_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("project-1")
+        .bind("Project")
+        .bind(Option::<String>::None)
+        .bind("2026-03-13T00:00:00.000Z")
+        .bind("2026-03-13T00:00:00.000Z")
+        .bind(0_i64)
+        .bind(0_i64)
+        .bind(Option::<String>::None)
+        .bind(Option::<String>::None)
+        .execute(&db)
+        .await
+        .expect("insert project");
+
+        AppState {
+            client: reqwest::Client::new(),
+            db,
+            context_name: "default".to_owned(),
+            runner_endpoints: Vec::new(),
+            rps_per_node: 1,
+            scheduler: ExecutionScheduler::new(Default::default()),
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            e2e_queues: Arc::new(RwLock::new(HashMap::new())),
+            mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    async fn seed_project_with_pipeline(state: &AppState, project_id: &str, pipeline: Pipeline) {
+        insert_project_pipeline(&state.db, project_id, pipeline)
+            .await
+            .expect("insert pipeline");
+    }
+
+    fn pipeline(id: &str) -> Pipeline {
+        Pipeline {
+            id: Some(id.to_owned()),
+            name: format!("Pipeline {id}"),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "step-1".to_owned(),
+                name: "step-1".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: "https://example.com".to_owned(),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: Vec::new(),
+            }],
+        }
     }
 }

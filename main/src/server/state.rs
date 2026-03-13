@@ -34,6 +34,7 @@ pub enum ExecutionKind {
 pub struct ExecutionCtx {
     pub cancel: CancellationToken,
     pub project_id: String,
+    pub pipeline_id: Option<String>,
     pub kind: ExecutionKind,
     pub sse_tx: broadcast::Sender<SseMessage>,
     pub init_payload: SharedValue<Value>,

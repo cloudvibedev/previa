@@ -45,6 +45,7 @@ use crate::server::models::{
     E2eTestRequest, HistoryQuery, LoadTestRequest, OrchestratorInfoResponse,
     ProjectE2eQueueRequest, ProjectExportEnvelope, ProjectListQuery, ProxyRequest,
 };
+use crate::server::services::pipeline_runtime::build_project_pipeline_record;
 use crate::server::state::{AppState, ExecutionKind};
 use crate::server::utils::{new_uuid_v7, now_iso};
 use crate::server::validation::openapi::validate_openapi_source;
@@ -672,7 +673,12 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                     .await
                     .map_err(|err| format!("failed to load project pipeline: {err}"))?;
             match pipeline {
-                Some(pipeline) => Ok(tool_success(serde_json::to_value(pipeline).unwrap())),
+                Some(pipeline) => Ok(tool_success(
+                    serde_json::to_value(
+                        build_project_pipeline_record(state, &args.project_id, pipeline).await,
+                    )
+                    .unwrap(),
+                )),
                 None => Ok(tool_error(format!(
                     "pipeline '{}' not found in project '{}'",
                     args.pipeline_id, args.project_id

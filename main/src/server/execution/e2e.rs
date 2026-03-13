@@ -131,6 +131,7 @@ pub async fn start_e2e_execution(
     let exec_ctx = Arc::new(ExecutionCtx {
         cancel: CancellationToken::new(),
         project_id: project_id_for_execution,
+        pipeline_id: pipeline_id.clone(),
         kind: ExecutionKind::E2e,
         sse_tx: sse_tx.clone(),
         init_payload: crate::server::execution::scheduler::SharedValue::new(init_payload.clone()),
