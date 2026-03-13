@@ -40,7 +40,11 @@ pub async fn create_e2e_queue(
         .iter()
         .map(|pipeline_id| pipeline_id.trim().to_owned())
         .collect::<Vec<_>>();
-    if pipeline_ids.is_empty() || pipeline_ids.iter().any(|pipeline_id| pipeline_id.is_empty()) {
+    if pipeline_ids.is_empty()
+        || pipeline_ids
+            .iter()
+            .any(|pipeline_id| pipeline_id.is_empty())
+    {
         return Err(QueueError::BadRequest(
             "pipelineIds must contain at least one non-empty value".to_owned(),
         ));
@@ -112,43 +116,28 @@ pub async fn get_e2e_queue_response(
     project_id: String,
     queue_id: String,
 ) -> Result<Response, QueueError> {
-    if let Some(runtime) = active_queue_runtime(&state, &project_id, &queue_id).await {
-        let snapshot = runtime.snapshot().await;
+    if let Some(snapshot) = get_e2e_queue_snapshot(&state, &project_id, &queue_id).await? {
         let (tx, rx) = mpsc::unbounded_channel::<SseMessage>();
         let _ = tx.send(SseMessage {
             event: "queue:update".to_owned(),
-            data: serde_json::to_value(snapshot).unwrap_or_else(|_| json!({})),
+            data: serde_json::to_value(&snapshot).unwrap_or_else(|_| json!({})),
         });
-        spawn_broadcast_bridge(runtime.sse_tx.subscribe(), tx, false);
-        return Ok(sse_response_from_rx(rx));
+        if let Some(runtime) = active_queue_runtime(&state, &project_id, &queue_id).await {
+            spawn_broadcast_bridge(runtime.sse_tx.subscribe(), tx, false);
+            return Ok(sse_response_from_rx(rx));
+        }
+
+        return Ok(axum::Json(snapshot).into_response());
     }
 
-    let snapshot = load_e2e_queue_record(&state.db, &project_id, &queue_id)
-        .await
-        .map_err(|err| QueueError::Internal(format!("failed to load e2e queue: {err}")))?;
-    let Some(snapshot) = snapshot else {
-        return Err(QueueError::NotFound("e2e queue not found".to_owned()));
-    };
-
-    Ok(axum::Json(snapshot).into_response())
+    Err(QueueError::NotFound("e2e queue not found".to_owned()))
 }
 
 pub async fn get_current_e2e_queue_response(
     state: AppState,
     project_id: String,
 ) -> Result<Response, QueueError> {
-    let runtime = {
-        let queues = state.e2e_queues.read().await;
-        queues.get(&project_id).cloned()
-    };
-
-    let Some(runtime) = runtime else {
-        return Err(QueueError::NotFound(
-            "no active e2e queue for project".to_owned(),
-        ));
-    };
-
-    Ok(axum::Json(runtime.snapshot().await).into_response())
+    Ok(axum::Json(get_current_e2e_queue_snapshot(&state, &project_id).await?).into_response())
 }
 
 pub async fn cancel_e2e_queue(
@@ -187,6 +176,38 @@ pub fn queue_error_response(err: QueueError) -> Response {
         QueueError::NotFound(message) => not_found_response(&message),
         QueueError::Internal(message) => internal_error_response(message),
     }
+}
+
+pub async fn get_e2e_queue_snapshot(
+    state: &AppState,
+    project_id: &str,
+    queue_id: &str,
+) -> Result<Option<E2eQueueRecord>, QueueError> {
+    if let Some(runtime) = active_queue_runtime(state, project_id, queue_id).await {
+        return Ok(Some(runtime.snapshot().await));
+    }
+
+    load_e2e_queue_record(&state.db, project_id, queue_id)
+        .await
+        .map_err(|err| QueueError::Internal(format!("failed to load e2e queue: {err}")))
+}
+
+pub async fn get_current_e2e_queue_snapshot(
+    state: &AppState,
+    project_id: &str,
+) -> Result<E2eQueueRecord, QueueError> {
+    let runtime = {
+        let queues = state.e2e_queues.read().await;
+        queues.get(project_id).cloned()
+    };
+
+    let Some(runtime) = runtime else {
+        return Err(QueueError::NotFound(
+            "no active e2e queue for project".to_owned(),
+        ));
+    };
+
+    Ok(runtime.snapshot().await)
 }
 
 async fn active_queue_runtime(
@@ -257,26 +278,19 @@ async fn run_e2e_queue(
         }
         runtime.set_snapshot(snapshot.clone()).await;
 
-        let pipeline = match load_project_pipeline_for_execution(&state.db, &project_id, &pipeline_id)
-            .await
-        {
-            Ok(Some((pipeline, pipeline_index))) => (pipeline, pipeline_index),
-            Ok(None) => {
-                mark_queue_failed(
-                    &state,
-                    &runtime,
-                    &mut snapshot,
-                    position,
-                    None,
-                )
-                .await;
-                return;
-            }
-            Err(err) => {
-                finalize_runtime_with_internal_error(&state, &runtime, &mut snapshot, err).await;
-                return;
-            }
-        };
+        let pipeline =
+            match load_project_pipeline_for_execution(&state.db, &project_id, &pipeline_id).await {
+                Ok(Some((pipeline, pipeline_index))) => (pipeline, pipeline_index),
+                Ok(None) => {
+                    mark_queue_failed(&state, &runtime, &mut snapshot, position, None).await;
+                    return;
+                }
+                Err(err) => {
+                    finalize_runtime_with_internal_error(&state, &runtime, &mut snapshot, err)
+                        .await;
+                    return;
+                }
+            };
 
         let start_result = start_e2e_execution(
             state.clone(),
@@ -296,14 +310,7 @@ async fn run_e2e_queue(
             Err(StartE2eExecutionError::BadRequest(_))
             | Err(StartE2eExecutionError::ServiceUnavailable(_))
             | Err(StartE2eExecutionError::Internal(_)) => {
-                mark_queue_failed(
-                    &state,
-                    &runtime,
-                    &mut snapshot,
-                    position,
-                    None,
-                )
-                .await;
+                mark_queue_failed(&state, &runtime, &mut snapshot, position, None).await;
                 return;
             }
         };
@@ -369,7 +376,8 @@ async fn run_e2e_queue(
                 )
                 .await
                 {
-                    finalize_runtime_with_internal_error(&state, &runtime, &mut snapshot, err).await;
+                    finalize_runtime_with_internal_error(&state, &runtime, &mut snapshot, err)
+                        .await;
                     return;
                 }
 
@@ -388,7 +396,8 @@ async fn run_e2e_queue(
                 )
                 .await
                 {
-                    finalize_runtime_with_internal_error(&state, &runtime, &mut snapshot, err).await;
+                    finalize_runtime_with_internal_error(&state, &runtime, &mut snapshot, err)
+                        .await;
                     return;
                 }
                 runtime.set_snapshot(snapshot.clone()).await;
@@ -421,7 +430,10 @@ async fn run_e2e_queue(
 
     if terminal_status == E2eQueueStatus::Cancelled {
         for (position, item) in snapshot.pipelines.iter_mut().enumerate() {
-            if matches!(item.status, E2eQueueStatus::Pending | E2eQueueStatus::Running) {
+            if matches!(
+                item.status,
+                E2eQueueStatus::Pending | E2eQueueStatus::Running
+            ) {
                 item.status = E2eQueueStatus::Cancelled;
                 item.updated_at = final_updated_at.clone();
                 let _ = update_e2e_queue_item_status(
@@ -472,7 +484,12 @@ async fn mark_queue_failed(
     )
     .await;
 
-    for (position, item) in snapshot.pipelines.iter_mut().enumerate().skip(failed_position + 1) {
+    for (position, item) in snapshot
+        .pipelines
+        .iter_mut()
+        .enumerate()
+        .skip(failed_position + 1)
+    {
         if item.status == E2eQueueStatus::Pending {
             item.status = E2eQueueStatus::Cancelled;
             item.updated_at = updated_at.clone();

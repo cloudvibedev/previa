@@ -11,16 +11,22 @@ use crate::server::db::{
 };
 use crate::server::docs::build_openapi_document;
 use crate::server::execution::collect_runner_statuses;
+use crate::server::execution::e2e_queue::{
+    QueueError, cancel_e2e_queue, create_e2e_queue, get_current_e2e_queue_snapshot,
+    get_e2e_queue_snapshot,
+};
 use crate::server::execution::resolve_runtime_specs_for_execution;
 use crate::server::mcp::models::{
-    CreateProjectPipelineArgs, InitializeParams, ListProjectsToolArgs, McpPeerInfo, McpRequest,
-    McpResponse, McpSession, ProjectByIdArgs, ProjectHistoryToolArgs, ProjectPipelineByIdArgs,
-    ProjectTestByIdArgs, PromptDefinition, PromptGetParams, PromptGetResult, PromptMessage,
-    PromptTextContent, PromptsListParams, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams,
-    ToolCallResult, ToolDefinition, ToolTextContent, ToolsListParams, UpdateProjectPipelineArgs,
-    ValidateOpenApiToolArgs,
+    CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, InitializeParams, ListProjectsToolArgs,
+    McpPeerInfo, McpRequest, McpResponse, McpSession, ProjectByIdArgs, ProjectHistoryToolArgs,
+    ProjectPipelineByIdArgs, ProjectQueueByIdArgs, ProjectTestByIdArgs, PromptDefinition,
+    PromptGetParams, PromptGetResult, PromptMessage, PromptTextContent, PromptsListParams,
+    SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult, ToolDefinition, ToolTextContent,
+    ToolsListParams, UpdateProjectPipelineArgs, ValidateOpenApiToolArgs,
 };
-use crate::server::models::{HistoryQuery, OrchestratorInfoResponse, ProjectListQuery};
+use crate::server::models::{
+    HistoryQuery, OrchestratorInfoResponse, ProjectE2eQueueRequest, ProjectListQuery,
+};
 use crate::server::state::AppState;
 use crate::server::utils::new_uuid_v7;
 use crate::server::validation::openapi::validate_openapi_source;
@@ -653,6 +659,70 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                 .map_err(|err| format!("failed to list project specs: {err}"))?;
             Ok(tool_success(serde_json::to_value(specs).unwrap()))
         }
+        "create_project_e2e_queue" => {
+            let args = parse_tool_arguments::<CreateProjectE2eQueueArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+
+            match create_e2e_queue(
+                state.clone(),
+                args.project_id,
+                ProjectE2eQueueRequest {
+                    pipeline_ids: args.pipeline_ids,
+                    selected_base_url_key: args.selected_base_url_key,
+                    specs: args.specs,
+                },
+            )
+            .await
+            {
+                Ok(snapshot) => Ok(tool_success(serde_json::to_value(snapshot).unwrap())),
+                Err(err) => queue_tool_outcome(err),
+            }
+        }
+        "get_current_project_e2e_queue" => {
+            let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+
+            match get_current_e2e_queue_snapshot(state, &args.project_id).await {
+                Ok(snapshot) => Ok(tool_success(serde_json::to_value(snapshot).unwrap())),
+                Err(err) => queue_tool_outcome(err),
+            }
+        }
+        "get_project_e2e_queue" => {
+            let args = parse_tool_arguments::<ProjectQueueByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+
+            match get_e2e_queue_snapshot(state, &args.project_id, &args.queue_id).await {
+                Ok(Some(snapshot)) => Ok(tool_success(serde_json::to_value(snapshot).unwrap())),
+                Ok(None) => Ok(tool_error(format!(
+                    "e2e queue '{}' not found in project '{}'",
+                    args.queue_id, args.project_id
+                ))),
+                Err(err) => queue_tool_outcome(err),
+            }
+        }
+        "cancel_project_e2e_queue" => {
+            let args = parse_tool_arguments::<ProjectQueueByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+
+            match cancel_e2e_queue(
+                state.clone(),
+                args.project_id.clone(),
+                args.queue_id.clone(),
+            )
+            .await
+            {
+                Ok(()) => Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "queueId": args.queue_id,
+                    "cancelled": true
+                }))),
+                Err(err) => queue_tool_outcome(err),
+            }
+        }
         "validate_openapi" => {
             let args = parse_tool_arguments::<ValidateOpenApiToolArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
@@ -896,6 +966,66 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "create_project_e2e_queue".to_owned(),
+            title: Some("Create E2E Queue".to_owned()),
+            description: "Creates and starts a sequential E2E queue for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "pipelineIds"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "type": "string", "minLength": 1 }
+                    },
+                    "selectedBaseUrlKey": { "type": ["string", "null"] },
+                    "specs": {
+                        "type": "array",
+                        "items": { "type": "object" }
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "get_current_project_e2e_queue".to_owned(),
+            title: Some("Get Current E2E Queue".to_owned()),
+            description: "Returns the currently active E2E queue for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "get_project_e2e_queue".to_owned(),
+            title: Some("Get E2E Queue".to_owned()),
+            description: "Returns an E2E queue snapshot by queue id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "queueId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "queueId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "cancel_project_e2e_queue".to_owned(),
+            title: Some("Cancel E2E Queue".to_owned()),
+            description: "Cancels an E2E queue and clears remaining queued pipelines.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "queueId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "queueId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "validate_openapi".to_owned(),
             title: Some("Validate OpenAPI".to_owned()),
             description: "Validates an OpenAPI YAML or JSON document.".to_owned(),
@@ -983,6 +1113,24 @@ fn tool_error(message: String) -> ToolCallResult {
         }],
         structured_content: None,
         is_error: true,
+    }
+}
+
+async fn ensure_project_exists(state: &AppState, project_id: &str) -> Result<(), String> {
+    if project_exists(&state.db, project_id)
+        .await
+        .map_err(|err| format!("failed to load project: {err}"))?
+    {
+        Ok(())
+    } else {
+        Err(format!("project '{}' not found", project_id))
+    }
+}
+
+fn queue_tool_outcome(err: QueueError) -> Result<ToolCallResult, String> {
+    match err {
+        QueueError::BadRequest(message) | QueueError::NotFound(message) => Ok(tool_error(message)),
+        QueueError::Internal(message) => Err(message),
     }
 }
 
@@ -1251,17 +1399,29 @@ Output requirements:\n\
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use previa_runner::{Pipeline, PipelineStep};
     use serde_json::json;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tokio::sync::RwLock;
 
     use super::{
-        parse_tool_arguments, pipeline_creation_guide, pipeline_creation_specialist_prompt,
-        pipeline_test_assistant_prompt, prompt_definitions, prompt_result, tool_definitions,
-        validate_pipeline_input,
+        execute_tool, parse_tool_arguments, pipeline_creation_guide,
+        pipeline_creation_specialist_prompt, pipeline_test_assistant_prompt, prompt_definitions,
+        prompt_result, tool_definitions, validate_pipeline_input,
+    };
+    use crate::server::db::{
+        insert_project_pipeline, load_e2e_queue_record, upsert_project_metadata,
     };
     use crate::server::mcp::models::{
-        CreateProjectPipelineArgs, ProjectByIdArgs, ProjectHistoryToolArgs,
+        CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, ProjectByIdArgs,
+        ProjectHistoryToolArgs, ToolCallParams,
     };
+    use crate::server::models::ProjectMetadataUpsertRequest;
+    use crate::server::state::AppState;
 
     #[test]
     fn project_tools_require_project_id() {
@@ -1318,6 +1478,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_create_e2e_queue_arguments() {
+        let args = parse_tool_arguments::<CreateProjectE2eQueueArgs>(json!({
+            "projectId": "project-1",
+            "pipelineIds": ["pipeline-1", "pipeline-2"],
+            "selectedBaseUrlKey": "hml",
+            "specs": []
+        }))
+        .expect("valid create e2e queue args");
+
+        assert_eq!(args.project_id, "project-1");
+        assert_eq!(args.pipeline_ids, vec!["pipeline-1", "pipeline-2"]);
+        assert_eq!(args.selected_base_url_key.as_deref(), Some("hml"));
+    }
+
+    #[test]
     fn validate_pipeline_requires_name() {
         let pipeline = Pipeline {
             id: None,
@@ -1352,6 +1527,23 @@ mod tests {
             .expect("pipeline guide tool definition");
 
         assert_eq!(tool.input_schema["type"], json!("object"));
+    }
+
+    #[test]
+    fn e2e_queue_tools_are_available() {
+        let tools = tool_definitions();
+
+        for name in [
+            "create_project_e2e_queue",
+            "get_current_project_e2e_queue",
+            "get_project_e2e_queue",
+            "cancel_project_e2e_queue",
+        ] {
+            assert!(
+                tools.iter().any(|tool| tool.name == name),
+                "missing MCP tool definition for {name}"
+            );
+        }
     }
 
     #[test]
@@ -1455,5 +1647,165 @@ mod tests {
         assert_eq!(args.project_id, "project-1");
         assert_eq!(args.pipeline_index, Some(2));
         assert_eq!(args.limit, Some(50));
+    }
+
+    #[tokio::test]
+    async fn create_and_get_project_e2e_queue_tools_return_snapshots() {
+        let state = test_state().await;
+        seed_project_with_pipeline(&state, "project-1", "pipeline-1").await;
+
+        let created = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "create_project_e2e_queue".to_owned(),
+                arguments: json!({
+                    "projectId": "project-1",
+                    "pipelineIds": ["pipeline-1"]
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("create queue tool result");
+
+        assert!(!created.is_error);
+        let queue = created
+            .structured_content
+            .expect("create queue structured content");
+        let queue_id = queue["id"].as_str().expect("queue id").to_owned();
+        assert_eq!(queue["status"], json!("pending"));
+
+        let terminal = wait_for_terminal_queue(&state, "project-1", &queue_id).await;
+        assert_eq!(terminal["id"], json!(queue_id.clone()));
+        assert!(matches!(
+            terminal["status"].as_str(),
+            Some("failed" | "completed" | "cancelled")
+        ));
+
+        let loaded = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "get_project_e2e_queue".to_owned(),
+                arguments: json!({
+                    "projectId": "project-1",
+                    "queueId": queue_id
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("get queue tool result");
+
+        assert!(!loaded.is_error);
+        assert_eq!(loaded.structured_content.expect("queue snapshot"), terminal);
+    }
+
+    #[tokio::test]
+    async fn get_current_project_e2e_queue_returns_error_without_active_queue() {
+        let state = test_state().await;
+        seed_project_with_pipeline(&state, "project-1", "pipeline-1").await;
+
+        let result = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "get_current_project_e2e_queue".to_owned(),
+                arguments: json!({ "projectId": "project-1" }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("current queue tool result");
+
+        assert!(result.is_error);
+        assert!(result.structured_content.is_none());
+        assert_eq!(
+            result.content[0].text,
+            "no active e2e queue for project".to_owned()
+        );
+    }
+
+    async fn test_state() -> AppState {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory db");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations");
+
+        AppState {
+            client: reqwest::Client::new(),
+            db,
+            context_name: "test".to_owned(),
+            runner_endpoints: Vec::new(),
+            rps_per_node: 1,
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            e2e_queues: Arc::new(RwLock::new(HashMap::new())),
+            mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    async fn seed_project_with_pipeline(state: &AppState, project_id: &str, pipeline_id: &str) {
+        upsert_project_metadata(
+            &state.db,
+            project_id.to_owned(),
+            ProjectMetadataUpsertRequest {
+                name: "Project".to_owned(),
+                description: Some("Queue test project".to_owned()),
+            },
+        )
+        .await
+        .expect("project upsert");
+
+        insert_project_pipeline(
+            &state.db,
+            project_id,
+            Pipeline {
+                id: Some(pipeline_id.to_owned()),
+                name: "Pipeline".to_owned(),
+                description: Some("Queue test pipeline".to_owned()),
+                steps: vec![PipelineStep {
+                    id: "step-1".to_owned(),
+                    name: "Step 1".to_owned(),
+                    description: None,
+                    method: "GET".to_owned(),
+                    url: "https://example.com".to_owned(),
+                    headers: Default::default(),
+                    body: None,
+                    operation_id: None,
+                    delay: None,
+                    retry: None,
+                    asserts: Vec::new(),
+                }],
+            },
+        )
+        .await
+        .expect("pipeline insert");
+    }
+
+    async fn wait_for_terminal_queue(
+        state: &AppState,
+        project_id: &str,
+        queue_id: &str,
+    ) -> serde_json::Value {
+        for _ in 0..20 {
+            let snapshot = load_e2e_queue_record(&state.db, project_id, queue_id)
+                .await
+                .expect("queue load")
+                .expect("queue exists");
+            let value = serde_json::to_value(snapshot).expect("queue to value");
+            if matches!(
+                value["status"].as_str(),
+                Some("failed" | "completed" | "cancelled")
+            ) {
+                return value;
+            }
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+
+        panic!("queue {queue_id} did not reach a terminal state in time");
     }
 }

@@ -258,6 +258,27 @@ pub struct ProjectByIdArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateProjectE2eQueueArgs {
+    pub project_id: String,
+    pub pipeline_ids: Vec<String>,
+    pub selected_base_url_key: Option<String>,
+    #[serde(default)]
+    pub specs: Vec<previa_runner::RuntimeSpec>,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectQueueByIdArgs {
+    pub project_id: String,
+    pub queue_id: String,
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectTestByIdArgs {
     pub project_id: String,
     pub test_id: String,
