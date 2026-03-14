@@ -116,7 +116,10 @@ async fn active_queue_runtime(
         .iter()
         .find(|pipeline| {
             pipeline.id == pipeline_id
-                && matches!(pipeline.status, E2eQueueStatus::Pending | E2eQueueStatus::Running)
+                && matches!(
+                    pipeline.status,
+                    E2eQueueStatus::Pending | E2eQueueStatus::Running
+                )
         })?
         .clone();
 
@@ -124,10 +127,13 @@ async fn active_queue_runtime(
     match pipeline.status {
         E2eQueueStatus::Running => Some(PipelineRuntimeState {
             status: PipelineRuntimeStatus::Running,
-            active_execution: runtime.active_execution_id().await.map(|id| PipelineExecutionRef {
-                id,
-                kind: PipelineExecutionKind::E2e,
-            }),
+            active_execution: runtime
+                .active_execution_id()
+                .await
+                .map(|id| PipelineExecutionRef {
+                    id,
+                    kind: PipelineExecutionKind::E2e,
+                }),
             active_queue: queue_ref,
         }),
         E2eQueueStatus::Pending => Some(PipelineRuntimeState {
@@ -150,8 +156,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::pipeline_runtime;
-    use crate::server::execution::scheduler::SharedValue;
     use crate::server::execution::ExecutionScheduler;
+    use crate::server::execution::scheduler::SharedValue;
     use crate::server::models::{
         E2eQueuePipelineRecord, E2eQueueRecord, E2eQueueStatus, PipelineRuntimeStatus,
     };
@@ -172,6 +178,15 @@ mod tests {
                     kind: ExecutionKind::Load,
                     sse_tx,
                     init_payload: SharedValue::new(json!({ "status": "running" })),
+                    snapshot_payload: SharedValue::new(json!({
+                        "executionId": "exec-1",
+                        "status": "running",
+                        "kind": "load",
+                        "context": {},
+                        "lines": [],
+                        "consolidated": null,
+                        "errors": []
+                    })),
                 }),
             );
         }
@@ -179,7 +194,10 @@ mod tests {
         let runtime = pipeline_runtime(&state, "project-1", "pipe-1").await;
         assert!(matches!(runtime.status, PipelineRuntimeStatus::Running));
         assert_eq!(
-            runtime.active_execution.as_ref().map(|execution| execution.id.as_str()),
+            runtime
+                .active_execution
+                .as_ref()
+                .map(|execution| execution.id.as_str()),
             Some("exec-1")
         );
         assert!(runtime.active_queue.is_none());

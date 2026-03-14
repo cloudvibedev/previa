@@ -7,6 +7,7 @@ pub mod load_batch;
 pub mod node_plan;
 pub mod runtime_specs;
 pub mod scheduler;
+pub mod snapshot;
 pub mod sse_stream;
 
 pub use e2e::{StartE2eExecutionError, sse_response_for_started_execution, start_e2e_execution};
@@ -25,4 +26,8 @@ pub use node_plan::{
 };
 pub use runtime_specs::resolve_runtime_specs_for_execution;
 pub use scheduler::{AcquireOutcome, ExecutionScheduler, ScheduledExecutionKind, SchedulerConfig};
+pub use snapshot::{
+    build_e2e_snapshot_payload, build_live_load_snapshot_payload, build_load_snapshot_payload,
+    extract_load_context_value,
+};
 pub use sse_stream::{spawn_broadcast_bridge, sse_response_from_rx};

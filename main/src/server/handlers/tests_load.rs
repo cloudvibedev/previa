@@ -331,7 +331,9 @@ mod tests {
             .route("/api/v1/tests/load", post(load))
             .with_state(());
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind listener");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
         let addr = listener.local_addr().expect("local addr");
         let task = tokio::spawn(async move {
             axum::serve(listener, app).await.expect("runner server");

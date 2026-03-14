@@ -284,8 +284,8 @@ mod tests {
 
     use crate::server::build_app;
     use crate::server::db::insert_project_pipeline;
-    use crate::server::execution::scheduler::SharedValue;
     use crate::server::execution::ExecutionScheduler;
+    use crate::server::execution::scheduler::SharedValue;
     use crate::server::mcp::models::McpConfig;
     use crate::server::models::{E2eQueuePipelineRecord, E2eQueueRecord, E2eQueueStatus};
     use crate::server::state::{AppState, E2eQueueRuntime, ExecutionCtx, ExecutionKind};
@@ -306,6 +306,15 @@ mod tests {
                     kind: ExecutionKind::Load,
                     sse_tx,
                     init_payload: SharedValue::new(json!({ "status": "running" })),
+                    snapshot_payload: SharedValue::new(json!({
+                        "executionId": "exec-1",
+                        "status": "running",
+                        "kind": "load",
+                        "context": {},
+                        "lines": [],
+                        "consolidated": null,
+                        "errors": []
+                    })),
                 }),
             );
         }

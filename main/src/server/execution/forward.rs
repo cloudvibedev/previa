@@ -8,6 +8,8 @@ use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::server::execution::history_capture::capture_e2e_history_event;
+use crate::server::execution::scheduler::SharedValue;
+use crate::server::execution::snapshot::build_e2e_snapshot_payload;
 use crate::server::models::{E2eHistoryAccumulator, NodePlan, SseMessage};
 use crate::server::state::TRANSACTION_ID_HEADER;
 
@@ -20,7 +22,11 @@ pub async fn forward_runner_stream(
     plan: NodePlan,
     endpoint_path: &str,
     transaction_id: Option<String>,
-    history_accumulator: Option<Arc<Mutex<E2eHistoryAccumulator>>>,
+    history_accumulator: Option<(
+        String,
+        Arc<Mutex<E2eHistoryAccumulator>>,
+        SharedValue<Value>,
+    )>,
 ) {
     if cancel.is_cancelled() {
         return;
@@ -111,8 +117,16 @@ pub async fn forward_runner_stream(
                 let mut data = serde_json::from_str::<Value>(&data_text)
                     .unwrap_or_else(|_| Value::String(data_text.clone()));
 
-                if let Some(acc) = history_accumulator.as_ref() {
+                if let Some((execution_id, acc, snapshot_payload)) = history_accumulator.as_ref() {
                     capture_e2e_history_event(acc, &event, &data).await;
+                    let snapshot = acc.lock().await.clone();
+                    snapshot_payload
+                        .set(build_e2e_snapshot_payload(
+                            execution_id,
+                            "running",
+                            &snapshot,
+                        ))
+                        .await;
                 }
                 data = add_context_fields(data, &runner_list, &plan);
                 let _ = send_sse_best_effort(&tx, event, data);

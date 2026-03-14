@@ -219,7 +219,9 @@ impl ExecutionScheduler {
     pub async fn cancel_queued(&self, execution_id: &str) -> bool {
         let mut state = self.state.lock().await;
         let before = state.queued.len();
-        state.queued.retain(|item| item.execution_id != execution_id);
+        state
+            .queued
+            .retain(|item| item.execution_id != execution_id);
         let changed = before != state.queued.len();
         if changed {
             self.notify.notify_waiters();
@@ -342,17 +344,26 @@ mod tests {
             )
             .await;
 
-        match scheduler.try_acquire("exec-1", &["runner-1".to_owned()]).await {
+        match scheduler
+            .try_acquire("exec-1", &["runner-1".to_owned()])
+            .await
+        {
             AcquireOutcome::Reserved(runners) => assert_eq!(runners, vec!["runner-1".to_owned()]),
             other => panic!("unexpected acquire result: {other:?}"),
         }
-        match scheduler.try_acquire("exec-2", &["runner-1".to_owned()]).await {
+        match scheduler
+            .try_acquire("exec-2", &["runner-1".to_owned()])
+            .await
+        {
             AcquireOutcome::Pending { position } => assert_eq!(position, 1),
             other => panic!("unexpected acquire result: {other:?}"),
         }
 
         scheduler.release("exec-1").await;
-        match scheduler.try_acquire("exec-2", &["runner-1".to_owned()]).await {
+        match scheduler
+            .try_acquire("exec-2", &["runner-1".to_owned()])
+            .await
+        {
             AcquireOutcome::Reserved(runners) => assert_eq!(runners, vec!["runner-1".to_owned()]),
             other => panic!("unexpected acquire result: {other:?}"),
         }
@@ -455,7 +466,9 @@ mod tests {
             .await;
         assert!(scheduler.cancel_queued("exec-1").await);
         assert!(matches!(
-            scheduler.try_acquire("exec-1", &["runner-1".to_owned()]).await,
+            scheduler
+                .try_acquire("exec-1", &["runner-1".to_owned()])
+                .await,
             AcquireOutcome::Missing
         ));
     }

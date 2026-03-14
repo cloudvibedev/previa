@@ -8,10 +8,11 @@ use tracing::error;
 
 use crate::server::db::{save_load_history, upsert_load_history};
 use crate::server::execution::{
-    AcquireOutcome, ScheduledExecutionKind, add_load_context_fields, calculate_node_plan,
-    determine_load_history_status, flush_load_batches, forward_runner_stream_load_chunked,
-    resolve_runtime_specs_for_execution, send_sse_best_effort, snapshot_consolidated_metrics,
-    snapshot_latest_lines, split_even,
+    AcquireOutcome, ScheduledExecutionKind, add_load_context_fields,
+    build_live_load_snapshot_payload, build_load_snapshot_payload, calculate_node_plan,
+    determine_load_history_status, extract_load_context_value, flush_load_batches,
+    forward_runner_stream_load_chunked, resolve_runtime_specs_for_execution, send_sse_best_effort,
+    snapshot_consolidated_metrics, snapshot_latest_lines, split_even,
 };
 use crate::server::models::{
     HistoryMetadata, LoadEventContext, LoadHistoryWrite, LoadLatencyAccumulator, LoadTestRequest,
@@ -187,6 +188,17 @@ pub async fn start_load_execution(
     };
     let (sse_tx, _) = broadcast::channel(EXECUTION_SSE_BUFFER_SIZE);
     let response_subscriber = sse_tx.subscribe();
+    let init_snapshot = build_load_snapshot_payload(
+        &orchestrator_execution_id,
+        init_payload
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("queued"),
+        extract_load_context_value(&init_payload),
+        Vec::new(),
+        None,
+        Vec::new(),
+    );
     let exec_ctx = Arc::new(ExecutionCtx {
         cancel: CancellationToken::new(),
         project_id: project_id_for_execution,
@@ -194,6 +206,7 @@ pub async fn start_load_execution(
         kind: ExecutionKind::Load,
         sse_tx: sse_tx.clone(),
         init_payload: crate::server::execution::scheduler::SharedValue::new(init_payload.clone()),
+        snapshot_payload: crate::server::execution::scheduler::SharedValue::new(init_snapshot),
     });
 
     {
@@ -214,7 +227,10 @@ pub async fn start_load_execution(
             AcquireOutcome::Reserved(runners) => (runners, active_nodes.clone(), false),
             AcquireOutcome::Pending { .. } | AcquireOutcome::Missing => loop {
                 if exec_ctx.cancel.is_cancelled() {
-                    let _ = state_clone.scheduler.cancel_queued(&history_execution_id).await;
+                    let _ = state_clone
+                        .scheduler
+                        .cancel_queued(&history_execution_id)
+                        .await;
                     let cancelled_payload = json!({
                         "executionId": history_execution_id,
                         "status": "cancelled",
@@ -256,12 +272,24 @@ pub async fn start_load_execution(
                             position,
                         );
                         exec_ctx.init_payload.set(queued_payload.clone()).await;
-                        let _ = send_sse_best_effort(
-                            &sse_tx,
-                            "execution:status",
-                            queued_payload,
-                        );
-                        if !state_clone.scheduler.wait_for_change(&exec_ctx.cancel).await {
+                        let queued_context = extract_load_context_value(&queued_payload);
+                        exec_ctx
+                            .snapshot_payload
+                            .set(crate::server::execution::build_load_snapshot_payload(
+                                &history_execution_id,
+                                "queued",
+                                queued_context,
+                                Vec::new(),
+                                None,
+                                Vec::new(),
+                            ))
+                            .await;
+                        let _ = send_sse_best_effort(&sse_tx, "execution:status", queued_payload);
+                        if !state_clone
+                            .scheduler
+                            .wait_for_change(&exec_ctx.cancel)
+                            .await
+                        {
                             continue;
                         }
                     }
@@ -329,6 +357,17 @@ pub async fn start_load_execution(
             runner_load_plan,
             batch_window_ms: LOAD_BATCH_WINDOW_MS,
         });
+        exec_ctx
+            .snapshot_payload
+            .set(build_live_load_snapshot_payload(
+                &history_execution_id,
+                "running",
+                load_context.as_ref(),
+                &[],
+                None,
+                &[],
+            ))
+            .await;
         if emitted_running_status {
             let payload = add_load_context_fields(
                 json!({ "executionId": history_execution_id, "status": "running" }),
@@ -379,13 +418,16 @@ pub async fn start_load_execution(
 
         let flush_stop = CancellationToken::new();
         let flush_handle = tokio::spawn(flush_load_batches(
+            history_execution_id.clone(),
             sse_tx.clone(),
             exec_ctx.cancel.clone(),
             flush_stop.clone(),
             Arc::clone(&load_chunk),
             Arc::clone(&load_latest),
             Arc::clone(&load_latency),
+            Arc::clone(&load_errors),
             Arc::clone(&load_context),
+            exec_ctx.snapshot_payload.clone(),
         ));
 
         let mut handles = Vec::with_capacity(selected_nodes.len());
@@ -393,6 +435,8 @@ pub async fn start_load_execution(
             let node = node.clone();
             let client = state_clone.client.clone();
             let cancel = exec_ctx.cancel.clone();
+            let execution_id = history_execution_id.clone();
+            let snapshot_payload = exec_ctx.snapshot_payload.clone();
             let tx = sse_tx.clone();
             let load_chunk = Arc::clone(&load_chunk);
             let load_latest = Arc::clone(&load_latest);
@@ -427,6 +471,8 @@ pub async fn start_load_execution(
                     load_latency,
                     load_errors,
                     load_context,
+                    execution_id,
+                    snapshot_payload,
                     "/api/v1/tests/load",
                     transaction_id,
                 )
@@ -464,6 +510,17 @@ pub async fn start_load_execution(
             errors.is_empty(),
         );
         let context_payload = add_load_context_fields(json!({}), load_context.as_ref());
+        exec_ctx
+            .snapshot_payload
+            .set(build_live_load_snapshot_payload(
+                &history_execution_id,
+                &status,
+                load_context.as_ref(),
+                &final_lines,
+                final_consolidated.as_ref(),
+                &errors,
+            ))
+            .await;
 
         if let Err(err) = upsert_load_history(
             &state_clone.db,
@@ -588,7 +645,10 @@ fn build_runner_load_plan(
     }
     let split_requests = split_even(config.total_requests.max(1), used_nodes.len());
     let split_concurrency = split_even(config.concurrency.max(1), used_nodes.len());
-    let desired_total_requests = config.total_requests.max(1).div_ceil(requested_nodes.max(1));
+    let desired_total_requests = config
+        .total_requests
+        .max(1)
+        .div_ceil(requested_nodes.max(1));
     used_nodes
         .iter()
         .enumerate()
@@ -837,7 +897,9 @@ mod tests {
             .route("/api/v1/tests/load", post(load))
             .with_state(());
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind listener");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
         let addr = listener.local_addr().expect("local addr");
         tokio::spawn(async move {
             axum::serve(listener, app).await.expect("runner server");

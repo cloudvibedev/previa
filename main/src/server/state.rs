@@ -38,6 +38,7 @@ pub struct ExecutionCtx {
     pub kind: ExecutionKind,
     pub sse_tx: broadcast::Sender<SseMessage>,
     pub init_payload: SharedValue<Value>,
+    pub snapshot_payload: SharedValue<Value>,
 }
 
 #[derive(Debug)]

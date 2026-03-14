@@ -8,9 +8,9 @@ use tracing::error;
 
 use crate::server::db::{save_e2e_history, upsert_e2e_history};
 use crate::server::execution::{
-    AcquireOutcome, ScheduledExecutionKind, add_context_fields, collect_active_nodes,
-    determine_e2e_history_status, forward_runner_stream, resolve_runtime_specs_for_execution,
-    send_sse_best_effort, spawn_broadcast_bridge,
+    AcquireOutcome, ScheduledExecutionKind, add_context_fields, build_e2e_snapshot_payload,
+    collect_active_nodes, determine_e2e_history_status, forward_runner_stream,
+    resolve_runtime_specs_for_execution, send_sse_best_effort, spawn_broadcast_bridge,
 };
 use crate::server::models::{
     E2eHistoryAccumulator, E2eHistoryWrite, E2eTestRequest, HistoryMetadata, NodePlan, SseMessage,
@@ -116,18 +116,19 @@ pub async fn start_e2e_execution(
         .try_acquire(&orchestrator_execution_id, &active_nodes)
         .await;
     let init_payload = match &initial_acquire {
-        AcquireOutcome::Reserved(runners) => running_payload(
-            &orchestrator_execution_id,
-            runners,
-            active_nodes.len(),
-        ),
+        AcquireOutcome::Reserved(runners) => {
+            running_payload(&orchestrator_execution_id, runners, active_nodes.len())
+        }
         AcquireOutcome::Pending { position } => queued_payload(
             &orchestrator_execution_id,
             active_nodes.len(),
             *position.max(&queue_position),
         ),
-        AcquireOutcome::Missing => queued_payload(&orchestrator_execution_id, active_nodes.len(), 1),
+        AcquireOutcome::Missing => {
+            queued_payload(&orchestrator_execution_id, active_nodes.len(), 1)
+        }
     };
+    let history_accumulator = Arc::new(Mutex::new(E2eHistoryAccumulator::default()));
     let exec_ctx = Arc::new(ExecutionCtx {
         cancel: CancellationToken::new(),
         project_id: project_id_for_execution,
@@ -135,6 +136,16 @@ pub async fn start_e2e_execution(
         kind: ExecutionKind::E2e,
         sse_tx: sse_tx.clone(),
         init_payload: crate::server::execution::scheduler::SharedValue::new(init_payload.clone()),
+        snapshot_payload: crate::server::execution::scheduler::SharedValue::new(
+            build_e2e_snapshot_payload(
+                &orchestrator_execution_id,
+                init_payload
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("queued"),
+                &E2eHistoryAccumulator::default(),
+            ),
+        ),
     });
 
     {
@@ -150,28 +161,64 @@ pub async fn start_e2e_execution(
     let (completion_tx, completion_rx) = oneshot::channel();
 
     tokio::spawn(async move {
-        let history_accumulator = Arc::new(Mutex::new(E2eHistoryAccumulator::default()));
         let _ = send_sse_best_effort(&sse_tx, "execution:init", init_payload.clone());
 
         let (selected_runners, nodes_found, emitted_running_status) = match initial_acquire {
             AcquireOutcome::Reserved(runners) => (runners, active_nodes.len(), false),
-            AcquireOutcome::Pending { .. } | AcquireOutcome::Missing => {
-                loop {
-                    if exec_ctx.cancel.is_cancelled() {
-                        let _ = state_clone
-                            .scheduler
-                            .cancel_queued(&history_execution_id)
+            AcquireOutcome::Pending { .. } | AcquireOutcome::Missing => loop {
+                if exec_ctx.cancel.is_cancelled() {
+                    let _ = state_clone
+                        .scheduler
+                        .cancel_queued(&history_execution_id)
+                        .await;
+                    let cancelled_payload = json!({
+                        "executionId": history_execution_id,
+                        "status": "cancelled",
+                        "message": "execution cancelled while queued"
+                    });
+                    let _ = send_sse_best_effort(&sse_tx, "execution:status", cancelled_payload);
+                    let mut executions = state_clone.executions.write().await;
+                    executions.remove(&execution_id_for_cleanup);
+                    let _ = completion_tx.send(E2eExecutionOutcome {
+                        execution_id: history_execution_id,
+                        status: "cancelled".to_owned(),
+                    });
+                    return;
+                }
+
+                let mut randomized = state_clone.runner_endpoints.clone();
+                randomized.shuffle(&mut rand::rng());
+                let active_nodes = collect_active_nodes(&state_clone.client, &randomized).await;
+                match state_clone
+                    .scheduler
+                    .try_acquire(&history_execution_id, &active_nodes)
+                    .await
+                {
+                    AcquireOutcome::Reserved(runners) => {
+                        break (runners, active_nodes.len(), true);
+                    }
+                    AcquireOutcome::Pending { position } => {
+                        let queued =
+                            queued_payload(&history_execution_id, active_nodes.len(), position);
+                        exec_ctx.init_payload.set(queued).await;
+                        let snapshot = history_accumulator.lock().await.clone();
+                        exec_ctx
+                            .snapshot_payload
+                            .set(build_e2e_snapshot_payload(
+                                &history_execution_id,
+                                "queued",
+                                &snapshot,
+                            ))
                             .await;
-                        let cancelled_payload = json!({
-                            "executionId": history_execution_id,
-                            "status": "cancelled",
-                            "message": "execution cancelled while queued"
-                        });
-                        let _ = send_sse_best_effort(
-                            &sse_tx,
-                            "execution:status",
-                            cancelled_payload,
-                        );
+                        if !state_clone
+                            .scheduler
+                            .wait_for_change(&exec_ctx.cancel)
+                            .await
+                        {
+                            continue;
+                        }
+                    }
+                    AcquireOutcome::Missing => {
                         let mut executions = state_clone.executions.write().await;
                         executions.remove(&execution_id_for_cleanup);
                         let _ = completion_tx.send(E2eExecutionOutcome {
@@ -180,43 +227,8 @@ pub async fn start_e2e_execution(
                         });
                         return;
                     }
-
-                    let mut randomized = state_clone.runner_endpoints.clone();
-                    randomized.shuffle(&mut rand::rng());
-                    let active_nodes = collect_active_nodes(&state_clone.client, &randomized).await;
-                    match state_clone
-                        .scheduler
-                        .try_acquire(&history_execution_id, &active_nodes)
-                        .await
-                    {
-                        AcquireOutcome::Reserved(runners) => {
-                            break (runners, active_nodes.len(), true);
-                        }
-                        AcquireOutcome::Pending { position } => {
-                            exec_ctx
-                                .init_payload
-                                .set(queued_payload(
-                                    &history_execution_id,
-                                    active_nodes.len(),
-                                    position,
-                                ))
-                                .await;
-                            if !state_clone.scheduler.wait_for_change(&exec_ctx.cancel).await {
-                                continue;
-                            }
-                        }
-                        AcquireOutcome::Missing => {
-                            let mut executions = state_clone.executions.write().await;
-                            executions.remove(&execution_id_for_cleanup);
-                            let _ = completion_tx.send(E2eExecutionOutcome {
-                                execution_id: history_execution_id,
-                                status: "cancelled".to_owned(),
-                            });
-                            return;
-                        }
-                    }
                 }
-            }
+            },
         };
 
         let selected_node = selected_runners[0].clone();
@@ -229,6 +241,15 @@ pub async fn start_e2e_execution(
         if emitted_running_status {
             let payload = running_payload(&history_execution_id, &selected_runners, nodes_found);
             exec_ctx.init_payload.set(payload.clone()).await;
+            let snapshot = history_accumulator.lock().await.clone();
+            exec_ctx
+                .snapshot_payload
+                .set(build_e2e_snapshot_payload(
+                    &history_execution_id,
+                    "running",
+                    &snapshot,
+                ))
+                .await;
             let _ = send_sse_best_effort(&sse_tx, "execution:status", payload);
         }
 
@@ -274,7 +295,11 @@ pub async fn start_e2e_execution(
             plan,
             "/api/v1/tests/e2e",
             transaction_id_for_runner,
-            Some(Arc::clone(&history_accumulator)),
+            Some((
+                history_execution_id.clone(),
+                Arc::clone(&history_accumulator),
+                exec_ctx.snapshot_payload.clone(),
+            )),
         )
         .await;
 
@@ -282,6 +307,14 @@ pub async fn start_e2e_execution(
         let duration_ms = finished_at_ms.saturating_sub(started_at_ms);
         let snapshot = history_accumulator.lock().await.clone();
         let status = determine_e2e_history_status(exec_ctx.cancel.is_cancelled(), &snapshot);
+        exec_ctx
+            .snapshot_payload
+            .set(build_e2e_snapshot_payload(
+                &history_execution_id,
+                &status,
+                &snapshot,
+            ))
+            .await;
 
         if let Err(err) = upsert_e2e_history(
             &state_clone.db,
@@ -332,7 +365,11 @@ pub fn sse_response_for_started_execution(
     crate::server::execution::sse_response_from_rx(rx)
 }
 
-fn queued_payload(execution_id: &str, nodes_found: usize, queue_position: usize) -> serde_json::Value {
+fn queued_payload(
+    execution_id: &str,
+    nodes_found: usize,
+    queue_position: usize,
+) -> serde_json::Value {
     add_context_fields(
         json!({
             "executionId": execution_id,
@@ -377,8 +414,8 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use axum::body::{Body, Bytes};
     use axum::Json;
+    use axum::body::{Body, Bytes};
     use axum::extract::State;
     use axum::http::{StatusCode, header};
     use axum::response::Response;
@@ -431,8 +468,8 @@ mod tests {
             },
             None,
         )
-            .await
-            .expect("first execution");
+        .await
+        .expect("first execution");
         let second = start_e2e_execution(
             state.clone(),
             crate::server::models::E2eTestRequest {
@@ -444,8 +481,8 @@ mod tests {
             },
             None,
         )
-            .await
-            .expect("second execution");
+        .await
+        .expect("second execution");
 
         let init_payload = {
             let executions = state.executions.read().await;
@@ -504,7 +541,9 @@ mod tests {
             .route("/api/v1/tests/e2e", post(e2e))
             .with_state(());
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind listener");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
         let addr = listener.local_addr().expect("local addr");
         tokio::spawn(async move {
             axum::serve(listener, app).await.expect("runner server");
