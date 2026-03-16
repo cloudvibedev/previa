@@ -112,6 +112,39 @@ pub async fn load_existing_project_pipeline_ids(
         .collect())
 }
 
+pub async fn load_existing_pipeline_ids(
+    db: &SqlitePool,
+    pipeline_ids: &[String],
+) -> Result<HashSet<String>, sqlx::Error> {
+    if pipeline_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let unique_ids = pipeline_ids
+        .iter()
+        .map(|pipeline_id| pipeline_id.trim())
+        .filter(|pipeline_id| !pipeline_id.is_empty())
+        .collect::<Vec<_>>();
+    if unique_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let mut qb = QueryBuilder::<Sqlite>::new("SELECT id FROM pipelines WHERE id IN (");
+    {
+        let mut separated = qb.separated(", ");
+        for pipeline_id in &unique_ids {
+            separated.push_bind(*pipeline_id);
+        }
+    }
+    qb.push(")");
+
+    let rows = qb.build().fetch_all(db).await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<String, _>("id").ok())
+        .collect())
+}
+
 pub async fn insert_project_pipeline(
     db: &SqlitePool,
     project_id: &str,

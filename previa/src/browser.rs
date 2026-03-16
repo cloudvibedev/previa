@@ -48,7 +48,7 @@ fn run_browser(command: &mut Command, program: &str) -> Result<()> {
     Ok(())
 }
 
-fn main_url(address: &str, port: u16) -> String {
+pub fn main_url(address: &str, port: u16) -> String {
     let normalized = match address.parse::<IpAddr>() {
         Ok(IpAddr::V4(ip)) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
         Ok(IpAddr::V6(ip)) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),

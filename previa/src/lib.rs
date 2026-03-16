@@ -7,6 +7,7 @@ mod health;
 mod logs;
 mod output;
 mod paths;
+mod pipeline_import;
 mod process;
 mod pull;
 mod runtime;
@@ -40,6 +41,7 @@ use crate::output::{
     print_process_rows, print_status_human,
 };
 use crate::paths::{PreviaPaths, StackPaths};
+use crate::pipeline_import::{import_pipelines, resolve_import_config};
 use crate::process::{
     BindingConflict, BindingConflictKind, SpawnedStack, conflict_message, graceful_shutdown_pids,
     monitor_foreground_stack, pid_exists, spawn_detached_stack, spawn_foreground_stack,
@@ -82,6 +84,7 @@ async fn cmd_pull(args: PullArgs) -> Result<()> {
 }
 
 async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> {
+    let import_config = resolve_import_config(&args)?;
     let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
     let mut resolved = resolve_up_config(paths, &stack_paths, args).await?;
@@ -123,6 +126,15 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
                     "context '{}' started in detached mode (main: {}:{})",
                     stack_name, state.main.address, state.main.port
                 );
+                if let Some(import_config) = import_config.as_ref() {
+                    let outcome =
+                        import_pipelines(http, &state.main.address, state.main.port, import_config)
+                            .await?;
+                    println!(
+                        "imported {} pipeline(s) into stack '{}' ({})",
+                        outcome.pipelines_imported, outcome.stack_name, outcome.project_id
+                    );
+                }
                 Ok(())
             } else {
                 let result = compose.up(false, false).await;
@@ -145,6 +157,15 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
                     "context '{}' started in detached mode (main: {}:{})",
                     stack_name, state.main.address, state.main.port
                 );
+                if let Some(import_config) = import_config.as_ref() {
+                    let outcome =
+                        import_pipelines(http, &state.main.address, state.main.port, import_config)
+                            .await?;
+                    println!(
+                        "imported {} pipeline(s) into stack '{}' ({})",
+                        outcome.pipelines_imported, outcome.stack_name, outcome.project_id
+                    );
+                }
                 Ok(())
             } else {
                 let foreground = spawn_foreground_stack(&resolved, http).await?;

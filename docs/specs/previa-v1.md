@@ -40,7 +40,7 @@ scope for v1 and must not be invented during implementation.
 The v1 CLI surface is fixed to the commands below:
 
 ```text
-previa [--home <path>] up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach] [--version <tag>]
+previa [--home <path>] up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners <N>] [--attach-runner, -a <address|address:port|port> ...] [--import, -i <path>] [--recursive, -r] [--stack, -s <name>] [--dry-run] [-d, --detach] [--version <tag>]
 previa [--home <path>] pull [main|runner|all] [--version <version>]
 previa [--home <path>] down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]
 previa [--home <path>] restart [--context <context-name>] [--version <tag>]
@@ -56,7 +56,7 @@ No additional v1 commands are required beyond the surface listed above.
 
 ### Command Semantics
 
-#### `previa [--home <path>] up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run]`
+#### `previa [--home <path>] up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners <N>] [--attach-runner, -a <address|address:port|port> ...] [--import, -i <path>] [--recursive, -r] [--stack, -s <name>] [--dry-run]`
 
 - Bootstraps a local context on the current host.
 - Executes exactly one `previa-main` process.
@@ -82,13 +82,19 @@ No additional v1 commands are required beyond the surface listed above.
 - Optionally overrides the `previa-main` listen port through
   `--main-port <port>` or `-p <port>`.
 - Optionally spawns the number of local `previa-runner` processes declared by
-  `--runners <N>` or `-r <N>`.
+  `--runners <N>`.
 - Optionally overrides the local runner bind address through
   `--runner-address <address>`.
 - Optionally overrides the local runner port allocation window through
   `--runner-port-range <start:end>` or `-P <start:end>`.
 - Optionally attaches one or more existing runner targets provided through
   repeated `--attach-runner <selector>` or `-a <selector>` flags.
+- Optionally imports pipelines from a local file or directory through
+  `--import <path>` or `-i <path>`.
+- Accepts `--recursive` or `-r` only together with `--import` to scan a
+  directory recursively for pipeline files.
+- Accepts `--stack <name>` or `-s <name>` together with `--import` to name the
+  new project created by the import.
 - `--attach-runner <selector>` accepts:
   - `port`, for example `55880`
   - `address:port`, for example `10.0.0.12:55880`
@@ -128,6 +134,24 @@ No additional v1 commands are required beyond the surface listed above.
   runner `ADDRESS`.
 - Accepts `--dry-run` to validate configuration and print the resolved context
   plan without spawning child processes or mutating runtime state.
+- In this version, `--import` requires `--detach`.
+- `--import` must not be combined with `--dry-run`.
+- `--stack` is required whenever `--import` is present.
+- Without `--recursive`, `--import <path>` must resolve to a single file whose
+  name ends with `.previa`, `.previa.json`, `.previa.yaml`, or `.previa.yml`.
+- With `--recursive`, `--import <path>` must resolve to a directory and `up`
+  must recursively collect only files ending with `.previa`, `.previa.json`,
+  `.previa.yaml`, or `.previa.yml`.
+- In recursive mode, files outside those suffixes are ignored.
+- Every collected import file must parse as a direct `Pipeline` object in JSON
+  or YAML according to its suffix; any candidate file that fails to parse or
+  validate must fail the command and report the offending path.
+- After the local `previa-main` becomes healthy, `up` must send the collected
+  pipelines to the local API endpoint `/api/v1/projects/import/pipelines`.
+- The backend import must create a new project named by `--stack` and persist
+  all pipelines atomically.
+- If the import fails after the runtime has started, the runtime remains
+  running and the CLI returns the import error.
 - Accepts `-d` and `--detach` to leave the spawned processes running in
   background.
 - Before validating local bind availability or spawning any child process, `up`
@@ -707,7 +731,7 @@ Rules:
   child process.
 - `runners.local.address` maps to the `ADDRESS` environment variable for
   spawned local `previa-runner` processes.
-- `runners.local.count` is equivalent to `--runners` / `-r`.
+- `runners.local.count` is equivalent to `--runners`.
 - `runners.local.port_range.start` and `runners.local.port_range.end` together are
   equivalent to `--runner-port-range` / `-P`.
 - `runners.local.env` injects additional environment variables into spawned
@@ -784,7 +808,7 @@ Rules:
 - It accepts `--main-port <port>` / `-p <port>` to override the `PORT`
   environment variable passed to the `previa-main` child process.
 - It executes exactly the local runner count declared by the operator in
-  `--runners <N>` or `-r <N>`.
+  `--runners <N>`.
 - It accepts `--runner-address <address>` to override the `ADDRESS`
   environment variable passed to spawned local `previa-runner` processes.
 - It accepts `--runner-port-range <start:end>` / `-P <start:end>` to define the
@@ -796,7 +820,7 @@ Rules:
 - It may load `main.address`, `main.port`, `main.env`, `runners.local.address`,
   `runners.local.count`, `runners.local.port_range`, `runners.local.env`, and
   `runners.attach` from a compose file.
-- It must reject `up` if `--runners 0` / `-r 0` is combined with no
+- It must reject `up` if `--runners 0` is combined with no
   `--attach-runner` / `-a`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
   the context-scoped `main.env` when present, except that `PORT` is overridden by
@@ -887,30 +911,30 @@ The implementation is complete only when these scenarios are covered:
    `version`, main address, main port, main `env`, local runner address, local
    runner count, local runner port range, local runner `env`, and attached
    runners.
-7. `up /workspace/demo/previa-compose.yaml -p 7788 -r 2` lets the CLI flags
+7. `up /workspace/demo/previa-compose.yaml -p 7788 --runners 2` lets the CLI flags
     override the compose file values.
 8. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is
    missing.
 9. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is not
    `1`.
-10. `up --main-address 0.0.0.0 --runner-address 127.0.0.1 -r 3` starts one
+10. `up --main-address 0.0.0.0 --runner-address 127.0.0.1 --runners 3` starts one
     `previa-main` and three local runners with the requested bind addresses.
-11. `up -r 3` starts one `previa-main`, three local runners, and injects
+11. `up --runners 3` starts one `previa-main`, three local runners, and injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
    into the `previa-main` child process.
-12. `up -p 6688 -r 1` starts `previa-main` with `PORT=6688`.
-13. `up -P 56000:56002 -r 3` starts local runners on ports
+12. `up -p 6688 --runners 1` starts `previa-main` with `PORT=6688`.
+13. `up -P 56000:56002 --runners 3` starts local runners on ports
    `56000`, `56001`, and `56002`.
-14. `up -P 56000:56001 -r 3` fails validation before spawning
+14. `up -P 56000:56001 --runners 3` fails validation before spawning
    any local child process because the range capacity is insufficient.
 15. `up` fails before spawning any child process when a requested local main or
     runner bind target is already in use.
-16. `up -r 1 -a 10.0.0.12:55880` injects
+16. `up --runners 1 -a 10.0.0.12:55880` injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://10.0.0.12:55880`
    into the `previa-main` child process.
-17. `up -r 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
+17. `up --runners 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
    locally while attaching the remote runner endpoint.
-18. `up -r 0` with no attached runner fails validation before spawning any
+18. `up --runners 0` with no attached runner fails validation before spawning any
    process.
 19. `up -a 55880` normalizes the attached runner target to
    `http://127.0.0.1:55880`.
@@ -926,7 +950,7 @@ The implementation is complete only when these scenarios are covered:
 25. `up /workspace/demo/previa-compose.yaml --detach --context api` writes the
     resolved absolute compose file path to
     `PREVIA_HOME/stacks/api/run/state.json`.
-26. `up -r 3 --detach` writes
+26. `up --runners 3 --detach` writes
     `PREVIA_HOME/stacks/default/run/state.json` with the
    `previa-main` PID and the three runner PIDs, then exits without stopping the
    spawned processes.

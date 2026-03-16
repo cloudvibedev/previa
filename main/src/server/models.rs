@@ -281,6 +281,22 @@ pub struct ProjectImportResponse {
     pub load_history_imported: usize,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PipelineImportRequest {
+    pub stack_name: String,
+    #[schema(value_type = Vec<Object>)]
+    pub pipelines: Vec<Pipeline>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineImportResponse {
+    pub project_id: String,
+    pub stack_name: String,
+    pub pipelines_imported: usize,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OpenApiValidationRequest {

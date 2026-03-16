@@ -72,8 +72,14 @@ pub struct UpArgs {
     pub runner_address: Option<String>,
     #[arg(short = 'P', long = "runner-port-range")]
     pub runner_port_range: Option<String>,
-    #[arg(short = 'r', long)]
+    #[arg(long)]
     pub runners: Option<usize>,
+    #[arg(short = 'i', long = "import", value_name = "PATH")]
+    pub import_path: Option<String>,
+    #[arg(short = 'r', long)]
+    pub recursive: bool,
+    #[arg(short = 's', long = "stack", value_name = "STACK")]
+    pub stack: Option<String>,
     #[arg(short = 'a', long = "attach-runner")]
     pub attach_runners: Vec<String>,
     #[arg(long)]

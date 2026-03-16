@@ -183,7 +183,7 @@ O `up` tambem injeta:
 Uso:
 
 ```text
-previa up [--context <context>] [SOURCE] [--main-address <addr>] [-p, --main-port <port>] [--runner-address <addr>] [-P, --runner-port-range <start:end>] [-r, --runners <N>] [-a, --attach-runner <selector> ...] [--dry-run] [-d, --detach] [--version <tag>]
+previa up [--context <context>] [SOURCE] [--main-address <addr>] [-p, --main-port <port>] [--runner-address <addr>] [-P, --runner-port-range <start:end>] [--runners <N>] [-a, --attach-runner <selector> ...] [-i, --import <path>] [-r, --recursive] [-s, --stack <name>] [--dry-run] [-d, --detach] [--version <tag>]
 ```
 
 ### O que faz
@@ -205,13 +205,13 @@ previa up
 Subir 3 runners locais:
 
 ```bash
-previa up -r 3
+previa up --runners 3
 ```
 
 Subir outro context com portas customizadas:
 
 ```bash
-previa up --context other -p 6688 -P 56880:56889 -r 2
+previa up --context other -p 6688 -P 56880:56889 --runners 2
 ```
 
 Subir usando um compose:
@@ -238,6 +238,18 @@ Detached:
 
 ```bash
 previa up --detach --version latest
+```
+
+Importar uma pipeline local em um novo projeto:
+
+```bash
+previa up --detach --import ./tests/login.previa.json --stack my_new_stack
+```
+
+Importar pipelines recursivamente a partir de um diretorio:
+
+```bash
+previa up --detach -i ./tests -r -s my_new_stack
 ```
 
 ### `SOURCE`
@@ -269,6 +281,34 @@ Voce precisa ter pelo menos uma fonte de runner:
 - `--runners > 0`
 - pelo menos um `--attach-runner`
 - ou ambos
+
+### Importacao de pipelines
+
+Quando `--import <path>` e usado, o `previa up` sobe o runtime local e, depois
+que o `previa-main` fica saudavel, envia pipelines para a API local criando um
+novo projeto com o nome informado em `--stack <name>`.
+
+Regras:
+
+- `--stack` e obrigatorio com `--import`
+- `--recursive` so pode ser usado com `--import`
+- `--import` sem `--recursive` aceita apenas um arquivo
+- `--import` com `--recursive` aceita apenas um diretorio
+- nesta versao, `--import` exige `--detach`
+- `--import` nao pode ser combinado com `--dry-run`
+
+Arquivos aceitos:
+
+- `*.previa`
+- `*.previa.json`
+- `*.previa.yaml`
+- `*.previa.yml`
+
+Sem `--recursive`, o arquivo passado precisa ter um desses sufixos. Com
+`--recursive`, o diretorio e percorrido recursivamente e apenas arquivos com
+esses sufixos entram na importacao. Qualquer arquivo candidato invalido faz o
+comando falhar apontando o caminho e o erro. Se a importacao falhar depois que
+o runtime subir, o runtime permanece em execucao.
 
 ### Dry run
 
@@ -308,8 +348,11 @@ context 'default' started in detached mode (main: 0.0.0.0:5588)
 ### Regras e validacoes importantes
 
 - `--dry-run` nao pode ser combinado com `--detach`
+- `--import` exige `--detach`
+- `--import` nao pode ser combinado com `--dry-run`
+- `--stack` e obrigatorio com `--import`
 - `main.port` precisa estar entre `1` e `65535`
-- a faixa de runners precisa ter portas suficientes para `-r`
+- a faixa de runners precisa ter portas suficientes para `--runners`
 - o context nao pode ja estar em execucao
 - `up` falha antes de subir qualquer processo se o context ja estiver rodando
 - `up` falha cedo se algum bind local planejado ja estiver ocupado
@@ -815,7 +858,7 @@ previa down --all-contexts
 
 `requested local runner count exceeds the configured port range`
 
-- a faixa `-P` nao comporta a quantidade `-r`
+- a faixa `-P` nao comporta a quantidade `--runners`
 
 ## Referencias
 
