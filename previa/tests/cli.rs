@@ -17,7 +17,7 @@ fn python3_available() -> bool {
 
 fn write_browser_capture_script(path: &Path) {
     let script = r#"#!/bin/sh
-printf '%s' "$1" > "$PREVIACTL_OPEN_CAPTURE"
+printf '%s' "$1" > "$PREVIA_OPEN_CAPTURE"
 "#;
 
     fs::write(path, script).expect("write browser capture script");
@@ -154,7 +154,7 @@ httpd.serve_forever()
 
 STATE_PATH = pathlib.Path(
     os.environ.get(
-        "PREVIACTL_FAKE_DOCKER_STATE",
+        "PREVIA_FAKE_DOCKER_STATE",
         str(pathlib.Path(os.environ["PREVIA_HOME"]) / "fake-docker-state.json"),
     )
 )
@@ -173,7 +173,7 @@ def save_state(state):
 
 
 def append_log():
-    log_path = os.environ.get("PREVIACTL_DOCKER_LOG")
+    log_path = os.environ.get("PREVIA_DOCKER_LOG")
     if not log_path:
         return
     with open(log_path, "a", encoding="utf-8") as fh:
@@ -439,7 +439,7 @@ PY
 }
 
 fn cargo_bin() -> Command {
-    Command::cargo_bin("previactl").expect("previactl binary")
+    Command::cargo_bin("previa").expect("previa binary")
 }
 
 fn prepend_path(dir: &Path) -> OsString {
@@ -533,7 +533,7 @@ fn pull_defaults_to_all_latest_without_local_binaries() {
     let mut command = cargo_bin();
     docker_env(&temp, &mut command);
     command
-        .env("PREVIACTL_DOCKER_LOG", &docker_log)
+        .env("PREVIA_DOCKER_LOG", &docker_log)
         .args(["pull"])
         .assert()
         .success();
@@ -551,7 +551,7 @@ fn pull_accepts_explicit_version_for_single_target() {
     let mut command = cargo_bin();
     docker_env(&temp, &mut command);
     command
-        .env("PREVIACTL_DOCKER_LOG", &docker_log)
+        .env("PREVIA_DOCKER_LOG", &docker_log)
         .args(["pull", "runner", "--version", "0.0.7"])
         .assert()
         .success();
@@ -1408,8 +1408,8 @@ fn open_launches_app_with_encoded_main_context_url() {
     let mut command = cargo_bin();
     docker_env(&temp, &mut command);
     let output = command
-        .env("PREVIACTL_OPEN_BROWSER", &browser)
-        .env("PREVIACTL_OPEN_CAPTURE", &capture)
+        .env("PREVIA_OPEN_BROWSER", &browser)
+        .env("PREVIA_OPEN_CAPTURE", &capture)
         .args(["open", "--context", stack])
         .output()
         .expect("open output");

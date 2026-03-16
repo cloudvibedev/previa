@@ -13,7 +13,7 @@ pub fn build_open_url(address: &str, port: u16) -> Result<String> {
 }
 
 pub fn open_browser(url: &str) -> Result<()> {
-    if let Ok(browser) = env::var("PREVIACTL_OPEN_BROWSER") {
+    if let Ok(browser) = env::var("PREVIA_OPEN_BROWSER") {
         return run_browser(Command::new(&browser).arg(url), &browser);
     }
 

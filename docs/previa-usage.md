@@ -1,6 +1,6 @@
-# `previactl`: guia de uso
+# `previa`: guia de uso
 
-`previactl` e o CLI local do Previa para subir, inspecionar, parar e abrir um context local via Docker Compose, com um `previa-main`, zero ou mais `previa-runner` locais e runners anexados por URL.
+`previa` e o CLI local do Previa para subir, inspecionar, parar e abrir um context local via Docker Compose, com um `previa-main`, zero ou mais `previa-runner` locais e runners anexados por URL.
 
 Este guia cobre o uso operacional da CLI como ela existe hoje no codigo.
 
@@ -9,32 +9,32 @@ Este guia cobre o uso operacional da CLI como ela existe hoje no codigo.
 Comandos disponiveis:
 
 ```text
-previactl up [OPTIONS] [SOURCE]
-previactl pull [main|runner|all] [--version <version>]
-previactl down [OPTIONS]
-previactl restart [OPTIONS]
-previactl status [OPTIONS]
-previactl list [OPTIONS]
-previactl ps [OPTIONS]
-previactl logs [OPTIONS]
-previactl open [OPTIONS]
-previactl version
-previactl --version
+previa up [OPTIONS] [SOURCE]
+previa pull [main|runner|all] [--version <version>]
+previa down [OPTIONS]
+previa restart [OPTIONS]
+previa status [OPTIONS]
+previa list [OPTIONS]
+previa ps [OPTIONS]
+previa logs [OPTIONS]
+previa open [OPTIONS]
+previa version
+previa --version
 ```
 
 Ajuda rapida:
 
 ```bash
-previactl --help
-previactl up --help
-previactl logs --help
+previa --help
+previa up --help
+previa logs --help
 ```
 
 ## Conceitos
 
 ### Context
 
-Um `context` e um ambiente local isolado gerenciado pelo `previactl`.
+Um `context` e um ambiente local isolado gerenciado pelo `previa`.
 
 Cada context tem:
 
@@ -52,13 +52,13 @@ Se voce nao informar `--context`, o valor padrao e `default`.
 Exemplo:
 
 ```bash
-previactl up --context default
-previactl up --context other -p 6688 -P 56880:56889
+previa up --context default
+previa up --context other -p 6688 -P 56880:56889
 ```
 
 ### PREVIA_HOME
 
-O `previactl` grava estado, configuracao e o compose gerado sob `PREVIA_HOME`.
+O `previa` grava estado, configuracao e o compose gerado sob `PREVIA_HOME`.
 
 Se `PREVIA_HOME` nao estiver definido, o padrao e:
 
@@ -71,7 +71,7 @@ Layout por context:
 ```text
 $PREVIA_HOME/
   bin/
-    previactl
+    previa
   stacks/
     <context>/
       config/
@@ -91,51 +91,51 @@ $PREVIA_HOME/
 Subir um context local padrao com 1 runner:
 
 ```bash
-previactl up
+previa up
 ```
 
 Subir em detached mode:
 
 ```bash
-previactl up --detach
+previa up --detach
 ```
 
 Ver status:
 
 ```bash
-previactl status
+previa status
 ```
 
 Ver processos:
 
 ```bash
-previactl ps
+previa ps
 ```
 
 Abrir logs:
 
 ```bash
-previactl logs --follow
+previa logs --follow
 ```
 
 Abrir a UI com esse context:
 
 ```bash
-previactl open
+previa open
 ```
 
 Parar o context:
 
 ```bash
-previactl down
+previa down
 ```
 
 Baixar imagens publicadas:
 
 ```bash
-previactl pull
-previactl pull main
-previactl pull runner --version 0.0.7
+previa pull
+previa pull main
+previa pull runner --version 0.0.7
 ```
 
 ## Como o `up` resolve a configuracao
@@ -161,12 +161,12 @@ O `up` tambem injeta:
 - `RUNNER_ENDPOINTS` com os runners locais e anexados
 - `ORCHESTRATOR_DATABASE_URL` apontando para o SQLite do context
 
-## `previactl up`
+## `previa up`
 
 Uso:
 
 ```text
-previactl up [--context <context>] [SOURCE] [--main-address <addr>] [-p, --main-port <port>] [--runner-address <addr>] [-P, --runner-port-range <start:end>] [-r, --runners <N>] [-a, --attach-runner <selector> ...] [--dry-run] [-d, --detach] [--version <tag>]
+previa up [--context <context>] [SOURCE] [--main-address <addr>] [-p, --main-port <port>] [--runner-address <addr>] [-P, --runner-port-range <start:end>] [-r, --runners <N>] [-a, --attach-runner <selector> ...] [--dry-run] [-d, --detach] [--version <tag>]
 ```
 
 ### O que faz
@@ -182,45 +182,45 @@ previactl up [--context <context>] [SOURCE] [--main-address <addr>] [-p, --main-
 Subir o context padrao:
 
 ```bash
-previactl up
+previa up
 ```
 
 Subir 3 runners locais:
 
 ```bash
-previactl up -r 3
+previa up -r 3
 ```
 
 Subir outro context com portas customizadas:
 
 ```bash
-previactl up --context other -p 6688 -P 56880:56889 -r 2
+previa up --context other -p 6688 -P 56880:56889 -r 2
 ```
 
 Subir usando um compose:
 
 ```bash
-previactl up .
-previactl up ./ambientes/dev
-previactl up ./previa-compose.yaml
+previa up .
+previa up ./ambientes/dev
+previa up ./previa-compose.yaml
 ```
 
 Subir com runners anexados:
 
 ```bash
-previactl up -a 55880 -a 10.0.0.12:55880
+previa up -a 55880 -a 10.0.0.12:55880
 ```
 
 Dry run:
 
 ```bash
-previactl up --dry-run
+previa up --dry-run
 ```
 
 Detached:
 
 ```bash
-previactl up --detach --version latest
+previa up --detach --version latest
 ```
 
 ### `SOURCE`
@@ -276,7 +276,7 @@ attached runners:
 
 ### Detached mode
 
-Com `--detach`, o `previactl`:
+Com `--detach`, o `previa`:
 
 - gera `run/docker-compose.generated.yaml`
 - executa `docker compose up -d`
@@ -308,12 +308,12 @@ Comportamento:
 - apertar Enter equivale a `Y`
 - responder `n` aborta o comando
 
-## `previactl pull`
+## `previa pull`
 
 Uso:
 
 ```text
-previactl pull [main|runner|all] [--version <version>]
+previa pull [main|runner|all] [--version <version>]
 ```
 
 ### O que faz
@@ -331,18 +331,18 @@ previactl pull [main|runner|all] [--version <version>]
 ### Exemplos
 
 ```bash
-previactl pull
-previactl pull main
-previactl pull runner --version 0.0.7
-previactl pull all --version latest
+previa pull
+previa pull main
+previa pull runner --version 0.0.7
+previa pull all --version latest
 ```
 
-## `previactl down`
+## `previa down`
 
 Uso:
 
 ```text
-previactl down [--context <context>] [--all-contexts] [--runner <selector> ...]
+previa down [--context <context>] [--all-contexts] [--runner <selector> ...]
 ```
 
 ### O que faz
@@ -356,40 +356,40 @@ previactl down [--context <context>] [--all-contexts] [--runner <selector> ...]
 Parar o context atual:
 
 ```bash
-previactl down
+previa down
 ```
 
 Parar outro context:
 
 ```bash
-previactl down --context other
+previa down --context other
 ```
 
 Parar apenas um runner local:
 
 ```bash
-previactl down --runner 55880
+previa down --runner 55880
 ```
 
 Parar todos os contexts:
 
 ```bash
-previactl down --all-contexts
+previa down --all-contexts
 ```
 
 ### Regras
 
 - `--all-contexts` e `--runner` sao mutuamente exclusivos
 - `--runner` so atua em runners locais gravados no runtime
-- attached runners nunca sao encerrados pelo `previactl`
+- attached runners nunca sao encerrados pelo `previa`
 - parar os ultimos runners locais falha se nao houver attached runners restantes
 
-## `previactl restart`
+## `previa restart`
 
 Uso:
 
 ```text
-previactl restart [--context <context>]
+previa restart [--context <context>]
 ```
 
 Reinicia um context detached reaproveitando a configuracao gravada no runtime:
@@ -404,15 +404,15 @@ Reinicia um context detached reaproveitando a configuracao gravada no runtime:
 Exemplo:
 
 ```bash
-previactl restart --context other
+previa restart --context other
 ```
 
-## `previactl status`
+## `previa status`
 
 Uso:
 
 ```text
-previactl status [--context <context>] [--main] [--runner <selector>] [--json]
+previa status [--context <context>] [--main] [--runner <selector>] [--json]
 ```
 
 ### O que faz
@@ -429,25 +429,25 @@ Um processo local so e considerado healthy quando `/health` retorna `200 OK`.
 Status geral:
 
 ```bash
-previactl status
+previa status
 ```
 
 Status so do main:
 
 ```bash
-previactl status --main
+previa status --main
 ```
 
 Status de um runner:
 
 ```bash
-previactl status --runner 55880
+previa status --runner 55880
 ```
 
 JSON:
 
 ```bash
-previactl status --json
+previa status --json
 ```
 
 ### Estados
@@ -500,12 +500,12 @@ Estrutura:
 }
 ```
 
-## `previactl list`
+## `previa list`
 
 Uso:
 
 ```text
-previactl list [--json]
+previa list [--json]
 ```
 
 Lista todos os contexts conhecidos sob `PREVIA_HOME/stacks`.
@@ -513,8 +513,8 @@ Lista todos os contexts conhecidos sob `PREVIA_HOME/stacks`.
 Exemplo:
 
 ```bash
-previactl list
-previactl list --json
+previa list
+previa list --json
 ```
 
 Saida humana:
@@ -536,12 +536,12 @@ Saida JSON:
 ]
 ```
 
-## `previactl ps`
+## `previa ps`
 
 Uso:
 
 ```text
-previactl ps [--context <context>] [--json]
+previa ps [--context <context>] [--json]
 ```
 
 Mostra os processos locais registrados no runtime do context.
@@ -549,8 +549,8 @@ Mostra os processos locais registrados no runtime do context.
 Exemplo:
 
 ```bash
-previactl ps
-previactl ps --context other --json
+previa ps
+previa ps --context other --json
 ```
 
 Saida humana:
@@ -585,12 +585,12 @@ Saida JSON:
 ]
 ```
 
-## `previactl logs`
+## `previa logs`
 
 Uso:
 
 ```text
-previactl logs [--context <context>] [--main] [--runner <selector>] [--follow] [-t, --tail [<lines>]]
+previa logs [--context <context>] [--main] [--runner <selector>] [--follow] [-t, --tail [<lines>]]
 ```
 
 ### O que faz
@@ -607,43 +607,43 @@ Sem filtro, imprime:
 Logs completos:
 
 ```bash
-previactl logs
+previa logs
 ```
 
 So do `main`:
 
 ```bash
-previactl logs --main
+previa logs --main
 ```
 
 So de um runner:
 
 ```bash
-previactl logs --runner 55880
+previa logs --runner 55880
 ```
 
 Seguir logs:
 
 ```bash
-previactl logs --follow
+previa logs --follow
 ```
 
 Ultimas 20 linhas:
 
 ```bash
-previactl logs --tail 20
+previa logs --tail 20
 ```
 
 Atalho com default de 10 linhas:
 
 ```bash
-previactl logs -t
+previa logs -t
 ```
 
 Follow + tail:
 
 ```bash
-previactl logs --follow -t 50
+previa logs --follow -t 50
 ```
 
 ### Regras
@@ -653,12 +653,12 @@ previactl logs --follow -t 50
 - `-t 0` falha
 - o comando depende de runtime detached existente
 
-## `previactl open`
+## `previa open`
 
 Uso:
 
 ```text
-previactl open [--context <context>]
+previa open [--context <context>]
 ```
 
 Abre o navegador padrao com:
@@ -670,11 +670,11 @@ https://app.previa.dev?add_context=<url-do-main>
 Exemplo:
 
 ```bash
-previactl open
-previactl open --context other
+previa open
+previa open --context other
 ```
 
-Se o `main` estiver gravado como `0.0.0.0` ou `::`, o `previactl` normaliza para loopback antes de montar a URL.
+Se o `main` estiver gravado como `0.0.0.0` ou `::`, o `previa` normaliza para loopback antes de montar a URL.
 
 Exemplo de URL final:
 
@@ -682,15 +682,15 @@ Exemplo de URL final:
 https://app.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588
 ```
 
-Voce pode sobrescrever o comando que abre o navegador definindo `PREVIACTL_OPEN_BROWSER`.
+Voce pode sobrescrever o comando que abre o navegador definindo `PREVIA_OPEN_BROWSER`.
 
-## `previactl version`
+## `previa version`
 
 Uso:
 
 ```bash
-previactl version
-previactl --version
+previa version
+previa --version
 ```
 
 Saida:
@@ -699,11 +699,11 @@ Saida:
 <version>
 ```
 
-O valor exibido e a versao do pacote `previactl` compilado.
+O valor exibido e a versao do pacote `previa` compilado.
 
 ## Arquivos de ambiente por context
 
-Quando voce usa `previactl up` sem `--dry-run`, o CLI garante a existencia destes arquivos:
+Quando voce usa `previa up` sem `--dry-run`, o CLI garante a existencia destes arquivos:
 
 `main.env`:
 
@@ -759,24 +759,24 @@ runners:
 ### Subir um ambiente local simples
 
 ```bash
-previactl up --detach
-previactl status
-previactl open
+previa up --detach
+previa status
+previa open
 ```
 
 ### Operar varios contexts
 
 ```bash
-previactl up --context default --detach
-previactl up --context other --detach -p 6688 -P 56880:56889
-previactl list
-previactl status --context other
+previa up --context default --detach
+previa up --context other --detach -p 6688 -P 56880:56889
+previa list
+previa status --context other
 ```
 
 ### Encerrar tudo
 
 ```bash
-previactl down --all-contexts
+previa down --all-contexts
 ```
 
 ## Erros comuns
@@ -784,8 +784,8 @@ previactl down --all-contexts
 `context '<name>' is already running`
 
 - o context selecionado ja tem processos ativos registrados
-- use `previactl status --context <name>`
-- ou finalize com `previactl down --context <name>`
+- use `previa status --context <name>`
+- ou finalize com `previa down --context <name>`
 
 `no detached runtime exists for context '<name>'`
 
@@ -802,5 +802,5 @@ previactl down --all-contexts
 
 ## Referencias
 
-- [spec v1](./specs/previactl-v1.md)
+- [spec v1](./specs/previa-v1.md)
 - [README da workspace](../README.md)

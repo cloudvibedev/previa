@@ -145,7 +145,7 @@ jobs:
               cross build --release --target "${{ matrix.target }}" -p previa-main
             fi
             if [ "${{ matrix.build_ctl }}" = "true" ]; then
-              cross build --release --target "${{ matrix.target }}" -p previactl
+              cross build --release --target "${{ matrix.target }}" -p previa
             fi
           else
             if [ "${{ matrix.build_runner }}" = "true" ]; then
@@ -155,7 +155,7 @@ jobs:
               cargo build --release --target "${{ matrix.target }}" -p previa-main
             fi
             if [ "${{ matrix.build_ctl }}" = "true" ]; then
-              cargo build --release --target "${{ matrix.target }}" -p previactl
+              cargo build --release --target "${{ matrix.target }}" -p previa
             fi
           fi
 
@@ -178,8 +178,8 @@ jobs:
           fi
 
           if [ "${{ matrix.build_ctl }}" = "true" ]; then
-            ctl_src="target/${{ matrix.target }}/release/previactl${{ matrix.exe_ext }}"
-            ctl_asset="previactl-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
+            ctl_src="target/${{ matrix.target }}/release/previa${{ matrix.exe_ext }}"
+            ctl_asset="previa-${{ matrix.os_slug }}-${{ matrix.arch_slug }}${{ matrix.exe_ext }}"
             cp "${ctl_src}" "dist/${ctl_asset}"
           fi
 

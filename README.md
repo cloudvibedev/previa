@@ -20,12 +20,12 @@ Go to **https://previa.dev** and use the full power of Previa from the UI by run
 3. Point the UI to your server URL.
 4. Create projects, pipelines, and execute tests end-to-end.
 
-Previa architecture is composed of three Rust crates:
+Previa architecture is composed of four Rust crates:
 
 - `previa-main` (orchestrator API)
 - `previa-runner` (remote execution API)
 - `previa-engine` (pipeline execution core)
-- `previactl` (CLI para instalar e operar o stack local do Previa via Docker Compose)
+- `previa` (CLI para instalar e operar o stack local do Previa via Docker Compose)
 
 Data flow:
 
@@ -47,32 +47,32 @@ Direct script URL:
 https://downloads.previa.dev/install.sh
 ```
 
-The installer writes `previactl` to `~/.previa/bin`, sets `PREVIA_HOME="$HOME/.previa"`, and updates `~/.zshrc` and `~/.bashrc` when they exist.
+The installer writes `previa` to `~/.previa/bin`, sets `PREVIA_HOME="$HOME/.previa"`, and updates `~/.zshrc` and `~/.bashrc` when they exist.
 
-`previactl` release binaries are also published for macOS and Windows. O stack local gerenciado pelo CLI usa as imagens publicadas do `previa-main` e `previa-runner`.
+`previa` release binaries are also published for macOS and Windows. O stack local gerenciado pelo CLI usa as imagens publicadas do `previa-main` e `previa-runner`.
 
-You can also pull published container images with `previactl pull`, for example `previactl pull all` or `previactl pull runner --version 0.0.7`.
+You can also pull published container images with `previa pull`, for example `previa pull all` or `previa pull runner --version 0.0.7`.
 
 ## Quick Start
 
 ### 1. Start the local stack
 
 ```bash
-previactl up --detach
+previa up --detach
 ```
 
 ### 2. Check status and open the UI
 
 ```bash
-previactl status
-previactl open
+previa status
+previa open
 ```
 
 ### 3. Optional: pull a specific image tag first
 
 ```bash
-previactl pull all --version 0.0.7
-previactl up --detach --version 0.0.7
+previa pull all --version 0.0.7
+previa up --detach --version 0.0.7
 ```
 
 ## Workspace Crates
@@ -80,8 +80,8 @@ previactl up --detach --version 0.0.7
 - [`engine/README.md`](engine/README.md)
 - [`runner/README.md`](runner/README.md)
 - [`main/README.md`](main/README.md)
-- [`docs/previactl-usage.md`](docs/previactl-usage.md)
-- [`docs/specs/previactl-v1.md`](docs/specs/previactl-v1.md)
+- [`docs/previa-usage.md`](docs/previa-usage.md)
+- [`docs/specs/previa-v1.md`](docs/specs/previa-v1.md)
 
 ## Local Verification
 

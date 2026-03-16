@@ -227,16 +227,16 @@ main() {
   [ -n "${VERSION}" ] && [ "${VERSION}" != "null" ] || fail "Manifest is invalid: missing version."
   success "Resolved latest version ${VERSION}"
 
-  info "Installing previactl into ${PREVIA_BIN_DIR}"
+  info "Installing previa into ${PREVIA_BIN_DIR}"
   mkdir -p "${PREVIA_BIN_DIR}" || fail "Failed to create ${PREVIA_BIN_DIR}."
-  install_binary "previactl" "previactl" "previactl_${OS_SLUG}_${ARCH_SLUG}"
+  install_binary "previa" "previa" "previa_${OS_SLUG}_${ARCH_SLUG}"
 
   info "Configuring PREVIA_HOME and PATH"
   configure_shell_env
 
   success "Previa ${VERSION} installed successfully."
   printf "%sInstalled directory:%s %s\n" "${BLUE}" "${RESET}" "${PREVIA_HOME_DEFAULT}"
-  printf "%sOpen a new terminal to use 'previactl' from PATH.%s\n" "${BLUE}" "${RESET}"
+  printf "%sOpen a new terminal to use 'previa' from PATH.%s\n" "${BLUE}" "${RESET}"
 }
 
 main "$@"

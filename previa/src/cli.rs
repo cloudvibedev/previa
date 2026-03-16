@@ -12,7 +12,7 @@ fn parse_tail_lines(value: &str) -> Result<usize, String> {
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "previactl",
+    name = "previa",
     version,
     about = "CLI local para operar contexts do Previa"
 )]

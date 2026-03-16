@@ -1885,6 +1885,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "previa"
+version = "0.0.7"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "dotenvy",
+ "fs2",
+ "nix",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "urlencoding",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "previa-engine"
 version = "0.0.7"
 dependencies = [
@@ -1951,27 +1972,6 @@ dependencies = [
  "tracing-subscriber",
  "utoipa",
  "uuid 1.22.0",
-]
-
-[[package]]
-name = "previactl"
-version = "0.0.7"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "chrono",
- "clap",
- "dotenvy",
- "fs2",
- "nix",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokio",
- "urlencoding",
- "windows-sys 0.59.0",
 ]
 
 [[package]]

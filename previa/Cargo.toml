@@ -1,5 +1,5 @@
 [package]
-name = "previactl"
+name = "previa"
 description = "CLI local para operar stacks do Previa."
 version.workspace = true
 edition.workspace = true
