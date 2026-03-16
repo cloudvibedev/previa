@@ -9,6 +9,7 @@ Este guia cobre o uso operacional da CLI como ela existe hoje no codigo.
 Comandos disponiveis:
 
 ```text
+previa --home <path> <COMMAND>
 previa up [OPTIONS] [SOURCE]
 previa pull [main|runner|all] [--version <version>]
 previa down [OPTIONS]
@@ -26,6 +27,7 @@ Ajuda rapida:
 
 ```bash
 previa --help
+previa --home ./minha-previa status
 previa up --help
 previa logs --help
 ```
@@ -56,9 +58,17 @@ previa up --context default
 previa up --context other -p 6688 -P 56880:56889
 ```
 
-### PREVIA_HOME
+### PREVIA_HOME e `--home`
 
 O `previa` grava estado, configuracao e o compose gerado sob `PREVIA_HOME`.
+
+Voce pode sobrescrever isso por execucao com `--home <path>`.
+
+Precedencia:
+
+1. `--home <path>`
+2. `PREVIA_HOME`
+3. `$HOME/.previa`
 
 Se `PREVIA_HOME` nao estiver definido, o padrao e:
 
@@ -92,6 +102,13 @@ Subir um context local padrao com 1 runner:
 
 ```bash
 previa up
+```
+
+Usar um home local so nessa execucao:
+
+```bash
+previa --home ./minha-previa up --detach
+previa --home ./minha-previa status
 ```
 
 Subir em detached mode:

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 fn parse_tail_lines(value: &str) -> Result<usize, String> {
@@ -17,6 +19,8 @@ fn parse_tail_lines(value: &str) -> Result<usize, String> {
     about = "CLI local para operar contexts do Previa"
 )]
 pub struct Cli {
+    #[arg(long, global = true, value_name = "PATH")]
+    pub home: Option<PathBuf>,
     #[command(subcommand)]
     pub command: Commands,
 }

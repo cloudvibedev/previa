@@ -40,15 +40,15 @@ scope for v1 and must not be invented during implementation.
 The v1 CLI surface is fixed to the commands below:
 
 ```text
-previa up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach] [--version <tag>]
-previa pull [main|runner|all] [--version <version>]
-previa down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]
-previa restart [--context <context-name>] [--version <tag>]
-previa status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]
-previa list [--json]
-previa ps [--context <context-name>] [--json]
-previa logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
-previa open [--context <context-name>]
+previa [--home <path>] up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach] [--version <tag>]
+previa [--home <path>] pull [main|runner|all] [--version <version>]
+previa [--home <path>] down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]
+previa [--home <path>] restart [--context <context-name>] [--version <tag>]
+previa [--home <path>] status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]
+previa [--home <path>] list [--json]
+previa [--home <path>] ps [--context <context-name>] [--json]
+previa [--home <path>] logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
+previa [--home <path>] open [--context <context-name>]
 previa version
 ```
 
@@ -56,7 +56,7 @@ No additional v1 commands are required beyond the surface listed above.
 
 ### Command Semantics
 
-#### `previa up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run]`
+#### `previa [--home <path>] up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run]`
 
 - Bootstraps a local context on the current host.
 - Executes exactly one `previa-main` process.
@@ -390,6 +390,12 @@ files.
 
 - Environment variable:
   - `PREVIA_HOME`
+- Global CLI override:
+  - `--home <path>`
+- Resolution precedence:
+  1. `--home <path>`
+  2. `PREVIA_HOME`
+  3. `$HOME/.previa`
 - Default value when `PREVIA_HOME` is not set:
   - `$HOME/.previa`
 - Directory layout:

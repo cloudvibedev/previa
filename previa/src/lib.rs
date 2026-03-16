@@ -54,7 +54,7 @@ use crate::selectors::{RunnerSelector, parse_stack_name};
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
-    let paths = PreviaPaths::discover()?;
+    let paths = PreviaPaths::discover(cli.home.as_deref())?;
     let http = Client::builder()
         .timeout(Duration::from_secs(1))
         .build()

@@ -480,6 +480,12 @@ fn docker_env(temp: &TempDir, command: &mut Command) {
         .env("PATH", prepend_path(&temp.path().join("docker-bin")));
 }
 
+fn docker_env_with_previa_home(preview_home: &Path, docker_root: &TempDir, command: &mut Command) {
+    command
+        .env("PREVIA_HOME", preview_home)
+        .env("PATH", prepend_path(&docker_root.path().join("docker-bin")));
+}
+
 #[test]
 fn dry_run_rejects_detach() {
     let temp = setup_fake_docker();
@@ -489,6 +495,18 @@ fn dry_run_rejects_detach() {
         .args(["up", "--dry-run", "--detach"])
         .assert()
         .failure();
+}
+
+#[test]
+fn version_accepts_global_home_override() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut command = cargo_bin();
+    command.args([
+        "--home",
+        temp.path().to_str().expect("home str"),
+        "version",
+    ]);
+    command.assert().success();
 }
 
 #[test]
@@ -684,6 +702,131 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
             .path()
             .join("stacks")
             .join(stack)
+            .join("run/state.json")
+            .exists()
+    );
+}
+
+#[test]
+fn home_override_detached_lifecycle_uses_override_instead_of_previa_home_env() {
+    if !python3_available() {
+        return;
+    }
+
+    let docker_root = setup_fake_docker();
+    let env_home = TempDir::new().expect("env home");
+    let cli_home = TempDir::new().expect("cli home");
+    let stack = "home-override";
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env_with_previa_home(env_home.path(), &docker_root, &mut up);
+    up.args([
+        "--home",
+        cli_home.path().to_str().expect("home str"),
+        "up",
+        "--context",
+        stack,
+        "--detach",
+        "--main-address",
+        "127.0.0.1",
+        "-p",
+        &main_port.to_string(),
+        "--runner-address",
+        "127.0.0.1",
+        "-P",
+        &format!("{runner_port}:{runner_port}"),
+        "-r",
+        "1",
+    ])
+    .assert()
+    .success();
+
+    let cli_runtime = cli_home
+        .path()
+        .join("stacks")
+        .join(stack)
+        .join("run/state.json");
+    let env_runtime = env_home
+        .path()
+        .join("stacks")
+        .join(stack)
+        .join("run/state.json");
+    assert!(cli_runtime.exists());
+    assert!(!env_runtime.exists());
+
+    let mut status = cargo_bin();
+    docker_env_with_previa_home(env_home.path(), &docker_root, &mut status);
+    let status_output = status
+        .args([
+            "--home",
+            cli_home.path().to_str().expect("home str"),
+            "status",
+            "--context",
+            stack,
+            "--json",
+        ])
+        .output()
+        .expect("status output");
+    assert!(status_output.status.success());
+    let status_json: serde_json::Value =
+        serde_json::from_slice(&status_output.stdout).expect("status json");
+    assert_eq!(status_json["runtime_file"], cli_runtime.display().to_string());
+
+    let mut down = cargo_bin();
+    docker_env_with_previa_home(env_home.path(), &docker_root, &mut down);
+    down.args([
+        "--home",
+        cli_home.path().to_str().expect("home str"),
+        "down",
+        "--context",
+        stack,
+    ])
+    .assert()
+    .success();
+
+    assert!(!cli_runtime.exists());
+}
+
+#[test]
+fn relative_home_override_is_resolved_from_current_directory() {
+    if !python3_available() {
+        return;
+    }
+
+    let docker_root = setup_fake_docker();
+    let cwd = TempDir::new().expect("cwd");
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env_with_previa_home(docker_root.path(), &docker_root, &mut up);
+    up.current_dir(cwd.path())
+        .args([
+            "--home",
+            "custom-home",
+            "up",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "-r",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        cwd.path()
+            .join("custom-home")
+            .join("stacks")
+            .join("default")
             .join("run/state.json")
             .exists()
     );
