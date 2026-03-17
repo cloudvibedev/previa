@@ -25,7 +25,12 @@ pub async fn health() -> StatusCode {
     )
 )]
 pub async fn get_info(State(state): State<AppState>) -> Json<OrchestratorInfoResponse> {
-    let runners = collect_runner_statuses(&state.client, &state.runner_endpoints).await;
+    let runners = collect_runner_statuses(
+        &state.client,
+        &state.runner_endpoints,
+        state.runner_auth_key.as_deref(),
+    )
+    .await;
     let active_runners = runners.iter().filter(|runner| runner.active).count();
 
     Json(OrchestratorInfoResponse {
@@ -66,6 +71,7 @@ mod tests {
             db,
             context_name: "other".to_owned(),
             runner_endpoints: Vec::new(),
+            runner_auth_key: None,
             rps_per_node: 1000,
             scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),

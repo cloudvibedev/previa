@@ -23,6 +23,13 @@ fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
         .any(|arg| arg == "--version" || arg == "-v")
 }
 
+fn optional_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
 #[tokio::main]
 async fn main() {
     if should_print_version(std::env::args()) {
@@ -37,6 +44,7 @@ async fn main() {
         .init();
 
     let runner_endpoints = parse_runner_endpoints();
+    let runner_auth_key = optional_env("RUNNER_AUTH_KEY");
     let mcp_config = McpConfig::from_env();
     let database_url = std::env::var("ORCHESTRATOR_DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://orchestrator.db".to_owned());
@@ -88,6 +96,7 @@ async fn main() {
         db,
         context_name: context_name.clone(),
         runner_endpoints,
+        runner_auth_key,
         rps_per_node,
         scheduler: crate::server::execution::ExecutionScheduler::new(SchedulerConfig {
             e2e_per_runner_limit,

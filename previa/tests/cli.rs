@@ -696,6 +696,20 @@ fn read_fake_import_state(previa_home: &Path) -> serde_json::Value {
     .expect("fake import state json")
 }
 
+fn read_generated_compose(previa_home: &Path, context: &str) -> serde_json::Value {
+    serde_json::from_slice(
+        &fs::read(
+            previa_home
+                .join("stacks")
+                .join(context)
+                .join("run")
+                .join("docker-compose.generated.yaml"),
+        )
+        .expect("read generated compose"),
+    )
+    .expect("generated compose json")
+}
+
 #[test]
 fn dry_run_rejects_detach() {
     let temp = setup_fake_docker();
@@ -1038,6 +1052,71 @@ fn relative_home_override_is_resolved_from_current_directory() {
             .join("default")
             .join("run/state.json")
             .exists()
+    );
+}
+
+#[test]
+fn up_process_runner_auth_key_overrides_compose_and_env_files() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+    let compose = temp.path().join("previa-compose.yaml");
+    fs::write(
+        &compose,
+        r#"version: 1
+main:
+  env:
+    RUNNER_AUTH_KEY: compose-key
+runners:
+  local:
+    count: 1
+    env:
+      RUNNER_AUTH_KEY: compose-key
+"#,
+    )
+    .expect("write compose");
+
+    let stack_config_dir = temp.path().join("stacks/default/config");
+    fs::create_dir_all(&stack_config_dir).expect("stack config dir");
+    fs::write(
+        stack_config_dir.join("main.env"),
+        "RUNNER_AUTH_KEY=env-file-key\nRUST_LOG=info\n",
+    )
+    .expect("main env");
+    fs::write(
+        stack_config_dir.join("runner.env"),
+        "RUNNER_AUTH_KEY=env-file-key\nRUST_LOG=info\n",
+    )
+    .expect("runner env");
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    command
+        .env("RUNNER_AUTH_KEY", "process-key")
+        .args([
+            "up",
+            "--detach",
+            "-p",
+            &main_port.to_string(),
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            compose.to_str().expect("compose path"),
+        ])
+        .assert()
+        .success();
+
+    let generated = read_generated_compose(temp.path(), "default");
+    assert_eq!(
+        generated["services"]["main"]["environment"]["RUNNER_AUTH_KEY"],
+        "process-key"
+    );
+    assert_eq!(
+        generated["services"][format!("runner-{runner_port}")]["environment"]["RUNNER_AUTH_KEY"],
+        "process-key"
     );
 }
 

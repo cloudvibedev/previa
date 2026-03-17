@@ -8,6 +8,7 @@ use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::server::execution::history_capture::capture_e2e_history_event;
+use crate::server::execution::runner_auth::apply_runner_auth;
 use crate::server::execution::scheduler::SharedValue;
 use crate::server::execution::snapshot::build_e2e_snapshot_payload;
 use crate::server::models::{E2eHistoryAccumulator, NodePlan, SseMessage};
@@ -22,6 +23,7 @@ pub async fn forward_runner_stream(
     plan: NodePlan,
     endpoint_path: &str,
     transaction_id: Option<String>,
+    runner_auth_key: Option<&str>,
     history_accumulator: Option<(
         String,
         Arc<Mutex<E2eHistoryAccumulator>>,
@@ -35,10 +37,13 @@ pub async fn forward_runner_stream(
     let runner_list = vec![node.clone()];
     let url = format!("{}{}", node.trim_end_matches('/'), endpoint_path);
 
-    let mut request = client
-        .post(url)
-        .header("Content-Type", "application/json")
-        .header("Accept", "text/event-stream");
+    let mut request = apply_runner_auth(
+        client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream"),
+        runner_auth_key,
+    );
 
     if let Some(transaction_id) = transaction_id.as_deref() {
         request = request.header(TRANSACTION_ID_HEADER, transaction_id);
@@ -204,10 +209,17 @@ pub fn add_context_fields(data: Value, runners: &[String], plan: &NodePlan) -> V
 
 #[cfg(test)]
 mod tests {
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::routing::post;
+    use axum::{Router, response::IntoResponse};
     use serde_json::json;
+    use tokio::net::TcpListener;
+    use tokio::sync::broadcast;
+    use tokio_util::sync::CancellationToken;
 
-    use crate::server::execution::forward::add_context_fields;
-    use crate::server::models::NodePlan;
+    use crate::server::execution::forward::{add_context_fields, forward_runner_stream};
+    use crate::server::models::{NodePlan, SseMessage};
 
     #[test]
     fn context_fields_include_warning_and_runners() {
@@ -227,5 +239,76 @@ mod tests {
         assert_eq!(data["nodesUsed"], json!(2));
         assert_eq!(data["runners"], json!(["http://runner:3000"]));
         assert_eq!(data["warning"], json!("warn"));
+    }
+
+    #[tokio::test]
+    async fn forwards_execution_requests_with_authorization_header() {
+        let endpoint = spawn_sse_runner(Some("secret")).await;
+        let (tx, mut rx) = broadcast::channel::<SseMessage>(8);
+
+        forward_runner_stream(
+            &reqwest::Client::new(),
+            endpoint,
+            json!({"pipeline": {"name": "ignored", "steps": []}}),
+            tx,
+            CancellationToken::new(),
+            NodePlan {
+                requested_nodes: 1,
+                nodes_found: 1,
+                nodes_used: 1,
+                warning: None,
+            },
+            "/api/v1/tests/e2e",
+            None,
+            Some("secret"),
+            None,
+        )
+        .await;
+
+        let message = rx.recv().await.expect("sse message");
+        assert_eq!(message.event, "step:result");
+        assert_eq!(message.data["ok"], json!(true));
+    }
+
+    async fn spawn_sse_runner(expected_auth: Option<&str>) -> String {
+        let app = Router::new()
+            .route("/api/v1/tests/e2e", post(sse_handler))
+            .with_state(expected_auth.map(str::to_owned));
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let address = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve sse runner");
+        });
+
+        format!("http://{}", address)
+    }
+
+    async fn sse_handler(
+        State(expected_auth): State<Option<String>>,
+        headers: HeaderMap,
+    ) -> impl IntoResponse {
+        if let Some(expected) = expected_auth.as_deref() {
+            let provided = headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim);
+            if provided != Some(expected) {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    "missing or invalid authorization".to_owned(),
+                )
+                    .into_response();
+            }
+        }
+
+        (
+            StatusCode::OK,
+            [("content-type", "text/event-stream")],
+            "event: step:result\ndata: {\"ok\":true}\n\n",
+        )
+            .into_response()
     }
 }

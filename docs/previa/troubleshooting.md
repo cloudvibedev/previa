@@ -99,6 +99,21 @@ previa status
 previa logs
 ```
 
+## `401 Unauthorized` From a Runner
+
+If a runner is configured with `RUNNER_AUTH_KEY`, `previa-main` must send the
+same value in the `Authorization` header.
+
+Check these first:
+
+- `RUNNER_AUTH_KEY` is the same on `main` and the runner
+- the value is present in the environment used by `previa up`
+- attached external runners are using the same shared key
+- you are not accidentally using older binaries from `PREVIA_HOME/bin`
+
+When auth is enabled, even `/health` and `/info` require the key. A mismatch
+there makes the runner appear unhealthy or unavailable.
+
 ## Path and Home Confusion
 
 To isolate everything inside a repo, prefer:

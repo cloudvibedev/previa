@@ -17,6 +17,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub context_name: String,
     pub runner_endpoints: Vec<String>,
+    pub runner_auth_key: Option<String>,
     pub rps_per_node: u64,
     pub scheduler: ExecutionScheduler,
     pub executions: Arc<RwLock<HashMap<String, Arc<ExecutionCtx>>>>,

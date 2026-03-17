@@ -406,7 +406,12 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
     match params.name.as_str() {
         "health" => Ok(tool_success(json!({ "status": "ok" }))),
         "get_info" => {
-            let runners = collect_runner_statuses(&state.client, &state.runner_endpoints).await;
+            let runners = collect_runner_statuses(
+                &state.client,
+                &state.runner_endpoints,
+                state.runner_auth_key.as_deref(),
+            )
+            .await;
             let payload = OrchestratorInfoResponse {
                 context: state.context_name.clone(),
                 total_runners: runners.len(),
@@ -2826,6 +2831,7 @@ mod tests {
             db,
             context_name: "test".to_owned(),
             runner_endpoints: Vec::new(),
+            runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),

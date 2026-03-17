@@ -88,9 +88,32 @@ runners:
 
 - `runners.local.count` maps to `--runners`
 - `runners.attach` uses the same selector grammar as `--attach-runner`
+- `RUNNER_AUTH_KEY` may be passed through `main.env` and `runners.local.env`
 - CLI flags always override compose values
 - the compose source is read-only input
 - `previa` never rewrites the input compose file
+
+## Runner Authorization
+
+If you want `previa-main` and `previa-runner` to share a simple auth key, you
+can inject the same `RUNNER_AUTH_KEY` into:
+
+- `main.env`
+- `runners.local.env`
+
+Example:
+
+```yaml
+version: 1
+main:
+  env:
+    RUNNER_AUTH_KEY: local-dev-secret
+runners:
+  local:
+    count: 1
+    env:
+      RUNNER_AUTH_KEY: local-dev-secret
+```
 
 For the exact schema and compatibility rules, see the spec.
 

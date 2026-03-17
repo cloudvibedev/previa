@@ -5,6 +5,7 @@ pub mod history_capture;
 pub mod load;
 pub mod load_batch;
 pub mod node_plan;
+pub mod runner_auth;
 pub mod runtime_specs;
 pub mod scheduler;
 pub mod snapshot;

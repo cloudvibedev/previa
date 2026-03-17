@@ -250,6 +250,7 @@ mod tests {
             db,
             context_name: "test".to_owned(),
             runner_endpoints: Vec::new(),
+            runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),

@@ -62,9 +62,12 @@ pub async fn start_load_execution(
         ));
     }
 
-    let runner_statuses =
-        crate::server::execution::collect_runner_statuses(&state.client, &state.runner_endpoints)
-            .await;
+    let runner_statuses = crate::server::execution::collect_runner_statuses(
+        &state.client,
+        &state.runner_endpoints,
+        state.runner_auth_key.as_deref(),
+    )
+    .await;
     let registered_nodes: Vec<String> = runner_statuses
         .iter()
         .map(|runner| runner.endpoint.clone())
@@ -249,6 +252,7 @@ pub async fn start_load_execution(
                 let runner_statuses = crate::server::execution::collect_runner_statuses(
                     &state_clone.client,
                     &state_clone.runner_endpoints,
+                    state_clone.runner_auth_key.as_deref(),
                 )
                 .await;
                 let active_nodes = runner_statuses
@@ -447,6 +451,7 @@ pub async fn start_load_execution(
             let pipeline = runner_pipeline.clone();
             let transaction_id = transaction_id_for_children.clone();
             let specs = runtime_specs_for_runner.clone();
+            let runner_auth_key = state_clone.runner_auth_key.clone();
 
             let child_request = json!({
                 "pipeline": pipeline,
@@ -475,6 +480,7 @@ pub async fn start_load_execution(
                     snapshot_payload,
                     "/api/v1/tests/load",
                     transaction_id,
+                    runner_auth_key.as_deref(),
                 )
                 .await;
             }));
@@ -720,6 +726,7 @@ mod tests {
             db,
             context_name: "test".to_owned(),
             runner_endpoints: vec![runner],
+            runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),
@@ -804,6 +811,7 @@ mod tests {
             db,
             context_name: "test".to_owned(),
             runner_endpoints: vec![first_runner, second_runner],
+            runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),

@@ -2,10 +2,15 @@ use std::time::Duration;
 
 use reqwest::Client;
 
+use crate::server::execution::runner_auth::apply_runner_auth;
 use crate::server::models::{NodePlan, RunnerInfo, RunnerRuntimeInfo};
 
-pub async fn collect_active_nodes(client: &Client, runner_endpoints: &[String]) -> Vec<String> {
-    collect_runner_statuses(client, runner_endpoints)
+pub async fn collect_active_nodes(
+    client: &Client,
+    runner_endpoints: &[String],
+    runner_auth_key: Option<&str>,
+) -> Vec<String> {
+    collect_runner_statuses(client, runner_endpoints, runner_auth_key)
         .await
         .into_iter()
         .filter(|runner| runner.active)
@@ -16,14 +21,16 @@ pub async fn collect_active_nodes(client: &Client, runner_endpoints: &[String]) 
 pub async fn collect_runner_statuses(
     client: &Client,
     runner_endpoints: &[String],
+    runner_auth_key: Option<&str>,
 ) -> Vec<RunnerInfo> {
     let mut runners = Vec::with_capacity(runner_endpoints.len());
 
     for endpoint in runner_endpoints {
-        let (runtime, runtime_error) = fetch_runner_runtime_info(client, endpoint).await;
+        let (runtime, runtime_error) =
+            fetch_runner_runtime_info(client, endpoint, runner_auth_key).await;
         runners.push(RunnerInfo {
             endpoint: endpoint.clone(),
-            active: is_runner_healthy(client, endpoint).await,
+            active: is_runner_healthy(client, endpoint, runner_auth_key).await,
             runtime,
             runtime_error,
         });
@@ -35,9 +42,11 @@ pub async fn collect_runner_statuses(
 pub async fn fetch_runner_runtime_info(
     client: &Client,
     endpoint: &str,
+    runner_auth_key: Option<&str>,
 ) -> (Option<RunnerRuntimeInfo>, Option<String>) {
     let url = format!("{}/info", endpoint.trim_end_matches('/'));
-    match tokio::time::timeout(Duration::from_secs(2), client.get(url).send()).await {
+    let request = apply_runner_auth(client.get(url), runner_auth_key);
+    match tokio::time::timeout(Duration::from_secs(2), request.send()).await {
         Ok(Ok(response)) => {
             if !response.status().is_success() {
                 let status = response.status().as_u16();
@@ -58,10 +67,15 @@ pub async fn fetch_runner_runtime_info(
     }
 }
 
-pub async fn is_runner_healthy(client: &Client, endpoint: &str) -> bool {
+pub async fn is_runner_healthy(
+    client: &Client,
+    endpoint: &str,
+    runner_auth_key: Option<&str>,
+) -> bool {
     let url = format!("{}/health", endpoint.trim_end_matches('/'));
+    let request = apply_runner_auth(client.get(url), runner_auth_key);
 
-    match tokio::time::timeout(Duration::from_secs(2), client.get(url).send()).await {
+    match tokio::time::timeout(Duration::from_secs(2), request.send()).await {
         Ok(Ok(response)) => response.status().is_success(),
         _ => false,
     }
@@ -125,7 +139,18 @@ pub fn parse_runner_endpoints() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::server::execution::node_plan::{calculate_node_plan, split_even};
+    use axum::Json;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::routing::get;
+    use axum::{Router, response::IntoResponse};
+    use reqwest::Client;
+    use tokio::net::TcpListener;
+
+    use crate::server::execution::node_plan::{
+        calculate_node_plan, fetch_runner_runtime_info, is_runner_healthy, split_even,
+    };
+    use crate::server::models::RunnerRuntimeInfo;
 
     #[test]
     fn warns_when_not_enough_nodes_for_requested_rps() {
@@ -147,5 +172,88 @@ mod tests {
     #[test]
     fn splits_evenly() {
         assert_eq!(split_even(10, 3), vec![4, 3, 3]);
+    }
+
+    #[tokio::test]
+    async fn runner_health_and_info_include_authorization_when_configured() {
+        let endpoint = spawn_runner_probe_server(Some("secret")).await;
+        let client = Client::new();
+
+        assert!(is_runner_healthy(&client, &endpoint, Some("secret")).await);
+        let (runtime, error) = fetch_runner_runtime_info(&client, &endpoint, Some("secret")).await;
+        assert!(error.is_none());
+        assert_eq!(runtime.expect("runtime").pid, 42);
+    }
+
+    #[tokio::test]
+    async fn protected_runner_appears_unhealthy_without_matching_authorization() {
+        let endpoint = spawn_runner_probe_server(Some("secret")).await;
+        let client = Client::new();
+
+        assert!(!is_runner_healthy(&client, &endpoint, None).await);
+        let (runtime, error) = fetch_runner_runtime_info(&client, &endpoint, None).await;
+        assert!(runtime.is_none());
+        assert!(
+            error
+                .as_deref()
+                .is_some_and(|message| message.contains("HTTP 401"))
+        );
+    }
+
+    async fn spawn_runner_probe_server(expected_auth: Option<&str>) -> String {
+        let app = Router::new()
+            .route("/health", get(health))
+            .route("/info", get(info))
+            .with_state(expected_auth.map(str::to_owned));
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind listener");
+        let address = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve runner probes");
+        });
+
+        format!("http://{}", address)
+    }
+
+    async fn health(
+        State(expected_auth): State<Option<String>>,
+        headers: HeaderMap,
+    ) -> impl IntoResponse {
+        if authorization_ok(&headers, expected_auth.as_deref()) {
+            StatusCode::OK
+        } else {
+            StatusCode::UNAUTHORIZED
+        }
+    }
+
+    async fn info(
+        State(expected_auth): State<Option<String>>,
+        headers: HeaderMap,
+    ) -> impl IntoResponse {
+        if !authorization_ok(&headers, expected_auth.as_deref()) {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+
+        Json(RunnerRuntimeInfo {
+            pid: 42,
+            memory_bytes: 1024,
+            virtual_memory_bytes: 2048,
+            cpu_usage_percent: 1.5,
+        })
+        .into_response()
+    }
+
+    fn authorization_ok(headers: &HeaderMap, expected_auth: Option<&str>) -> bool {
+        match expected_auth {
+            Some(expected) => headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value == expected),
+            None => true,
+        }
     }
 }

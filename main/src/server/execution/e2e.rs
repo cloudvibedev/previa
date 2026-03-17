@@ -101,7 +101,8 @@ pub async fn start_e2e_execution(
     let response_subscriber = sse_tx.subscribe();
     let mut randomized = state.runner_endpoints.clone();
     randomized.shuffle(&mut rand::rng());
-    let active_nodes = collect_active_nodes(&state.client, &randomized).await;
+    let active_nodes =
+        collect_active_nodes(&state.client, &randomized, state.runner_auth_key.as_deref()).await;
     let queue_position = state
         .scheduler
         .enqueue(
@@ -188,7 +189,12 @@ pub async fn start_e2e_execution(
 
                 let mut randomized = state_clone.runner_endpoints.clone();
                 randomized.shuffle(&mut rand::rng());
-                let active_nodes = collect_active_nodes(&state_clone.client, &randomized).await;
+                let active_nodes = collect_active_nodes(
+                    &state_clone.client,
+                    &randomized,
+                    state_clone.runner_auth_key.as_deref(),
+                )
+                .await;
                 match state_clone
                     .scheduler
                     .try_acquire(&history_execution_id, &active_nodes)
@@ -295,6 +301,7 @@ pub async fn start_e2e_execution(
             plan,
             "/api/v1/tests/e2e",
             transaction_id_for_runner,
+            state_clone.runner_auth_key.as_deref(),
             Some((
                 history_execution_id.clone(),
                 Arc::clone(&history_accumulator),
@@ -450,6 +457,7 @@ mod tests {
             db,
             context_name: "test".to_owned(),
             runner_endpoints: vec![runner],
+            runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),

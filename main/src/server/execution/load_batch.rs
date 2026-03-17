@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::server::execution::forward::{parse_sse_block, send_sse_best_effort};
 use crate::server::execution::history_capture::{extract_error_message, push_load_error};
+use crate::server::execution::runner_auth::apply_runner_auth;
 use crate::server::execution::scheduler::SharedValue;
 use crate::server::execution::snapshot::build_live_load_snapshot_payload;
 use crate::server::models::{
@@ -34,6 +35,7 @@ pub async fn forward_runner_stream_load_chunked(
     snapshot_payload: SharedValue<Value>,
     endpoint_path: &str,
     transaction_id: Option<String>,
+    runner_auth_key: Option<&str>,
 ) {
     if cancel.is_cancelled() {
         return;
@@ -41,10 +43,13 @@ pub async fn forward_runner_stream_load_chunked(
 
     let url = format!("{}{}", node.trim_end_matches('/'), endpoint_path);
 
-    let mut request = client
-        .post(url)
-        .header("Content-Type", "application/json")
-        .header("Accept", "text/event-stream");
+    let mut request = apply_runner_auth(
+        client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream"),
+        runner_auth_key,
+    );
 
     if let Some(transaction_id) = transaction_id.as_deref() {
         request = request.header(TRANSACTION_ID_HEADER, transaction_id);

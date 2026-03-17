@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
@@ -337,6 +338,9 @@ pub async fn resolve_up_config(
     main_env
         .entry("ORCHESTRATOR_DATABASE_URL".to_owned())
         .or_insert_with(|| sqlite_database_url(&stack_paths.orchestrator_db));
+    if let Some(runner_auth_key) = process_runner_auth_key() {
+        main_env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key);
+    }
 
     let mut local_runners = Vec::with_capacity(local_runner_count);
     let mut local_runner_ports = Vec::with_capacity(local_runner_count);
@@ -351,6 +355,9 @@ pub async fn resolve_up_config(
         env = merge_env(env, compose_runner_env.clone());
         env.insert("ADDRESS".to_owned(), runner_address.clone());
         env.insert("PORT".to_owned(), port.to_string());
+        if let Some(runner_auth_key) = process_runner_auth_key() {
+            env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key);
+        }
         local_runners.push(RunnerLaunch {
             address: runner_address.clone(),
             port,
@@ -385,6 +392,13 @@ pub async fn resolve_up_config(
         dry_run: args.dry_run,
         detach: args.detach,
     })
+}
+
+fn process_runner_auth_key() -> Option<String> {
+    env::var("RUNNER_AUTH_KEY")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 #[derive(Debug, Deserialize)]

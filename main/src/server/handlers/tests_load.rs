@@ -267,6 +267,7 @@ mod tests {
             db,
             context_name: "default".to_owned(),
             runner_endpoints: vec![runner_url],
+            runner_auth_key: None,
             rps_per_node: 1000,
             scheduler: ExecutionScheduler::new(Default::default()),
             executions: Arc::new(RwLock::new(HashMap::new())),

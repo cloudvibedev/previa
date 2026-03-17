@@ -87,6 +87,34 @@ This is useful for local development, but remember that `previa` resolves
 binaries from `PREVIA_HOME/bin` before falling back to workspace targets. Old
 installed binaries can therefore shadow newer workspace builds.
 
+## `RUNNER_AUTH_KEY`
+
+`previa-main` can authenticate requests to runners using the `Authorization`
+header with the raw value from `RUNNER_AUTH_KEY`.
+
+Current behavior:
+
+- if `RUNNER_AUTH_KEY` is unset on the runner, requests work as they do today
+- if `RUNNER_AUTH_KEY` is set on the runner, it becomes required on:
+  - `/health`
+  - `/info`
+  - `/api/v1/tests/e2e`
+  - `/api/v1/tests/load`
+
+For local `previa up`, precedence is:
+
+1. process env `RUNNER_AUTH_KEY`
+2. compose env maps
+3. existing `main.env` and `runner.env`
+
+Example:
+
+```bash
+RUNNER_AUTH_KEY=local-dev-secret previa up --detach
+```
+
+The same shared key is used for all runners in one local context.
+
 ## `--version`
 
 For compose-backed runtimes, `--version` selects the container image tag:
