@@ -3,7 +3,7 @@ resolver = "3"
 members = ['engine', 'main', 'previa', 'runner']
 
 [workspace.package]
-version = "0.0.1-alpha.0"
+version = "1.0.0-alpha.0"
 edition = "2024"
 rust-version = "1.90.0"
 authors = ["Previa Labs <previa@cloudvibe.dev>"]
@@ -13,8 +13,8 @@ homepage = "https://github.com/cloudvibedev/previa"
 
 [workspace.dependencies]
 # internal
-previa-engine = { path = "engine", version = "0.0.1-alpha" }
-previa-runner = { path = "runner", version = "0.0.1-alpha" }
+previa-engine = { path = "engine", version = "1.0.0-alpha.0" }
+previa-runner = { path = "runner", version = "1.0.0-alpha.0" }
 
 # external
 axum = "0.8"
