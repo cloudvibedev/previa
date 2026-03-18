@@ -357,7 +357,7 @@ async fn handle_initialize(
                     title: Some("Previa Main MCP".to_owned()),
                     version: env!("CARGO_PKG_VERSION").to_owned(),
                 },
-                "instructions": "Use the available tools to inspect orchestrator health, projects, pipelines, OpenAPI specs, and to validate OpenAPI source content. Use the available prompts when you need operational guidance for creating pipelines, reviewing executed tests, and proposing step fixes."
+                "instructions": "Use the available tools to inspect orchestrator health, projects, pipelines, execution history, queues, OpenAPI specs, and live HTTP behavior. Use the available prompts when you need guidance for project onboarding, pipeline authoring, failure triage, step repair planning, OpenAPI ingestion, load-test design, queue operations, safe reviews, migrations, and spec-driven pipeline bootstrapping."
             }),
         ),
         session_id: Some(session_id),
@@ -1665,37 +1665,160 @@ fn prompt_definitions() -> Vec<PromptDefinition> {
             ),
             arguments: Vec::new(),
         },
+        PromptDefinition {
+            name: "project_onboarding_guide".to_owned(),
+            title: Some("Project Onboarding Guide".to_owned()),
+            description: Some(
+                "Guides remote assistants through project discovery, context gathering, and safe next steps before making changes."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "pipeline_failure_triage".to_owned(),
+            title: Some("Pipeline Failure Triage".to_owned()),
+            description: Some(
+                "Investigates failing E2E and load executions, identifies likely causes, and recommends the next safe action."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "openapi_spec_ingestion_advisor".to_owned(),
+            title: Some("OpenAPI Spec Ingestion Advisor".to_owned()),
+            description: Some(
+                "Validates OpenAPI content and guides spec creation or updates for a project."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "pipeline_repair_planner".to_owned(),
+            title: Some("Pipeline Repair Planner".to_owned()),
+            description: Some(
+                "Plans safe, concrete pipeline fixes from execution evidence before any update is applied."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "load_test_designer".to_owned(),
+            title: Some("Load Test Designer".to_owned()),
+            description: Some(
+                "Designs load test runs with justified parameters, risk notes, and clear execution plans."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "queue_orchestrator".to_owned(),
+            title: Some("Queue Orchestrator".to_owned()),
+            description: Some(
+                "Helps remote assistants create, monitor, and cancel project E2E queues."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "http_probe_assistant".to_owned(),
+            title: Some("HTTP Probe Assistant".to_owned()),
+            description: Some(
+                "Uses proxied HTTP requests to inspect live endpoint behavior before proposing persistent pipeline changes."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "project_migration_assistant".to_owned(),
+            title: Some("Project Migration Assistant".to_owned()),
+            description: Some(
+                "Guides export and import workflows for moving projects between environments."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "safe_change_reviewer".to_owned(),
+            title: Some("Safe Change Reviewer".to_owned()),
+            description: Some(
+                "Reviews risky create, update, delete, and import actions before they are applied."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "spec_to_pipeline_bootstrap".to_owned(),
+            title: Some("Spec To Pipeline Bootstrap".to_owned()),
+            description: Some(
+                "Turns project specs into an initial executable pipeline plan with valid assertions and template usage."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
     ]
 }
 
 fn prompt_result(name: &str) -> Option<PromptGetResult> {
     match name {
-        "default" | "pipeline_test_assistant" => Some(PromptGetResult {
-            description: Some(
-                "Operational prompt for pipeline authoring, test analysis, and step repair."
-                    .to_owned(),
-            ),
-            messages: vec![PromptMessage {
-                role: "user".to_owned(),
-                content: PromptTextContent {
-                    kind: "text",
-                    text: pipeline_test_assistant_prompt(),
-                },
-            }],
-        }),
-        "previa_pipeline_author" | "pipeline_creation_specialist" => Some(PromptGetResult {
-            description: Some(
-                "Detailed prompt for authoring Previa pipelines through MCP.".to_owned(),
-            ),
-            messages: vec![PromptMessage {
-                role: "user".to_owned(),
-                content: PromptTextContent {
-                    kind: "text",
-                    text: previa_pipeline_author_prompt(),
-                },
-            }],
-        }),
+        "default" | "pipeline_test_assistant" => Some(prompt_text_result(
+            "Operational prompt for pipeline authoring, test analysis, and step repair.",
+            pipeline_test_assistant_prompt(),
+        )),
+        "previa_pipeline_author" | "pipeline_creation_specialist" => Some(prompt_text_result(
+            "Detailed prompt for authoring Previa pipelines through MCP.",
+            previa_pipeline_author_prompt(),
+        )),
+        "project_onboarding_guide" => Some(prompt_text_result(
+            "Guided prompt for safely discovering project context before acting.",
+            project_onboarding_guide_prompt(),
+        )),
+        "pipeline_failure_triage" => Some(prompt_text_result(
+            "Prompt for investigating failures across E2E and load executions.",
+            pipeline_failure_triage_prompt(),
+        )),
+        "openapi_spec_ingestion_advisor" => Some(prompt_text_result(
+            "Prompt for validating and ingesting OpenAPI specs into a project.",
+            openapi_spec_ingestion_advisor_prompt(),
+        )),
+        "pipeline_repair_planner" => Some(prompt_text_result(
+            "Prompt for planning evidence-based pipeline repairs before updates.",
+            pipeline_repair_planner_prompt(),
+        )),
+        "load_test_designer" => Some(prompt_text_result(
+            "Prompt for designing safe, justified load test executions.",
+            load_test_designer_prompt(),
+        )),
+        "queue_orchestrator" => Some(prompt_text_result(
+            "Prompt for operating project E2E queues.",
+            queue_orchestrator_prompt(),
+        )),
+        "http_probe_assistant" => Some(prompt_text_result(
+            "Prompt for inspecting live HTTP behavior through proxy requests.",
+            http_probe_assistant_prompt(),
+        )),
+        "project_migration_assistant" => Some(prompt_text_result(
+            "Prompt for exporting, reviewing, and importing project bundles.",
+            project_migration_assistant_prompt(),
+        )),
+        "safe_change_reviewer" => Some(prompt_text_result(
+            "Prompt for reviewing the impact of risky project changes before execution.",
+            safe_change_reviewer_prompt(),
+        )),
+        "spec_to_pipeline_bootstrap" => Some(prompt_text_result(
+            "Prompt for converting project specs into an initial pipeline design.",
+            spec_to_pipeline_bootstrap_prompt(),
+        )),
         _ => None,
+    }
+}
+
+fn prompt_text_result(description: &str, text: String) -> PromptGetResult {
+    PromptGetResult {
+        description: Some(description.to_owned()),
+        messages: vec![PromptMessage {
+            role: "user".to_owned(),
+            content: PromptTextContent { kind: "text", text },
+        }],
     }
 }
 
@@ -2374,6 +2497,179 @@ Output requirements:\n\
     )
 }
 
+fn project_onboarding_guide_prompt() -> String {
+    [
+        "You are onboarding yourself to a Previa project through MCP before making any change.",
+        "Your first job is to build a concise mental model of the project and expose it to the user.",
+        "Recommended workflow:",
+        "1. Call list_projects or get_project to identify the target project.",
+        "2. Call list_project_specs to discover available specs, slugs, and base URL names.",
+        "3. Call list_project_pipelines to understand what is already automated.",
+        "4. If the user mentions failures or runs, inspect list_e2e_history or list_load_history before proposing edits.",
+        "5. Summarize the current state, open risks, and the best next MCP action.",
+        "Output requirements:",
+        "- Return a short onboarding summary with project purpose, known specs, existing pipelines, and obvious gaps.",
+        "- Distinguish facts gathered from MCP from assumptions that still need confirmation.",
+        "- Do not propose create, update, delete, or import actions until you have shown the current context.",
+        "- If critical context is missing, name the exact MCP tool that should be called next.",
+    ]
+    .join("\n")
+}
+
+fn pipeline_failure_triage_prompt() -> String {
+    [
+        "You are triaging a failed Previa execution through MCP.",
+        "Always begin with evidence, not guesses.",
+        "Required workflow:",
+        "1. Use list_e2e_history or list_load_history to identify the relevant failure when the execution is not already known.",
+        "2. Use get_e2e_test, get_load_test, or get_execution to inspect the exact request, response, asserts, and failed steps.",
+        "3. Identify the most likely root cause and explain why it is more plausible than nearby alternatives.",
+        "4. Recommend the next safe action: observe more data, probe the endpoint, adjust a pipeline, or rerun after confirmation.",
+        "Output requirements:",
+        "- Name the failing step or execution segment.",
+        "- Separate observed evidence, likely cause, confidence level, and next action.",
+        "- When you recommend a pipeline change, mention update_project_pipeline but do not apply it without user approval.",
+        "- If the failure points to live API behavior, propose proxy_request before editing the pipeline.",
+    ]
+    .join("\n")
+}
+
+fn openapi_spec_ingestion_advisor_prompt() -> String {
+    [
+        "You are responsible for safely ingesting OpenAPI content into a Previa project through MCP.",
+        "Your goal is to validate the source, explain issues clearly, and produce the correct create or update action.",
+        "Required workflow:",
+        "1. Validate the provided source with validate_openapi before proposing persistence.",
+        "2. Inspect the target project with get_project and list_project_specs.",
+        "3. Decide whether the operation should use create_project_spec or update_project_spec.",
+        "4. Verify slug, URL names, and any project-specific conventions before proposing a final payload.",
+        "Output requirements:",
+        "- Report validation findings first.",
+        "- Call out schema errors, missing servers, ambiguous slugs, and naming conflicts explicitly.",
+        "- Return a payload compatible with create_project_spec or update_project_spec only when the source is valid enough.",
+        "- If the source is not ready, explain what must change before the MCP write call should happen.",
+    ]
+    .join("\n")
+}
+
+fn pipeline_repair_planner_prompt() -> String {
+    [
+        "You are planning a safe repair for an existing Previa pipeline.",
+        "Use execution data and current pipeline state together before proposing a fix.",
+        "Required workflow:",
+        "1. Inspect the failing execution with get_e2e_test, get_load_test, or get_execution.",
+        "2. Fetch the saved pipeline with get_project_pipeline.",
+        "3. Compare observed failure data with the current step definitions, template references, URLs, headers, and assertions.",
+        "4. Propose the smallest effective patch that resolves the evidence-backed issue.",
+        "Output requirements:",
+        "- Name the exact step to change.",
+        "- Show the before-and-after intent in plain language.",
+        "- Mention update_project_pipeline as the write tool, but wait for explicit approval before applying it.",
+        "- If the evidence is weak, ask for one more diagnostic MCP call instead of overfitting the fix.",
+    ]
+    .join("\n")
+}
+
+fn load_test_designer_prompt() -> String {
+    [
+        "You are designing Previa load tests through MCP.",
+        "Your job is to choose realistic parameters and explain why they fit the user's goal.",
+        "Required workflow:",
+        "1. Confirm the target project and pipeline with get_project, list_project_pipelines, or get_project_pipeline.",
+        "2. If needed, inspect prior load results with list_load_history and get_load_test.",
+        "3. Propose config values for totalRequests, concurrency, and rampUpSeconds with rationale.",
+        "4. Highlight operational risks such as unstable environments, missing assertions, or overly aggressive concurrency.",
+        "Output requirements:",
+        "- Present a runnable payload for run_project_load_test when enough context exists.",
+        "- Explain what the run is trying to learn.",
+        "- Distinguish smoke, baseline, and stress-style configurations when helpful.",
+        "- If the underlying pipeline looks weak, recommend fixing the pipeline before scaling load.",
+    ]
+    .join("\n")
+}
+
+fn queue_orchestrator_prompt() -> String {
+    [
+        "You are operating Previa E2E queues for a remote user through MCP.",
+        "Your job is to sequence pipelines clearly, track queue state, and avoid surprise actions.",
+        "Required workflow:",
+        "1. Inspect available pipelines with list_project_pipelines.",
+        "2. Use create_project_e2e_queue only after confirming the intended pipeline order and base URL selection.",
+        "3. Use get_current_project_e2e_queue or get_project_e2e_queue to explain progress and current status.",
+        "4. Use cancel_project_e2e_queue only when the user requests cancellation or when you are explicitly asked what the cancel path is.",
+        "Output requirements:",
+        "- Summarize queue composition, active item, completed items, failures, and remaining work.",
+        "- Make it obvious whether the queue is running, completed, or canceled.",
+        "- Do not invent queue tools or background monitoring features that do not exist.",
+    ]
+    .join("\n")
+}
+
+fn http_probe_assistant_prompt() -> String {
+    [
+        "You are inspecting live HTTP behavior before changing saved Previa assets.",
+        "Use proxy_request to gather real evidence from endpoints, auth flows, headers, payloads, redirects, and SSE streams.",
+        "Required workflow:",
+        "1. Define the smallest probe that can answer the user's question.",
+        "2. Use proxy_request with explicit request details and bounded maxEvents or timeoutMs when probing SSE.",
+        "3. Report status code, headers, body shape, and any mismatches with current pipeline expectations.",
+        "4. Recommend whether the next step should be another probe, a pipeline update, a spec update, or no change.",
+        "Output requirements:",
+        "- Keep the probe purpose clear and narrow.",
+        "- Call out sensitive headers or auth assumptions when relevant.",
+        "- Treat proxy evidence as a diagnostic input, not an automatic justification to edit saved pipelines.",
+    ]
+    .join("\n")
+}
+
+fn project_migration_assistant_prompt() -> String {
+    [
+        "You are guiding a project migration through Previa MCP export and import tools.",
+        "Your job is to move data carefully between environments and explain what is included.",
+        "Required workflow:",
+        "1. Inspect the source project with get_project, list_project_pipelines, and list_project_specs when needed.",
+        "2. Use export_project to create a bundle and decide deliberately whether includeHistory should be true.",
+        "3. Review the bundle contents at a high level before import_project.",
+        "4. After import, verify the destination state with get_project, list_project_pipelines, and list_project_specs.",
+        "Output requirements:",
+        "- Explain what will move: metadata, specs, pipelines, and optionally history.",
+        "- Call out overwrite or duplication risks before import.",
+        "- If the user asks for a migration plan only, do not execute import_project automatically.",
+    ]
+    .join("\n")
+}
+
+fn safe_change_reviewer_prompt() -> String {
+    [
+        "You are reviewing potentially risky MCP write actions before they are executed.",
+        "You should make the blast radius visible and keep remote changes deliberate.",
+        "Review scope includes create_project, update_project, delete_project, import_project, create_project_pipeline, update_project_pipeline, delete_project_pipeline, create_project_spec, update_project_spec, and delete_project_spec.",
+        "Output requirements:",
+        "- Summarize the intended action, affected resources, likely impact, and rollback path.",
+        "- Highlight destructive or irreversible consequences explicitly.",
+        "- When the action depends on assumptions, list them before recommending execution.",
+        "- Ask for explicit confirmation before delete and import flows or any broad update with uncertain impact.",
+    ]
+    .join("\n")
+}
+
+fn spec_to_pipeline_bootstrap_prompt() -> String {
+    [
+        "You are turning existing project specs into an initial Previa pipeline design.",
+        "Your goal is to bootstrap a useful saved pipeline from the API contract without inventing unsupported variables or tools.",
+        "Required workflow:",
+        "1. Inspect the target project with get_project and list_project_specs.",
+        "2. Use get_project_spec and get_pipeline_creation_guide to understand the available base URLs, schema hints, and supported template variables.",
+        "3. Build a practical first pipeline with explicit status assertions and stable step ids.",
+        "4. Return a payload compatible with create_project_pipeline.",
+        "Output requirements:",
+        "- Prefer a narrow smoke-style flow over an overly ambitious end-to-end journey.",
+        "- Use specs.<slug>.url.<name> only after verifying the exact slug and URL name.",
+        "- If the spec is too incomplete to bootstrap safely, explain the gap before generating a payload.",
+    ]
+    .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -2387,7 +2683,7 @@ mod tests {
 
     use super::{
         execute_tool, parse_tool_arguments, pipeline_creation_guide,
-        previa_pipeline_author_prompt, pipeline_test_assistant_prompt, prompt_definitions,
+        pipeline_test_assistant_prompt, previa_pipeline_author_prompt, prompt_definitions,
         prompt_result, tool_definitions, validate_pipeline_input,
     };
     use crate::server::db::{
@@ -2654,6 +2950,51 @@ mod tests {
                 .text
                 .contains("create_project_pipeline")
         );
+    }
+
+    #[test]
+    fn remote_assistant_prompts_are_available() {
+        let prompts = prompt_definitions();
+
+        for name in [
+            "project_onboarding_guide",
+            "pipeline_failure_triage",
+            "openapi_spec_ingestion_advisor",
+            "pipeline_repair_planner",
+            "load_test_designer",
+            "queue_orchestrator",
+            "http_probe_assistant",
+            "project_migration_assistant",
+            "safe_change_reviewer",
+            "spec_to_pipeline_bootstrap",
+        ] {
+            assert!(
+                prompts.iter().any(|prompt| prompt.name == name),
+                "missing MCP prompt definition for {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_assistant_prompts_reference_expected_tools() {
+        for (name, expected) in [
+            ("project_onboarding_guide", "list_project_pipelines"),
+            ("pipeline_failure_triage", "get_e2e_test"),
+            ("openapi_spec_ingestion_advisor", "validate_openapi"),
+            ("pipeline_repair_planner", "get_project_pipeline"),
+            ("load_test_designer", "run_project_load_test"),
+            ("queue_orchestrator", "create_project_e2e_queue"),
+            ("http_probe_assistant", "proxy_request"),
+            ("project_migration_assistant", "export_project"),
+            ("safe_change_reviewer", "delete_project_pipeline"),
+            ("spec_to_pipeline_bootstrap", "get_pipeline_creation_guide"),
+        ] {
+            let prompt = prompt_result(name).expect("prompt result");
+            assert!(
+                prompt.messages[0].content.text.contains(expected),
+                "prompt {name} should mention {expected}"
+            );
+        }
     }
 
     #[test]
