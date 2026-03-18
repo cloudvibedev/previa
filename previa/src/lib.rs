@@ -2,6 +2,7 @@ mod browser;
 mod cli;
 mod compose;
 mod config;
+mod download;
 mod envfile;
 mod health;
 mod logs;

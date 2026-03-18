@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 #[derive(Debug, Clone)]
 pub struct PreviaPaths {
     pub home: PathBuf,
+    pub workspace_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,15 +39,18 @@ impl PreviaPaths {
             },
         };
 
-        Ok(Self { home })
+        Ok(Self {
+            home,
+            workspace_root: discover_workspace_root()?,
+        })
     }
 
     pub fn main_binary(&self) -> Result<PathBuf> {
-        resolve_binary(&self.home, "previa-main")
+        resolve_binary(&self.home, self.workspace_root.as_deref(), "previa-main")
     }
 
     pub fn runner_binary(&self) -> Result<PathBuf> {
-        resolve_binary(&self.home, "previa-runner")
+        resolve_binary(&self.home, self.workspace_root.as_deref(), "previa-runner")
     }
 
     pub fn stack(&self, name: &str) -> StackPaths {
@@ -122,8 +126,12 @@ pub fn sqlite_database_url(path: &Path) -> String {
     format!("sqlite://{}", path.display())
 }
 
-fn resolve_binary(home: &Path, binary_name: &str) -> Result<PathBuf> {
-    let candidates = binary_candidates(home, binary_name)?;
+fn resolve_binary(
+    home: &Path,
+    workspace_root: Option<&Path>,
+    binary_name: &str,
+) -> Result<PathBuf> {
+    let candidates = binary_candidates(home, workspace_root, binary_name)?;
     for candidate in &candidates {
         if candidate.exists() {
             return Ok(candidate.clone());
@@ -138,10 +146,19 @@ fn resolve_binary(home: &Path, binary_name: &str) -> Result<PathBuf> {
     bail!("missing binary '{}'; searched {}", binary_name, searched);
 }
 
-fn binary_candidates(home: &Path, binary_name: &str) -> Result<Vec<PathBuf>> {
+fn binary_candidates(
+    home: &Path,
+    workspace_root: Option<&Path>,
+    binary_name: &str,
+) -> Result<Vec<PathBuf>> {
     let mut candidates = vec![home.join("bin").join(binary_name)];
 
-    if let Some(workspace_root) = discover_workspace_root()? {
+    let discovered_workspace_root = match workspace_root {
+        Some(path) => Some(path.to_path_buf()),
+        None => discover_workspace_root()?,
+    };
+
+    if let Some(workspace_root) = discovered_workspace_root {
         candidates.push(workspace_root.join("target/debug").join(binary_name));
         candidates.push(workspace_root.join("target/release").join(binary_name));
     }
@@ -184,14 +201,22 @@ mod tests {
     #[test]
     fn binary_candidates_prioritize_previa_home_before_targets() {
         let home = PathBuf::from("/tmp/previa-home");
-        let candidates = binary_candidates(&home, "previa-main").expect("candidates");
+        let workspace_root = PathBuf::from("/tmp/workspace");
+        let candidates =
+            binary_candidates(&home, Some(&workspace_root), "previa-main").expect("candidates");
         assert_eq!(
             candidates[0],
             PathBuf::from("/tmp/previa-home/bin/previa-main")
         );
         if candidates.len() >= 3 {
-            assert!(candidates[1].ends_with("target/debug/previa-main"));
-            assert!(candidates[2].ends_with("target/release/previa-main"));
+            assert_eq!(
+                candidates[1],
+                PathBuf::from("/tmp/workspace/target/debug/previa-main")
+            );
+            assert_eq!(
+                candidates[2],
+                PathBuf::from("/tmp/workspace/target/release/previa-main")
+            );
         }
     }
 }

@@ -16,6 +16,7 @@ chrono = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
 dotenvy = { workspace = true }
 fs2 = "0.4"
+indicatif = "0.18"
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,11 +27,13 @@ tokio = { workspace = true, features = [
     "fs",
     "io-std",
     "io-util",
+    "net",
     "process",
     "signal",
 ] }
 
 [dev-dependencies]
+axum = { workspace = true }
 assert_cmd = "2"
 tempfile = "3"
 

@@ -747,20 +747,25 @@ fn up_bin_rejects_version_override() {
 }
 
 #[test]
-fn up_bin_fails_when_local_binaries_are_missing() {
+fn up_bin_reports_manifest_fetch_failures_when_auto_download_cannot_start() {
     let temp = setup_fake_docker();
+    let unavailable_port = find_free_port();
 
     let mut command = cargo_bin();
     docker_env(&temp, &mut command);
     let output = command
         .current_dir(temp.path())
+        .env(
+            "PREVIA_DOWNLOAD_MANIFEST_URL",
+            format!("http://127.0.0.1:{unavailable_port}/latest.json"),
+        )
         .args(["up", "--bin"])
         .output()
         .expect("up output");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
-    assert!(stderr.contains("missing binary 'previa-main'"));
+    assert!(stderr.contains("failed to fetch manifest"));
 }
 
 #[test]

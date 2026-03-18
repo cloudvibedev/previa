@@ -404,6 +404,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let stack_paths = crate::paths::PreviaPaths {
             home: temp.path().to_path_buf(),
+            workspace_root: None,
         }
         .stack("default");
         stack_paths.ensure_parent_dirs().expect("dirs");
@@ -411,6 +412,7 @@ mod tests {
         let resolved = ResolvedUpConfig {
             previa_paths: crate::paths::PreviaPaths {
                 home: temp.path().to_path_buf(),
+                workspace_root: None,
             },
             stack_paths: stack_paths.clone(),
             backend: RuntimeBackend::Compose,
