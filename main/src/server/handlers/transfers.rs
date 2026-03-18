@@ -12,8 +12,10 @@ use crate::server::errors::{
     not_found_response,
 };
 use crate::server::models::{
-    ErrorResponse, ProjectExportEnvelope, ProjectImportResponse, ProjectTransferQuery,
+    ErrorResponse, PipelineImportRequest, PipelineImportResponse, ProjectExportEnvelope,
+    ProjectImportResponse, ProjectTransferQuery,
 };
+use crate::server::services::pipeline_import::{PipelineImportError, import_pipelines_as_project};
 use crate::server::state::AppState;
 use crate::server::utils::now_iso;
 
@@ -159,5 +161,68 @@ pub async fn import_project(
             conflict_response("import data conflicts with existing records")
         }
         Err(err) => internal_error_response(format!("failed to import project: {err}")),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/projects/import/pipelines",
+    request_body = PipelineImportRequest,
+    responses(
+        (
+            status = 201,
+            description = "Pipelines imported into a newly created project",
+            body = PipelineImportResponse
+        ),
+        (
+            status = 400,
+            description = "Invalid pipeline payload",
+            body = ErrorResponse
+        ),
+        (
+            status = 409,
+            description = "Import conflict",
+            body = ErrorResponse
+        ),
+        (
+            status = 500,
+            description = "Failed to import pipelines",
+            body = ErrorResponse
+        )
+    )
+)]
+pub async fn import_pipelines(
+    State(state): State<AppState>,
+    payload: Result<Json<PipelineImportRequest>, JsonRejection>,
+) -> Response {
+    let Json(payload) = match payload {
+        Ok(payload) => payload,
+        Err(rejection) => return bad_request_response(rejection),
+    };
+
+    match import_pipelines_as_project(&state.db, payload.stack_name, payload.pipelines).await {
+        Ok(response) => (StatusCode::CREATED, Json(response)).into_response(),
+        Err(PipelineImportError::EmptyStackName) => {
+            bad_request_message_response("stackName is required")
+        }
+        Err(PipelineImportError::EmptyPipelines) => {
+            bad_request_message_response("at least one pipeline is required")
+        }
+        Err(PipelineImportError::EmptyPipelineName(index)) => {
+            bad_request_message_response(&format!("pipeline #{index} name is required"))
+        }
+        Err(PipelineImportError::DuplicatePipelineId(pipeline_id)) => conflict_response(&format!(
+            "duplicate pipeline id '{pipeline_id}' in import payload"
+        )),
+        Err(PipelineImportError::ExistingPipelineId(pipeline_id)) => {
+            conflict_response(&format!("pipeline id '{pipeline_id}' already exists"))
+        }
+        Err(PipelineImportError::ProjectExists(stack_name)) => {
+            conflict_response(&format!("project '{stack_name}' already exists"))
+        }
+        Err(PipelineImportError::Validation(message)) => bad_request_message_response(&message),
+        Err(PipelineImportError::Database(err)) => {
+            internal_error_response(format!("failed to import pipelines: {err}"))
+        }
     }
 }

@@ -1,12 +1,13 @@
 use axum::Router;
 use axum::http::header;
-use axum::middleware::from_fn;
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{get, post};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::server::handlers::e2e::run_e2e_test;
 use crate::server::handlers::load::run_load_test;
 use crate::server::handlers::system::{health, info_runtime, openapi_json};
+use crate::server::middleware::auth::require_runner_authorization;
 use crate::server::middleware::http_logging::log_http_io;
 use crate::server::middleware::transaction::propagate_transaction_header;
 use crate::server::state::AppState;
@@ -25,11 +26,17 @@ pub fn build_app(state: AppState) -> Router {
     let api_v1 = Router::new()
         .route("/tests/e2e", post(run_e2e_test))
         .route("/tests/load", post(run_load_test));
-
-    Router::new()
+    let protected = Router::new()
         .nest("/api/v1", api_v1)
         .route("/health", get(health))
         .route("/info", get(info_runtime))
+        .layer(from_fn_with_state(
+            state.clone(),
+            require_runner_authorization,
+        ));
+
+    Router::new()
+        .merge(protected)
         .route("/openapi.json", get(openapi_json))
         .layer(
             CorsLayer::new()

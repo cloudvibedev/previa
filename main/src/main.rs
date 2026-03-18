@@ -11,13 +11,23 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::server::build_app;
-use crate::server::db::backfill_project_spec_md5_hashes;
-use crate::server::execution::parse_runner_endpoints;
+use crate::server::db::{backfill_project_spec_md5_hashes, cancel_stale_e2e_queues};
+use crate::server::execution::{SchedulerConfig, parse_runner_endpoints};
 use crate::server::mcp::models::McpConfig;
 use crate::server::state::{AppState, DB_SCHEMA_VERSION};
+use crate::server::utils::now_iso;
 
 fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
-    args.into_iter().skip(1).any(|arg| arg == "--version" || arg == "-v")
+    args.into_iter()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-v")
+}
+
+fn optional_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 #[tokio::main]
@@ -34,6 +44,7 @@ async fn main() {
         .init();
 
     let runner_endpoints = parse_runner_endpoints();
+    let runner_auth_key = optional_env("RUNNER_AUTH_KEY");
     let mcp_config = McpConfig::from_env();
     let database_url = std::env::var("ORCHESTRATOR_DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://orchestrator.db".to_owned());
@@ -42,6 +53,16 @@ async fn main() {
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(1000);
+    let e2e_per_runner_limit = std::env::var("E2E_EXECUTIONS_PER_RUNNER")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
+    let load_per_runner_limit = std::env::var("LOAD_EXECUTIONS_PER_RUNNER")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
     let address = std::env::var("ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_owned());
     let port = std::env::var("PORT")
         .ok()
@@ -66,14 +87,23 @@ async fn main() {
     let backfilled_spec_hashes = backfill_project_spec_md5_hashes(&db)
         .await
         .expect("failed to backfill OpenAPI spec md5 hashes");
+    let cancelled_stale_queues = cancel_stale_e2e_queues(&db, &now_iso())
+        .await
+        .expect("failed to cancel stale e2e queues");
 
     let state = AppState {
         client: Client::new(),
         db,
         context_name: context_name.clone(),
         runner_endpoints,
+        runner_auth_key,
         rps_per_node,
+        scheduler: crate::server::execution::ExecutionScheduler::new(SchedulerConfig {
+            e2e_per_runner_limit,
+            load_per_runner_limit,
+        }),
         executions: Arc::new(RwLock::new(HashMap::new())),
+        e2e_queues: Arc::new(RwLock::new(HashMap::new())),
         mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
     };
 
@@ -102,6 +132,16 @@ async fn main() {
             backfilled_spec_hashes
         );
     }
+    if cancelled_stale_queues > 0 {
+        info!(
+            "cancelled {} stale e2e queues from previous startup",
+            cancelled_stale_queues
+        );
+    }
+    info!(
+        "execution scheduler configured (e2e_per_runner_limit: {}, load_per_runner_limit: {})",
+        e2e_per_runner_limit, load_per_runner_limit
+    );
 
     axum::serve(listener, app)
         .await

@@ -13,7 +13,7 @@ pub fn build_open_url(address: &str, port: u16) -> Result<String> {
 }
 
 pub fn open_browser(url: &str) -> Result<()> {
-    if let Ok(browser) = env::var("PREVIACTL_OPEN_BROWSER") {
+    if let Ok(browser) = env::var("PREVIA_OPEN_BROWSER") {
         return run_browser(Command::new(&browser).arg(url), &browser);
     }
 
@@ -48,7 +48,7 @@ fn run_browser(command: &mut Command, program: &str) -> Result<()> {
     Ok(())
 }
 
-fn main_url(address: &str, port: u16) -> String {
+pub fn main_url(address: &str, port: u16) -> String {
     let normalized = match address.parse::<IpAddr>() {
         Ok(IpAddr::V4(ip)) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
         Ok(IpAddr::V6(ip)) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),

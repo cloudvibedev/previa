@@ -17,7 +17,7 @@ fn python3_available() -> bool {
 
 fn write_browser_capture_script(path: &Path) {
     let script = r#"#!/bin/sh
-printf '%s' "$1" > "$PREVIACTL_OPEN_CAPTURE"
+printf '%s' "$1" > "$PREVIA_OPEN_CAPTURE"
 "#;
 
     fs::write(path, script).expect("write browser capture script");
@@ -27,84 +27,16 @@ printf '%s' "$1" > "$PREVIACTL_OPEN_CAPTURE"
 }
 
 fn write_fake_binary(path: &Path, label: &str) {
-    let script = format!(
-        r#"#!/bin/sh
+    let script = r#"#!/bin/sh
 if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
-  printf '%s 0.0.7\n' "{label}"
+  printf '%s 0.0.7\n' "__LABEL__"
   exit 0
 fi
 exec python3 -u - <<'PY'
-import os
-import signal
-import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-address = os.environ.get("ADDRESS", "127.0.0.1")
-port = int(os.environ.get("PORT", "0"))
-health_status = int(os.environ.get("HEALTH_STATUS", "200"))
-health_status_file = os.environ.get("HEALTH_STATUS_FILE")
-fail_port = os.environ.get("FAIL_PORT")
-
-if os.environ.get("FAIL_STARTUP") == "1":
-    sys.exit(1)
-if fail_port and fail_port == str(port):
-    sys.exit(1)
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/health":
-            status = health_status
-            if health_status_file and os.path.exists(health_status_file):
-                with open(health_status_file, "r", encoding="utf-8") as fh:
-                    status = int(fh.read().strip() or "200")
-            self.send_response(status)
-            self.end_headers()
-            self.wfile.write(b"ok")
-        elif self.path == "/info":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{{"pid":1,"memoryBytes":0,"virtualMemoryBytes":0,"cpuUsagePercent":0.0}}')
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, fmt, *args):
-        return
-
-httpd = HTTPServer((address, port), Handler)
-print("fake binary service listening on {{}}:{{}} pid={{}}".format(address, port, os.getpid()), flush=True)
-
-def stop(_signum, _frame):
-    httpd.shutdown()
-
-signal.signal(signal.SIGTERM, stop)
-signal.signal(signal.SIGINT, stop)
-httpd.serve_forever()
-PY
-"#
-    );
-
-    fs::write(path, script).expect("write fake binary");
-    let mut permissions = fs::metadata(path).expect("metadata").permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).expect("chmod");
-}
-
-fn write_fake_docker(path: &Path) {
-    let script = r#"#!/bin/sh
-exec python3 -u - "$@" <<'PY'
 import json
 import os
 import pathlib
 import signal
-import subprocess
-import sys
-import time
-
-SERVER_CODE = r"""
-import os
-import signal
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -113,11 +45,26 @@ port = int(os.environ.get("PORT", "0"))
 health_status = int(os.environ.get("HEALTH_STATUS", "200"))
 health_status_file = os.environ.get("HEALTH_STATUS_FILE")
 fail_port = os.environ.get("FAIL_PORT")
+import_state_path = pathlib.Path(
+    os.environ.get(
+        "PREVIA_IMPORT_STATE",
+        str(pathlib.Path(os.environ.get("PREVIA_HOME", ".")) / "fake-imports.json"),
+    )
+)
 
 if os.environ.get("FAIL_STARTUP") == "1":
     sys.exit(1)
 if fail_port and fail_port == str(port):
     sys.exit(1)
+
+def load_import_state():
+    if not import_state_path.exists():
+        return {"projects": {}}
+    return json.loads(import_state_path.read_text(encoding="utf-8"))
+
+def save_import_state(state):
+    import_state_path.parent.mkdir(parents=True, exist_ok=True)
+    import_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -138,6 +85,214 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        if self.path != "/api/v1/projects/import/pipelines":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        content_length = int(self.headers.get("Content-Length", "0") or "0")
+        raw_body = self.rfile.read(content_length)
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            self.respond_json(400, {
+                "error": "bad_request",
+                "message": "invalid json payload",
+            })
+            return
+
+        stack_name = str(payload.get("stackName", "")).strip()
+        pipelines = payload.get("pipelines")
+        if not stack_name:
+            self.respond_json(400, {
+                "error": "bad_request",
+                "message": "stackName is required",
+            })
+            return
+        if not isinstance(pipelines, list) or not pipelines:
+            self.respond_json(400, {
+                "error": "bad_request",
+                "message": "at least one pipeline is required",
+            })
+            return
+        for index, pipeline in enumerate(pipelines, start=1):
+            if not isinstance(pipeline, dict) or not str(pipeline.get("name", "")).strip():
+                self.respond_json(400, {
+                    "error": "bad_request",
+                    "message": f"pipeline #{index} name is required",
+                })
+                return
+
+        state = load_import_state()
+        if stack_name in state.setdefault("projects", {}):
+            self.respond_json(409, {
+                "error": "conflict",
+                "message": f"project '{stack_name}' already exists",
+            })
+            return
+
+        state["projects"][stack_name] = payload
+        save_import_state(state)
+        self.respond_json(201, {
+            "projectId": f"project-{stack_name}",
+            "stackName": stack_name,
+            "pipelinesImported": len(pipelines),
+        })
+
+    def respond_json(self, status, payload):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload).encode("utf-8"))
+
+    def log_message(self, fmt, *args):
+        return
+
+httpd = HTTPServer((address, port), Handler)
+print(f"fake binary service listening on {address}:{port} pid={os.getpid()}", flush=True)
+
+def stop(_signum, _frame):
+    httpd.shutdown()
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+httpd.serve_forever()
+PY
+"#
+    .replace("__LABEL__", label);
+
+    fs::write(path, script).expect("write fake binary");
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("chmod");
+}
+
+fn write_fake_docker(path: &Path) {
+    let script = r#"#!/bin/sh
+exec python3 -u - "$@" <<'PY'
+import json
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+import time
+
+SERVER_CODE = r"""
+import json
+import os
+import pathlib
+import signal
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+address = os.environ.get("ADDRESS", "127.0.0.1")
+port = int(os.environ.get("PORT", "0"))
+health_status = int(os.environ.get("HEALTH_STATUS", "200"))
+health_status_file = os.environ.get("HEALTH_STATUS_FILE")
+fail_port = os.environ.get("FAIL_PORT")
+import_state_path = pathlib.Path(
+    os.environ.get(
+        "PREVIA_IMPORT_STATE",
+        str(pathlib.Path(os.environ.get("PREVIA_HOME", ".")) / "fake-imports.json"),
+    )
+)
+
+if os.environ.get("FAIL_STARTUP") == "1":
+    sys.exit(1)
+if fail_port and fail_port == str(port):
+    sys.exit(1)
+
+def load_import_state():
+    if not import_state_path.exists():
+        return {"projects": {}}
+    return json.loads(import_state_path.read_text(encoding="utf-8"))
+
+def save_import_state(state):
+    import_state_path.parent.mkdir(parents=True, exist_ok=True)
+    import_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            status = health_status
+            if health_status_file and os.path.exists(health_status_file):
+                with open(health_status_file, "r", encoding="utf-8") as fh:
+                    status = int(fh.read().strip() or "200")
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(b"ok")
+        elif self.path == "/info":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"pid":1,"memoryBytes":0,"virtualMemoryBytes":0,"cpuUsagePercent":0.0}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        if self.path != "/api/v1/projects/import/pipelines":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        content_length = int(self.headers.get("Content-Length", "0") or "0")
+        raw_body = self.rfile.read(content_length)
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            self.respond_json(400, {
+                "error": "bad_request",
+                "message": "invalid json payload",
+            })
+            return
+
+        stack_name = str(payload.get("stackName", "")).strip()
+        pipelines = payload.get("pipelines")
+        if not stack_name:
+            self.respond_json(400, {
+                "error": "bad_request",
+                "message": "stackName is required",
+            })
+            return
+        if not isinstance(pipelines, list) or not pipelines:
+            self.respond_json(400, {
+                "error": "bad_request",
+                "message": "at least one pipeline is required",
+            })
+            return
+        for index, pipeline in enumerate(pipelines, start=1):
+            if not isinstance(pipeline, dict) or not str(pipeline.get("name", "")).strip():
+                self.respond_json(400, {
+                    "error": "bad_request",
+                    "message": f"pipeline #{index} name is required",
+                })
+                return
+
+        state = load_import_state()
+        if stack_name in state.setdefault("projects", {}):
+            self.respond_json(409, {
+                "error": "conflict",
+                "message": f"project '{stack_name}' already exists",
+            })
+            return
+
+        state["projects"][stack_name] = payload
+        save_import_state(state)
+        self.respond_json(201, {
+            "projectId": f"project-{stack_name}",
+            "stackName": stack_name,
+            "pipelinesImported": len(pipelines),
+        })
+
+    def respond_json(self, status, payload):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload).encode("utf-8"))
+
     def log_message(self, fmt, *args):
         return
 
@@ -154,7 +309,7 @@ httpd.serve_forever()
 
 STATE_PATH = pathlib.Path(
     os.environ.get(
-        "PREVIACTL_FAKE_DOCKER_STATE",
+        "PREVIA_FAKE_DOCKER_STATE",
         str(pathlib.Path(os.environ["PREVIA_HOME"]) / "fake-docker-state.json"),
     )
 )
@@ -173,7 +328,7 @@ def save_state(state):
 
 
 def append_log():
-    log_path = os.environ.get("PREVIACTL_DOCKER_LOG")
+    log_path = os.environ.get("PREVIA_DOCKER_LOG")
     if not log_path:
         return
     with open(log_path, "a", encoding="utf-8") as fh:
@@ -439,7 +594,7 @@ PY
 }
 
 fn cargo_bin() -> Command {
-    Command::cargo_bin("previactl").expect("previactl binary")
+    Command::cargo_bin("previa").expect("previa binary")
 }
 
 fn prepend_path(dir: &Path) -> OsString {
@@ -480,6 +635,81 @@ fn docker_env(temp: &TempDir, command: &mut Command) {
         .env("PATH", prepend_path(&temp.path().join("docker-bin")));
 }
 
+fn docker_env_with_previa_home(preview_home: &Path, docker_root: &TempDir, command: &mut Command) {
+    command
+        .env("PREVIA_HOME", preview_home)
+        .env("PATH", prepend_path(&docker_root.path().join("docker-bin")));
+}
+
+fn write_pipeline_json(path: &Path, name: &str, pipeline_id: Option<&str>) {
+    let pipeline_id = pipeline_id
+        .map(|value| format!(r#""id":"{value}","#))
+        .unwrap_or_default();
+    fs::write(
+        path,
+        format!(
+            r#"{{
+  {pipeline_id}"name":"{name}",
+  "description":"Generated by CLI test",
+  "steps":[
+    {{
+      "id":"step-1",
+      "name":"Request",
+      "method":"GET",
+      "url":"https://example.com",
+      "headers":{{}},
+      "asserts":[]
+    }}
+  ]
+}}"#
+        ),
+    )
+    .expect("write pipeline json");
+}
+
+fn write_pipeline_yaml(path: &Path, name: &str, pipeline_id: Option<&str>) {
+    let pipeline_id = pipeline_id
+        .map(|value| format!("id: {value}\n"))
+        .unwrap_or_default();
+    fs::write(
+        path,
+        format!(
+            r#"{pipeline_id}name: {name}
+description: Generated by CLI test
+steps:
+  - id: step-1
+    name: Request
+    method: GET
+    url: https://example.com
+    headers: {{}}
+    asserts: []
+"#
+        ),
+    )
+    .expect("write pipeline yaml");
+}
+
+fn read_fake_import_state(previa_home: &Path) -> serde_json::Value {
+    serde_json::from_slice(
+        &fs::read(previa_home.join("fake-imports.json")).expect("read fake import state"),
+    )
+    .expect("fake import state json")
+}
+
+fn read_generated_compose(previa_home: &Path, context: &str) -> serde_json::Value {
+    serde_json::from_slice(
+        &fs::read(
+            previa_home
+                .join("stacks")
+                .join(context)
+                .join("run")
+                .join("docker-compose.generated.yaml"),
+        )
+        .expect("read generated compose"),
+    )
+    .expect("generated compose json")
+}
+
 #[test]
 fn dry_run_rejects_detach() {
     let temp = setup_fake_docker();
@@ -489,6 +719,14 @@ fn dry_run_rejects_detach() {
         .args(["up", "--dry-run", "--detach"])
         .assert()
         .failure();
+}
+
+#[test]
+fn version_accepts_global_home_override() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut command = cargo_bin();
+    command.args(["--home", temp.path().to_str().expect("home str"), "version"]);
+    command.assert().success();
 }
 
 #[test]
@@ -533,7 +771,7 @@ fn pull_defaults_to_all_latest_without_local_binaries() {
     let mut command = cargo_bin();
     docker_env(&temp, &mut command);
     command
-        .env("PREVIACTL_DOCKER_LOG", &docker_log)
+        .env("PREVIA_DOCKER_LOG", &docker_log)
         .args(["pull"])
         .assert()
         .success();
@@ -551,7 +789,7 @@ fn pull_accepts_explicit_version_for_single_target() {
     let mut command = cargo_bin();
     docker_env(&temp, &mut command);
     command
-        .env("PREVIACTL_DOCKER_LOG", &docker_log)
+        .env("PREVIA_DOCKER_LOG", &docker_log)
         .args(["pull", "runner", "--version", "0.0.7"])
         .assert()
         .success();
@@ -624,7 +862,7 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
         "127.0.0.1",
         "-P",
         &format!("{runner_port}:{runner_port}"),
-        "-r",
+        "--runners",
         "1",
     ])
     .assert()
@@ -690,6 +928,561 @@ fn detached_lifecycle_supports_status_ps_logs_list_and_down() {
 }
 
 #[test]
+fn home_override_detached_lifecycle_uses_override_instead_of_previa_home_env() {
+    if !python3_available() {
+        return;
+    }
+
+    let docker_root = setup_fake_docker();
+    let env_home = TempDir::new().expect("env home");
+    let cli_home = TempDir::new().expect("cli home");
+    let stack = "home-override";
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env_with_previa_home(env_home.path(), &docker_root, &mut up);
+    up.args([
+        "--home",
+        cli_home.path().to_str().expect("home str"),
+        "up",
+        "--context",
+        stack,
+        "--detach",
+        "--main-address",
+        "127.0.0.1",
+        "-p",
+        &main_port.to_string(),
+        "--runner-address",
+        "127.0.0.1",
+        "-P",
+        &format!("{runner_port}:{runner_port}"),
+        "--runners",
+        "1",
+    ])
+    .assert()
+    .success();
+
+    let cli_runtime = cli_home
+        .path()
+        .join("stacks")
+        .join(stack)
+        .join("run/state.json");
+    let env_runtime = env_home
+        .path()
+        .join("stacks")
+        .join(stack)
+        .join("run/state.json");
+    assert!(cli_runtime.exists());
+    assert!(!env_runtime.exists());
+
+    let mut status = cargo_bin();
+    docker_env_with_previa_home(env_home.path(), &docker_root, &mut status);
+    let status_output = status
+        .args([
+            "--home",
+            cli_home.path().to_str().expect("home str"),
+            "status",
+            "--context",
+            stack,
+            "--json",
+        ])
+        .output()
+        .expect("status output");
+    assert!(status_output.status.success());
+    let status_json: serde_json::Value =
+        serde_json::from_slice(&status_output.stdout).expect("status json");
+    assert_eq!(
+        status_json["runtime_file"],
+        cli_runtime.display().to_string()
+    );
+
+    let mut down = cargo_bin();
+    docker_env_with_previa_home(env_home.path(), &docker_root, &mut down);
+    down.args([
+        "--home",
+        cli_home.path().to_str().expect("home str"),
+        "down",
+        "--context",
+        stack,
+    ])
+    .assert()
+    .success();
+
+    assert!(!cli_runtime.exists());
+}
+
+#[test]
+fn relative_home_override_is_resolved_from_current_directory() {
+    if !python3_available() {
+        return;
+    }
+
+    let docker_root = setup_fake_docker();
+    let cwd = TempDir::new().expect("cwd");
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env_with_previa_home(docker_root.path(), &docker_root, &mut up);
+    up.current_dir(cwd.path())
+        .args([
+            "--home",
+            "custom-home",
+            "up",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "--runners",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        cwd.path()
+            .join("custom-home")
+            .join("stacks")
+            .join("default")
+            .join("run/state.json")
+            .exists()
+    );
+}
+
+#[test]
+fn up_process_runner_auth_key_overrides_compose_and_env_files() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+    let compose = temp.path().join("previa-compose.yaml");
+    fs::write(
+        &compose,
+        r#"version: 1
+main:
+  env:
+    RUNNER_AUTH_KEY: compose-key
+runners:
+  local:
+    count: 1
+    env:
+      RUNNER_AUTH_KEY: compose-key
+"#,
+    )
+    .expect("write compose");
+
+    let stack_config_dir = temp.path().join("stacks/default/config");
+    fs::create_dir_all(&stack_config_dir).expect("stack config dir");
+    fs::write(
+        stack_config_dir.join("main.env"),
+        "RUNNER_AUTH_KEY=env-file-key\nRUST_LOG=info\n",
+    )
+    .expect("main env");
+    fs::write(
+        stack_config_dir.join("runner.env"),
+        "RUNNER_AUTH_KEY=env-file-key\nRUST_LOG=info\n",
+    )
+    .expect("runner env");
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    command
+        .env("RUNNER_AUTH_KEY", "process-key")
+        .args([
+            "up",
+            "--detach",
+            "-p",
+            &main_port.to_string(),
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            compose.to_str().expect("compose path"),
+        ])
+        .assert()
+        .success();
+
+    let generated = read_generated_compose(temp.path(), "default");
+    assert_eq!(
+        generated["services"]["main"]["environment"]["RUNNER_AUTH_KEY"],
+        "process-key"
+    );
+    assert_eq!(
+        generated["services"][format!("runner-{runner_port}")]["environment"]["RUNNER_AUTH_KEY"],
+        "process-key"
+    );
+}
+
+#[test]
+fn up_import_requires_stack_name() {
+    let temp = setup_fake_docker();
+    let pipeline = temp.path().join("single.previa.json");
+    write_pipeline_json(&pipeline, "single-pipeline", None);
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "up",
+            "--detach",
+            "--import",
+            pipeline.to_str().expect("pipeline path"),
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("--stack is required when using --import"));
+}
+
+#[test]
+fn up_recursive_requires_import_flag() {
+    let temp = setup_fake_docker();
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args(["up", "--detach", "--recursive"])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("--recursive requires --import"));
+}
+
+#[test]
+fn up_import_directory_requires_recursive_mode() {
+    let temp = setup_fake_docker();
+    let import_dir = temp.path().join("pipelines");
+    fs::create_dir_all(&import_dir).expect("import dir");
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "up",
+            "--detach",
+            "--import",
+            import_dir.to_str().expect("dir path"),
+            "--stack",
+            "imported-stack",
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("--import requires a file path unless --recursive is used"));
+}
+
+#[test]
+fn up_recursive_requires_directory_import_path() {
+    let temp = setup_fake_docker();
+    let pipeline = temp.path().join("single.previa.json");
+    write_pipeline_json(&pipeline, "single-pipeline", None);
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "up",
+            "--detach",
+            "--import",
+            pipeline.to_str().expect("pipeline path"),
+            "--recursive",
+            "--stack",
+            "imported-stack",
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("--recursive requires --import to point to a directory"));
+}
+
+#[test]
+fn detached_up_imports_single_pipeline_file() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "import-single";
+    let pipeline = temp.path().join("single.previa.json");
+    write_pipeline_json(&pipeline, "single-pipeline", Some("pipe-single"));
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env(&temp, &mut up);
+    let output = up
+        .args([
+            "up",
+            "--context",
+            stack,
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "--runners",
+            "1",
+            "--import",
+            pipeline.to_str().expect("pipeline path"),
+            "--stack",
+            "my_new_stack",
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("imported 1 pipeline(s) into stack 'my_new_stack'"));
+
+    let state = read_fake_import_state(temp.path());
+    assert_eq!(
+        state["projects"]["my_new_stack"]["stackName"],
+        "my_new_stack"
+    );
+    assert_eq!(
+        state["projects"]["my_new_stack"]["pipelines"][0]["id"],
+        "pipe-single"
+    );
+    assert_eq!(
+        state["projects"]["my_new_stack"]["pipelines"][0]["name"],
+        "single-pipeline"
+    );
+    assert!(
+        temp.path()
+            .join("stacks")
+            .join(stack)
+            .join("run/state.json")
+            .exists()
+    );
+}
+
+#[test]
+fn detached_up_recursive_imports_matching_pipeline_files_only() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "import-recursive";
+    let import_dir = temp.path().join("pipelines");
+    fs::create_dir_all(import_dir.join("nested")).expect("nested dir");
+    write_pipeline_json(
+        &import_dir.join("alpha.previa.json"),
+        "alpha-pipeline",
+        Some("pipe-alpha"),
+    );
+    write_pipeline_yaml(
+        &import_dir.join("nested/beta.previa.yaml"),
+        "beta-pipeline",
+        Some("pipe-beta"),
+    );
+    write_pipeline_json(
+        &import_dir.join("nested/gamma.previa"),
+        "gamma-pipeline",
+        Some("pipe-gamma"),
+    );
+    fs::write(
+        import_dir.join("ignored.json"),
+        r#"{"name":"ignored","steps":[]}"#,
+    )
+    .expect("ignored file");
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env(&temp, &mut up);
+    let output = up
+        .args([
+            "up",
+            "--context",
+            stack,
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "--runners",
+            "1",
+            "-i",
+            import_dir.to_str().expect("import dir"),
+            "-r",
+            "-s",
+            "recursive_stack",
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(output.status.success());
+    let state = read_fake_import_state(temp.path());
+    let pipelines = state["projects"]["recursive_stack"]["pipelines"]
+        .as_array()
+        .expect("pipeline array");
+    assert_eq!(pipelines.len(), 3);
+    assert_eq!(pipelines[0]["name"], "alpha-pipeline");
+    assert_eq!(pipelines[1]["name"], "beta-pipeline");
+    assert_eq!(pipelines[2]["name"], "gamma-pipeline");
+}
+
+#[test]
+fn detached_up_recursive_import_fails_for_invalid_matching_file_and_keeps_runtime() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "import-invalid";
+    let import_dir = temp.path().join("pipelines");
+    fs::create_dir_all(&import_dir).expect("import dir");
+    write_pipeline_json(
+        &import_dir.join("valid.previa.json"),
+        "valid-pipeline",
+        Some("pipe-valid"),
+    );
+    fs::write(import_dir.join("broken.previa.yaml"), "name: [").expect("broken file");
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env(&temp, &mut up);
+    let output = up
+        .args([
+            "up",
+            "--context",
+            stack,
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "--runners",
+            "1",
+            "--import",
+            import_dir.to_str().expect("import dir"),
+            "--recursive",
+            "--stack",
+            "broken_stack",
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("broken.previa.yaml"));
+    assert!(
+        temp.path()
+            .join("stacks")
+            .join(stack)
+            .join("run/state.json")
+            .exists()
+    );
+}
+
+#[test]
+fn detached_up_import_stack_conflict_keeps_runtime_running() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let pipeline = temp.path().join("single.previa.json");
+    write_pipeline_json(&pipeline, "conflict-pipeline", Some("pipe-conflict"));
+
+    let first_main_port = find_free_port();
+    let first_runner_port = find_free_port();
+    let mut first = cargo_bin();
+    docker_env(&temp, &mut first);
+    first
+        .args([
+            "up",
+            "--context",
+            "import-one",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &first_main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{first_runner_port}:{first_runner_port}"),
+            "--runners",
+            "1",
+            "--import",
+            pipeline.to_str().expect("pipeline path"),
+            "--stack",
+            "shared_stack",
+        ])
+        .assert()
+        .success();
+
+    let second_main_port = find_free_port();
+    let second_runner_port = find_free_port();
+    let mut second = cargo_bin();
+    docker_env(&temp, &mut second);
+    let output = second
+        .args([
+            "up",
+            "--context",
+            "import-two",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &second_main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{second_runner_port}:{second_runner_port}"),
+            "--runners",
+            "1",
+            "--import",
+            pipeline.to_str().expect("pipeline path"),
+            "--stack",
+            "shared_stack",
+        ])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("project 'shared_stack' already exists"));
+    assert!(
+        temp.path()
+            .join("stacks")
+            .join("import-two")
+            .join("run/state.json")
+            .exists()
+    );
+}
+
+#[test]
 fn detached_binary_lifecycle_supports_status_ps_logs_restart_and_down() {
     if !python3_available() {
         return;
@@ -717,7 +1510,7 @@ fn detached_binary_lifecycle_supports_status_ps_logs_restart_and_down() {
         "127.0.0.1",
         "-P",
         &format!("{runner_port}:{runner_port}"),
-        "-r",
+        "--runners",
         "1",
     ])
     .assert()
@@ -830,7 +1623,7 @@ fn down_runner_removes_selected_runner_and_rewrites_runtime() {
         "127.0.0.1",
         "-P",
         &format!("{runner_start}:{runner_end}"),
-        "-r",
+        "--runners",
         "2",
     ])
     .assert()
@@ -900,7 +1693,7 @@ fn restart_allows_overriding_image_tag() {
         "127.0.0.1",
         "-P",
         &format!("{runner_port}:{runner_port}"),
-        "-r",
+        "--runners",
         "1",
     ])
     .assert()
@@ -962,7 +1755,7 @@ fn up_fails_early_when_context_is_already_running() {
             "127.0.0.1",
             "-P",
             &format!("{runner_port}:{runner_port}"),
-            "-r",
+            "--runners",
             "1",
         ])
         .assert()
@@ -1015,7 +1808,7 @@ fn down_all_context_stops_every_detached_context() {
             "127.0.0.1",
             "-P",
             &format!("{alpha_runner_port}:{alpha_runner_port}"),
-            "-r",
+            "--runners",
             "1",
         ])
         .assert()
@@ -1036,7 +1829,7 @@ fn down_all_context_stops_every_detached_context() {
         "127.0.0.1",
         "-P",
         &format!("{beta_runner_port}:{beta_runner_port}"),
-        "-r",
+        "--runners",
         "1",
     ])
     .assert()
@@ -1076,7 +1869,7 @@ fn logs_supports_tail_count() {
         "127.0.0.1",
         "-P",
         &format!("{runner_port}:{runner_port}"),
-        "-r",
+        "--runners",
         "1",
     ])
     .assert()
@@ -1222,7 +2015,7 @@ fn status_reports_degraded_when_health_is_not_200() {
         "127.0.0.1",
         "-P",
         &format!("{runner_port}:{runner_port}"),
-        "-r",
+        "--runners",
         "1",
     ])
     .assert()
@@ -1347,7 +2140,7 @@ fn up_leaves_no_runtime_state_when_compose_startup_fails() {
             "127.0.0.1",
             "-P",
             &format!("{runner_port}:{failing_runner_port}"),
-            "-r",
+            "--runners",
             "2",
         ])
         .output()
@@ -1408,8 +2201,8 @@ fn open_launches_app_with_encoded_main_context_url() {
     let mut command = cargo_bin();
     docker_env(&temp, &mut command);
     let output = command
-        .env("PREVIACTL_OPEN_BROWSER", &browser)
-        .env("PREVIACTL_OPEN_CAPTURE", &capture)
+        .env("PREVIA_OPEN_BROWSER", &browser)
+        .env("PREVIA_OPEN_CAPTURE", &capture)
         .args(["open", "--context", stack])
         .output()
         .expect("open output");

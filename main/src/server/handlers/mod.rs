@@ -7,5 +7,6 @@ pub mod projects;
 pub mod proxy;
 pub mod specs;
 pub mod tests_e2e;
+pub mod tests_e2e_queue;
 pub mod tests_load;
 pub mod transfers;

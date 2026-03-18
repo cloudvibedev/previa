@@ -83,12 +83,32 @@ fn headers_to_map(headers: &axum::http::HeaderMap) -> HashMap<String, String> {
     headers
         .iter()
         .map(|(k, v)| {
-            (
-                k.as_str().to_owned(),
-                v.to_str().unwrap_or("<non-utf8>").to_owned(),
-            )
+            let value = if k.as_str().eq_ignore_ascii_case("authorization") {
+                "<redacted>".to_owned()
+            } else {
+                v.to_str().unwrap_or("<non-utf8>").to_owned()
+            };
+            (k.as_str().to_owned(), value)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderMap, HeaderValue};
+
+    use super::headers_to_map;
+
+    #[test]
+    fn redacts_authorization_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("secret"));
+        let map = headers_to_map(&headers);
+        assert_eq!(
+            map.get("authorization").map(String::as_str),
+            Some("<redacted>")
+        );
+    }
 }
 
 fn bytes_to_log_body(bytes: &axum::body::Bytes) -> Value {

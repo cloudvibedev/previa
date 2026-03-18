@@ -25,14 +25,17 @@ pub struct StackPaths {
 }
 
 impl PreviaPaths {
-    pub fn discover() -> Result<Self> {
-        let home = match env::var("PREVIA_HOME") {
-            Ok(value) => absolutize(PathBuf::from(value))?,
-            Err(_) => {
-                let user_home =
-                    env::var("HOME").context("HOME is not set and PREVIA_HOME is unset")?;
-                absolutize(PathBuf::from(user_home).join(".previa"))?
-            }
+    pub fn discover(home_override: Option<&Path>) -> Result<Self> {
+        let home = match home_override {
+            Some(path) => absolutize(path.to_path_buf())?,
+            None => match env::var("PREVIA_HOME") {
+                Ok(value) => absolutize(PathBuf::from(value))?,
+                Err(_) => {
+                    let user_home =
+                        env::var("HOME").context("HOME is not set and PREVIA_HOME is unset")?;
+                    absolutize(PathBuf::from(user_home).join(".previa"))?
+                }
+            },
         };
 
         Ok(Self { home })

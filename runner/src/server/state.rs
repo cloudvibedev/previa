@@ -7,4 +7,5 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone, Default)]
 pub struct AppState {
     pub executions: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    pub runner_auth_key: Option<String>,
 }

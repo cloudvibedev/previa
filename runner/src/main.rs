@@ -7,7 +7,16 @@ use crate::server::build_app;
 use crate::server::state::AppState;
 
 fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
-    args.into_iter().skip(1).any(|arg| arg == "--version" || arg == "-v")
+    args.into_iter()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-v")
+}
+
+fn optional_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 #[tokio::main]
@@ -23,7 +32,10 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let state = AppState::default();
+    let state = AppState {
+        runner_auth_key: optional_env("RUNNER_AUTH_KEY"),
+        ..AppState::default()
+    };
     let address = std::env::var("ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_owned());
     let port = std::env::var("PORT")
         .ok()

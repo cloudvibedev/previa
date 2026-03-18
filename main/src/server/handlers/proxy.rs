@@ -136,7 +136,7 @@ async fn forward_proxy_request(state: &AppState, payload: ProxyRequest) -> Respo
     let mut proxy_response = Response::builder().status(status);
     if let Some(headers) = proxy_response.headers_mut() {
         for (name, value) in &upstream_headers {
-            if name == CONTENT_LENGTH {
+            if !should_forward_response_header(name, value) {
                 continue;
             }
             headers.append(name.clone(), value.clone());
@@ -146,6 +146,37 @@ async fn forward_proxy_request(state: &AppState, payload: ProxyRequest) -> Respo
     proxy_response
         .body(Body::from(bytes))
         .unwrap_or_else(|_| internal_error_response("failed to build proxy response".to_owned()))
+}
+
+fn should_forward_response_header(name: &HeaderName, value: &HeaderValue) -> bool {
+    if name == CONTENT_LENGTH {
+        return false;
+    }
+
+    if matches!(
+        name.as_str(),
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+            | "alt-svc"
+            | "nel"
+            | "report-to"
+            | "server-timing"
+    ) {
+        return false;
+    }
+
+    // Keep the proxied response compatible with the local HTTP/1 writer even if
+    // the upstream sent opaque bytes that reqwest accepted internally.
+    value
+        .as_bytes()
+        .iter()
+        .all(|byte| *byte == b'\t' || *byte == b' ' || (0x21..=0x7e).contains(byte))
 }
 
 fn stream_sse_response(response: reqwest::Response) -> Response {
@@ -224,4 +255,51 @@ fn render_proxy_payload(payload: ProxyRequest) -> Result<ProxyRequest, String> {
     let rendered = render_template_value_simple(&value);
     serde_json::from_value(rendered)
         .map_err(|err| format!("failed to parse rendered proxy payload: {}", err))
+}
+
+#[cfg(test)]
+mod tests {
+    use reqwest::header::{HeaderName, HeaderValue};
+
+    use super::should_forward_response_header;
+
+    #[test]
+    fn proxy_response_filter_drops_hop_by_hop_and_infra_headers() {
+        for header in [
+            "content-length",
+            "connection",
+            "transfer-encoding",
+            "alt-svc",
+            "nel",
+            "report-to",
+            "server-timing",
+        ] {
+            let name = HeaderName::from_static(header);
+            let value = HeaderValue::from_static("test");
+            assert!(
+                !should_forward_response_header(&name, &value),
+                "header {header} should be filtered"
+            );
+        }
+    }
+
+    #[test]
+    fn proxy_response_filter_keeps_regular_response_headers() {
+        for header in ["content-type", "cache-control", "etag", "x-request-id"] {
+            let name = HeaderName::from_bytes(header.as_bytes()).expect("header name");
+            let value = HeaderValue::from_static("test");
+            assert!(
+                should_forward_response_header(&name, &value),
+                "header {header} should be forwarded"
+            );
+        }
+    }
+
+    #[test]
+    fn proxy_response_filter_drops_non_visible_ascii_values() {
+        let name = HeaderName::from_static("x-upstream-meta");
+        let value = HeaderValue::from_bytes(b"ok\x80").expect("header value");
+
+        assert!(!should_forward_response_header(&name, &value));
+    }
 }

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 fn parse_tail_lines(value: &str) -> Result<usize, String> {
@@ -12,11 +14,13 @@ fn parse_tail_lines(value: &str) -> Result<usize, String> {
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "previactl",
+    name = "previa",
     version,
     about = "CLI local para operar contexts do Previa"
 )]
 pub struct Cli {
+    #[arg(long, global = true, value_name = "PATH")]
+    pub home: Option<PathBuf>,
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -68,8 +72,14 @@ pub struct UpArgs {
     pub runner_address: Option<String>,
     #[arg(short = 'P', long = "runner-port-range")]
     pub runner_port_range: Option<String>,
-    #[arg(short = 'r', long)]
+    #[arg(long)]
     pub runners: Option<usize>,
+    #[arg(short = 'i', long = "import", value_name = "PATH")]
+    pub import_path: Option<String>,
+    #[arg(short = 'r', long)]
+    pub recursive: bool,
+    #[arg(short = 's', long = "stack", value_name = "STACK")]
+    pub stack: Option<String>,
     #[arg(short = 'a', long = "attach-runner")]
     pub attach_runners: Vec<String>,
     #[arg(long)]

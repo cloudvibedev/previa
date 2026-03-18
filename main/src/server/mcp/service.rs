@@ -1,30 +1,56 @@
+use std::time::Duration;
+
 use previa_runner::Pipeline;
+use reqwest::Method;
+use reqwest::header::{CONTENT_TYPE, HeaderName, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
+use tokio::time::timeout;
+use tokio_stream::StreamExt;
 use tracing::info;
 
 use crate::server::db::{
-    delete_pipeline_record, insert_project_pipeline, list_e2e_history_records,
+    delete_pipeline_record, delete_project_spec_record, import_project_bundle,
+    insert_project_pipeline, insert_project_spec_record, list_e2e_history_records,
     list_load_history_records, list_project_records, list_project_spec_records,
-    load_e2e_history_record_by_id, load_load_history_record_by_id, load_pipelines_for_project,
-    load_project_pipeline_record, load_project_record, project_exists, update_project_pipeline,
+    load_e2e_history_for_export, load_e2e_history_record_by_id, load_load_history_for_export,
+    load_load_history_record_by_id, load_pipelines_for_project, load_project_export,
+    load_project_pipeline_record, load_project_record, load_project_spec_record_by_id,
+    project_exists, update_project_pipeline, update_project_spec_record, upsert_project_metadata,
+    upsert_project_with_pipelines,
 };
 use crate::server::docs::build_openapi_document;
 use crate::server::execution::collect_runner_statuses;
-use crate::server::execution::resolve_runtime_specs_for_execution;
-use crate::server::mcp::models::{
-    CreateProjectPipelineArgs, InitializeParams, ListProjectsToolArgs, McpPeerInfo, McpRequest,
-    McpResponse, McpSession, ProjectByIdArgs, ProjectHistoryToolArgs, ProjectPipelineByIdArgs,
-    ProjectTestByIdArgs, PromptDefinition, PromptGetParams, PromptGetResult, PromptMessage,
-    PromptTextContent, PromptsListParams, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams,
-    ToolCallResult, ToolDefinition, ToolTextContent, ToolsListParams, UpdateProjectPipelineArgs,
-    ValidateOpenApiToolArgs,
+use crate::server::execution::e2e_queue::{
+    QueueError, cancel_e2e_queue, create_e2e_queue, get_current_e2e_queue_snapshot,
+    get_e2e_queue_snapshot,
 };
-use crate::server::models::{HistoryQuery, OrchestratorInfoResponse, ProjectListQuery};
-use crate::server::state::AppState;
-use crate::server::utils::new_uuid_v7;
+use crate::server::execution::forward::parse_sse_block;
+use crate::server::execution::{
+    StartE2eExecutionError, StartLoadExecutionError, resolve_runtime_specs_for_execution,
+    start_e2e_execution, start_load_execution,
+};
+use crate::server::mcp::models::{
+    CreateProjectArgs, CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, CreateProjectSpecArgs,
+    ExecutionByIdArgs, ExecutionCancelArgs, ExportProjectArgs, ImportProjectArgs, InitializeParams,
+    ListProjectsToolArgs, McpPeerInfo, McpRequest, McpResponse, McpSession, ProjectByIdArgs,
+    ProjectHistoryToolArgs, ProjectPipelineByIdArgs, ProjectQueueByIdArgs, ProjectSpecByIdArgs,
+    ProjectTestByIdArgs, PromptDefinition, PromptGetParams, PromptGetResult, PromptMessage,
+    PromptTextContent, PromptsListParams, ProxyToolArgs, RunProjectE2eTestArgs,
+    RunProjectLoadTestArgs, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult,
+    ToolDefinition, ToolTextContent, ToolsListParams, UpdateProjectArgs, UpdateProjectPipelineArgs,
+    UpdateProjectSpecArgs, ValidateOpenApiToolArgs,
+};
+use crate::server::models::{
+    E2eTestRequest, HistoryQuery, LoadTestRequest, OrchestratorInfoResponse,
+    ProjectE2eQueueRequest, ProjectExportEnvelope, ProjectListQuery, ProxyRequest,
+};
+use crate::server::services::pipeline_runtime::build_project_pipeline_record;
+use crate::server::state::{AppState, ExecutionKind};
+use crate::server::utils::{new_uuid_v7, now_iso};
 use crate::server::validation::openapi::validate_openapi_source;
 use crate::server::validation::pipelines::{KNOWN_TEMPLATE_HELPERS, validate_pipeline_templates};
+use crate::server::validation::specs::{normalize_spec_slug, normalize_spec_urls_with_legacy};
 
 const INVALID_REQUEST: i32 = -32600;
 const METHOD_NOT_FOUND: i32 = -32601;
@@ -331,7 +357,7 @@ async fn handle_initialize(
                     title: Some("Previa Main MCP".to_owned()),
                     version: env!("CARGO_PKG_VERSION").to_owned(),
                 },
-                "instructions": "Use the available tools to inspect orchestrator health, projects, pipelines, OpenAPI specs, and to validate OpenAPI source content. Use the available prompts when you need operational guidance for creating pipelines, reviewing executed tests, and proposing step fixes."
+                "instructions": "Use the available tools to inspect orchestrator health, projects, pipelines, execution history, queues, OpenAPI specs, and live HTTP behavior. Use the available prompts when you need guidance for project onboarding, pipeline authoring, failure triage, step repair planning, OpenAPI ingestion, load-test design, queue operations, safe reviews, migrations, and spec-driven pipeline bootstrapping."
             }),
         ),
         session_id: Some(session_id),
@@ -380,7 +406,12 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
     match params.name.as_str() {
         "health" => Ok(tool_success(json!({ "status": "ok" }))),
         "get_info" => {
-            let runners = collect_runner_statuses(&state.client, &state.runner_endpoints).await;
+            let runners = collect_runner_statuses(
+                &state.client,
+                &state.runner_endpoints,
+                state.runner_auth_key.as_deref(),
+            )
+            .await;
             let payload = OrchestratorInfoResponse {
                 context: state.context_name.clone(),
                 total_runners: runners.len(),
@@ -421,6 +452,117 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                     args.project_id
                 ))),
             }
+        }
+        "create_project" => {
+            let args = parse_tool_arguments::<CreateProjectArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            if args.project.name.trim().is_empty() {
+                return Ok(tool_error("project name is required".to_owned()));
+            }
+            let project = upsert_project_with_pipelines(&state.db, new_uuid_v7(), args.project)
+                .await
+                .map_err(|err| format!("failed to create project: {err}"))?;
+            Ok(tool_success(serde_json::to_value(project).unwrap()))
+        }
+        "update_project" => {
+            let args = parse_tool_arguments::<UpdateProjectArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            if args.project.name.trim().is_empty() {
+                return Ok(tool_error("project name is required".to_owned()));
+            }
+            let project = upsert_project_metadata(&state.db, args.project_id, args.project)
+                .await
+                .map_err(|err| format!("failed to update project: {err}"))?;
+            Ok(tool_success(serde_json::to_value(project).unwrap()))
+        }
+        "delete_project" => {
+            let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let deleted = sqlx::query("DELETE FROM projects WHERE id = ?")
+                .bind(&args.project_id)
+                .execute(&state.db)
+                .await
+                .map_err(|err| format!("failed to delete project: {err}"))?
+                .rows_affected()
+                > 0;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "project '{}' not found",
+                    args.project_id
+                )))
+            }
+        }
+        "export_project" => {
+            let args = parse_tool_arguments::<ExportProjectArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let project_id = args.project_id.trim();
+            if project_id.is_empty() {
+                return Ok(tool_error("projectId cannot be empty".to_owned()));
+            }
+
+            let include_history = args.include_history.unwrap_or(true);
+            let mut project = match load_project_export(&state.db, project_id)
+                .await
+                .map_err(|err| format!("failed to load project export: {err}"))?
+            {
+                Some(project) => project,
+                None => return Ok(tool_error(format!("project '{}' not found", project_id))),
+            };
+
+            if include_history {
+                project.history.e2e = load_e2e_history_for_export(&state.db, project_id)
+                    .await
+                    .map_err(|err| format!("failed to load e2e history export: {err}"))?;
+                project.history.load = load_load_history_for_export(&state.db, project_id)
+                    .await
+                    .map_err(|err| format!("failed to load load history export: {err}"))?;
+            }
+
+            Ok(tool_success(
+                serde_json::to_value(ProjectExportEnvelope {
+                    format: "previa.project.export.v1".to_owned(),
+                    exported_at: now_iso(),
+                    history_included: include_history,
+                    project,
+                })
+                .unwrap(),
+            ))
+        }
+        "import_project" => {
+            let args = parse_tool_arguments::<ImportProjectArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let mut bundle = args.bundle;
+            if bundle.format != "previa.project.export.v1" {
+                return Ok(tool_error("invalid import format".to_owned()));
+            }
+            bundle.project.id = bundle.project.id.trim().to_owned();
+            bundle.project.name = bundle.project.name.trim().to_owned();
+            if bundle.project.id.is_empty() {
+                return Ok(tool_error("project.id is required".to_owned()));
+            }
+            if bundle.project.name.is_empty() {
+                return Ok(tool_error("project.name is required".to_owned()));
+            }
+            if project_exists(&state.db, &bundle.project.id)
+                .await
+                .map_err(|err| format!("failed to load project: {err}"))?
+            {
+                return Ok(tool_error("project already exists".to_owned()));
+            }
+
+            let imported = import_project_bundle(
+                &state.db,
+                &bundle.project,
+                args.include_history.unwrap_or(true),
+            )
+            .await
+            .map_err(|err| format!("failed to import project: {err}"))?;
+            Ok(tool_success(serde_json::to_value(imported).unwrap()))
         }
         "list_project_pipelines" => {
             let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
@@ -536,7 +678,12 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                     .await
                     .map_err(|err| format!("failed to load project pipeline: {err}"))?;
             match pipeline {
-                Some(pipeline) => Ok(tool_success(serde_json::to_value(pipeline).unwrap())),
+                Some(pipeline) => Ok(tool_success(
+                    serde_json::to_value(
+                        build_project_pipeline_record(state, &args.project_id, pipeline).await,
+                    )
+                    .unwrap(),
+                )),
                 None => Ok(tool_error(format!(
                     "pipeline '{}' not found in project '{}'",
                     args.pipeline_id, args.project_id
@@ -653,6 +800,282 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
                 .map_err(|err| format!("failed to list project specs: {err}"))?;
             Ok(tool_success(serde_json::to_value(specs).unwrap()))
         }
+        "get_project_spec" => {
+            let args = parse_tool_arguments::<ProjectSpecByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            match load_project_spec_record_by_id(&state.db, &args.project_id, &args.spec_id)
+                .await
+                .map_err(|err| format!("failed to load project spec: {err}"))?
+            {
+                Some(spec) => Ok(tool_success(serde_json::to_value(spec).unwrap())),
+                None => Ok(tool_error(format!(
+                    "project spec '{}' not found in project '{}'",
+                    args.spec_id, args.project_id
+                ))),
+            }
+        }
+        "create_project_spec" => {
+            let args = parse_tool_arguments::<CreateProjectSpecArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let payload = normalize_project_spec_payload(args.spec)?;
+            let spec = insert_project_spec_record(&state.db, &args.project_id, payload)
+                .await
+                .map_err(|err| format!("failed to create project spec: {err}"))?;
+            Ok(tool_success(serde_json::to_value(spec).unwrap()))
+        }
+        "update_project_spec" => {
+            let args = parse_tool_arguments::<UpdateProjectSpecArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let payload = normalize_project_spec_payload(args.spec)?;
+            match update_project_spec_record(&state.db, &args.project_id, &args.spec_id, payload)
+                .await
+                .map_err(|err| format!("failed to update project spec: {err}"))?
+            {
+                Some(spec) => Ok(tool_success(serde_json::to_value(spec).unwrap())),
+                None => Ok(tool_error(format!(
+                    "project spec '{}' not found in project '{}'",
+                    args.spec_id, args.project_id
+                ))),
+            }
+        }
+        "delete_project_spec" => {
+            let args = parse_tool_arguments::<ProjectSpecByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = delete_project_spec_record(&state.db, &args.project_id, &args.spec_id)
+                .await
+                .map_err(|err| format!("failed to delete project spec: {err}"))?;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "specId": args.spec_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "project spec '{}' not found in project '{}'",
+                    args.spec_id, args.project_id
+                )))
+            }
+        }
+        "create_project_e2e_queue" => {
+            let args = parse_tool_arguments::<CreateProjectE2eQueueArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+
+            match create_e2e_queue(
+                state.clone(),
+                args.project_id,
+                ProjectE2eQueueRequest {
+                    pipeline_ids: args.pipeline_ids,
+                    selected_base_url_key: args.selected_base_url_key,
+                    specs: args.specs,
+                },
+            )
+            .await
+            {
+                Ok(snapshot) => Ok(tool_success(serde_json::to_value(snapshot).unwrap())),
+                Err(err) => queue_tool_outcome(err),
+            }
+        }
+        "get_current_project_e2e_queue" => {
+            let args = parse_tool_arguments::<ProjectByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+
+            match get_current_e2e_queue_snapshot(state, &args.project_id).await {
+                Ok(snapshot) => Ok(tool_success(serde_json::to_value(snapshot).unwrap())),
+                Err(err) => queue_tool_outcome(err),
+            }
+        }
+        "get_project_e2e_queue" => {
+            let args = parse_tool_arguments::<ProjectQueueByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+
+            match get_e2e_queue_snapshot(state, &args.project_id, &args.queue_id).await {
+                Ok(Some(snapshot)) => Ok(tool_success(serde_json::to_value(snapshot).unwrap())),
+                Ok(None) => Ok(tool_error(format!(
+                    "e2e queue '{}' not found in project '{}'",
+                    args.queue_id, args.project_id
+                ))),
+                Err(err) => queue_tool_outcome(err),
+            }
+        }
+        "cancel_project_e2e_queue" => {
+            let args = parse_tool_arguments::<ProjectQueueByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+
+            match cancel_e2e_queue(
+                state.clone(),
+                args.project_id.clone(),
+                args.queue_id.clone(),
+            )
+            .await
+            {
+                Ok(()) => Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "queueId": args.queue_id,
+                    "cancelled": true
+                }))),
+                Err(err) => queue_tool_outcome(err),
+            }
+        }
+        "run_project_e2e_test" => {
+            let args = parse_tool_arguments::<RunProjectE2eTestArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let transaction_id = args.transaction_id.clone();
+            let payload = resolve_project_e2e_request(state, args).await?;
+            match start_e2e_execution(state.clone(), payload, transaction_id).await {
+                Ok(started) => Ok(tool_success(
+                    execution_started_payload(state, &started.execution_id, "e2e").await,
+                )),
+                Err(err) => execution_start_tool_outcome(err),
+            }
+        }
+        "run_project_load_test" => {
+            let args = parse_tool_arguments::<RunProjectLoadTestArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let transaction_id = args.transaction_id.clone();
+            let payload = resolve_project_load_request(state, args).await?;
+            match start_load_execution(state.clone(), payload, transaction_id).await {
+                Ok(started) => Ok(tool_success(
+                    execution_started_payload(state, &started.execution_id, "load").await,
+                )),
+                Err(err) => load_execution_start_tool_outcome(err),
+            }
+        }
+        "get_execution" => {
+            let args = parse_tool_arguments::<ExecutionByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            match execution_snapshot(state, &args.project_id, &args.execution_id).await? {
+                Some(snapshot) => Ok(tool_success(snapshot)),
+                None => Ok(tool_error(format!(
+                    "execution '{}' not found in project '{}'",
+                    args.execution_id, args.project_id
+                ))),
+            }
+        }
+        "cancel_execution" => {
+            let args = parse_tool_arguments::<ExecutionCancelArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            match cancel_execution_payload(state, &args.execution_id).await? {
+                Some(payload) => Ok(tool_success(payload)),
+                None => Ok(tool_error(
+                    "execution not found or already finished".to_owned(),
+                )),
+            }
+        }
+        "delete_e2e_history" => {
+            let args = parse_tool_arguments::<ProjectHistoryToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = delete_history_rows(
+                &state.db,
+                "integration_history",
+                &args.project_id,
+                args.pipeline_index,
+            )
+            .await?;
+            Ok(tool_success(json!({
+                "projectId": args.project_id,
+                "pipelineIndex": args.pipeline_index,
+                "deleted": true,
+                "rowsAffected": deleted
+            })))
+        }
+        "delete_e2e_test" => {
+            let args = parse_tool_arguments::<ProjectTestByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = sqlx::query(
+                "DELETE FROM integration_history WHERE project_id = ? AND (id = ? OR execution_id = ?)",
+            )
+            .bind(&args.project_id)
+            .bind(&args.test_id)
+            .bind(&args.test_id)
+            .execute(&state.db)
+            .await
+            .map_err(|err| format!("failed to delete e2e history record: {err}"))?
+            .rows_affected()
+                > 0;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "testId": args.test_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "e2e test '{}' not found in project '{}'",
+                    args.test_id, args.project_id
+                )))
+            }
+        }
+        "delete_load_history" => {
+            let args = parse_tool_arguments::<ProjectHistoryToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = delete_history_rows(
+                &state.db,
+                "load_history",
+                &args.project_id,
+                args.pipeline_index,
+            )
+            .await?;
+            Ok(tool_success(json!({
+                "projectId": args.project_id,
+                "pipelineIndex": args.pipeline_index,
+                "deleted": true,
+                "rowsAffected": deleted
+            })))
+        }
+        "delete_load_test" => {
+            let args = parse_tool_arguments::<ProjectTestByIdArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            ensure_project_exists(state, &args.project_id).await?;
+            let deleted = sqlx::query(
+                "DELETE FROM load_history WHERE project_id = ? AND (id = ? OR execution_id = ?)",
+            )
+            .bind(&args.project_id)
+            .bind(&args.test_id)
+            .bind(&args.test_id)
+            .execute(&state.db)
+            .await
+            .map_err(|err| format!("failed to delete load history record: {err}"))?
+            .rows_affected()
+                > 0;
+            if deleted {
+                Ok(tool_success(json!({
+                    "projectId": args.project_id,
+                    "testId": args.test_id,
+                    "deleted": true
+                })))
+            } else {
+                Ok(tool_error(format!(
+                    "load test '{}' not found in project '{}'",
+                    args.test_id, args.project_id
+                )))
+            }
+        }
+        "proxy_request" => {
+            let args = parse_tool_arguments::<ProxyToolArgs>(params.arguments)?;
+            let _ = args.meta.as_ref();
+            let payload = render_proxy_request(args.request)?;
+            let result = proxy_tool_request(
+                state,
+                payload,
+                args.max_events.unwrap_or(50),
+                args.timeout_ms.unwrap_or(5_000),
+            )
+            .await?;
+            Ok(tool_success(result))
+        }
         "validate_openapi" => {
             let args = parse_tool_arguments::<ValidateOpenApiToolArgs>(params.arguments)?;
             let _ = args.meta.as_ref();
@@ -759,6 +1182,69 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "create_project".to_owned(),
+            title: Some("Create Project".to_owned()),
+            description: "Creates a project with optional pipelines.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["project"],
+                "properties": {
+                    "project": { "type": "object" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "update_project".to_owned(),
+            title: Some("Update Project".to_owned()),
+            description: "Updates project metadata by id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "project"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "project": { "type": "object" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_project".to_owned(),
+            title: Some("Delete Project".to_owned()),
+            description: "Deletes a project by id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "export_project".to_owned(),
+            title: Some("Export Project".to_owned()),
+            description: "Exports a project bundle, optionally including history.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "includeHistory": { "type": "boolean" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "import_project".to_owned(),
+            title: Some("Import Project".to_owned()),
+            description: "Imports a project bundle.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["bundle"],
+                "properties": {
+                    "bundle": { "type": "object" },
+                    "includeHistory": { "type": "boolean" }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "list_project_pipelines".to_owned(),
             title: Some("List Pipelines".to_owned()),
             description: "Lists pipelines for a project.".to_owned(),
@@ -801,6 +1287,32 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "delete_e2e_history".to_owned(),
+            title: Some("Delete E2E History".to_owned()),
+            description: "Deletes E2E history for a project, optionally filtered by pipeline index.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineIndex": { "type": "integer" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_e2e_test".to_owned(),
+            title: Some("Delete E2E Test".to_owned()),
+            description: "Deletes a single E2E history record by history id or execution id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "testId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "testId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "list_load_history".to_owned(),
             title: Some("List Load History".to_owned()),
             description: "Lists executed load tests for a project.".to_owned(),
@@ -821,6 +1333,32 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             title: Some("Get Load Test".to_owned()),
             description: "Returns a single executed load test by history id or execution id."
                 .to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "testId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "testId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_load_history".to_owned(),
+            title: Some("Delete Load History".to_owned()),
+            description: "Deletes load history for a project, optionally filtered by pipeline index.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineIndex": { "type": "integer" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_load_test".to_owned(),
+            title: Some("Delete Load Test".to_owned()),
+            description: "Deletes a single load history record by history id or execution id.".to_owned(),
             input_schema: json!({
                 "type": "object",
                 "required": ["projectId", "testId"],
@@ -896,6 +1434,203 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "get_project_spec".to_owned(),
+            title: Some("Get Spec".to_owned()),
+            description: "Returns one OpenAPI spec from a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "specId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "specId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "create_project_spec".to_owned(),
+            title: Some("Create Spec".to_owned()),
+            description: "Creates an OpenAPI spec for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "spec"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "spec": { "type": "object" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "update_project_spec".to_owned(),
+            title: Some("Update Spec".to_owned()),
+            description: "Updates an OpenAPI spec for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "specId", "spec"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "specId": { "type": "string", "minLength": 1 },
+                    "spec": { "type": "object" }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "delete_project_spec".to_owned(),
+            title: Some("Delete Spec".to_owned()),
+            description: "Deletes an OpenAPI spec from a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "specId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "specId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "create_project_e2e_queue".to_owned(),
+            title: Some("Create E2E Queue".to_owned()),
+            description: "Creates and starts a sequential E2E queue for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "pipelineIds"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "type": "string", "minLength": 1 }
+                    },
+                    "selectedBaseUrlKey": { "type": ["string", "null"] },
+                    "specs": {
+                        "type": "array",
+                        "items": { "type": "object" }
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "get_current_project_e2e_queue".to_owned(),
+            title: Some("Get Current E2E Queue".to_owned()),
+            description: "Returns the currently active E2E queue for a project.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "get_project_e2e_queue".to_owned(),
+            title: Some("Get E2E Queue".to_owned()),
+            description: "Returns an E2E queue snapshot by queue id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "queueId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "queueId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "cancel_project_e2e_queue".to_owned(),
+            title: Some("Cancel E2E Queue".to_owned()),
+            description: "Cancels an E2E queue and clears remaining queued pipelines.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "queueId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "queueId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "run_project_e2e_test".to_owned(),
+            title: Some("Run E2E Test".to_owned()),
+            description: "Starts an E2E execution for a project and returns the execution id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineId": { "type": ["string", "null"] },
+                    "pipeline": pipeline_schema(),
+                    "selectedBaseUrlKey": { "type": ["string", "null"] },
+                    "pipelineIndex": { "type": ["integer", "null"] },
+                    "specs": { "type": "array", "items": { "type": "object" } },
+                    "transactionId": { "type": ["string", "null"] }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "run_project_load_test".to_owned(),
+            title: Some("Run Load Test".to_owned()),
+            description: "Starts a load execution for a project and returns the execution id.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "config"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "pipelineId": { "type": ["string", "null"] },
+                    "pipeline": pipeline_schema(),
+                    "config": {
+                        "type": "object",
+                        "required": ["totalRequests", "concurrency", "rampUpSeconds"],
+                        "properties": {
+                            "totalRequests": { "type": "integer", "minimum": 1 },
+                            "concurrency": { "type": "integer", "minimum": 1 },
+                            "rampUpSeconds": { "type": "number", "minimum": 0 }
+                        }
+                    },
+                    "selectedBaseUrlKey": { "type": ["string", "null"] },
+                    "pipelineIndex": { "type": ["integer", "null"] },
+                    "specs": { "type": "array", "items": { "type": "object" } },
+                    "transactionId": { "type": ["string", "null"] }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "get_execution".to_owned(),
+            title: Some("Get Execution".to_owned()),
+            description: "Returns the active snapshot or final stored result of an execution.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["projectId", "executionId"],
+                "properties": {
+                    "projectId": { "type": "string", "minLength": 1 },
+                    "executionId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "cancel_execution".to_owned(),
+            title: Some("Cancel Execution".to_owned()),
+            description: "Requests cancellation for an active execution.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["executionId"],
+                "properties": {
+                    "executionId": { "type": "string", "minLength": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "proxy_request".to_owned(),
+            title: Some("Proxy Request".to_owned()),
+            description: "Executes a proxied HTTP request. SSE responses are collected with an event/time limit.".to_owned(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["request"],
+                "properties": {
+                    "request": { "type": "object" },
+                    "maxEvents": { "type": "integer", "minimum": 1 },
+                    "timeoutMs": { "type": "integer", "minimum": 1 }
+                }
+            }),
+        },
+        ToolDefinition {
             name: "validate_openapi".to_owned(),
             title: Some("Validate OpenAPI".to_owned()),
             description: "Validates an OpenAPI YAML or JSON document.".to_owned(),
@@ -922,10 +1657,100 @@ fn prompt_definitions() -> Vec<PromptDefinition> {
             arguments: Vec::new(),
         },
         PromptDefinition {
-            name: "pipeline_creation_specialist".to_owned(),
-            title: Some("Pipeline Creation Specialist".to_owned()),
+            name: "previa_pipeline_author".to_owned(),
+            title: Some("Previa Pipeline Author".to_owned()),
             description: Some(
                 "Detailed prompt for creating valid Previa pipelines with schemas, template variables, rules, and examples."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "project_onboarding_guide".to_owned(),
+            title: Some("Project Onboarding Guide".to_owned()),
+            description: Some(
+                "Guides remote assistants through project discovery, context gathering, and safe next steps before making changes."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "pipeline_failure_triage".to_owned(),
+            title: Some("Pipeline Failure Triage".to_owned()),
+            description: Some(
+                "Investigates failing E2E and load executions, identifies likely causes, and recommends the next safe action."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "openapi_spec_ingestion_advisor".to_owned(),
+            title: Some("OpenAPI Spec Ingestion Advisor".to_owned()),
+            description: Some(
+                "Validates OpenAPI content and guides spec creation or updates for a project."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "pipeline_repair_planner".to_owned(),
+            title: Some("Pipeline Repair Planner".to_owned()),
+            description: Some(
+                "Plans safe, concrete pipeline fixes from execution evidence before any update is applied."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "load_test_designer".to_owned(),
+            title: Some("Load Test Designer".to_owned()),
+            description: Some(
+                "Designs load test runs with justified parameters, risk notes, and clear execution plans."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "queue_orchestrator".to_owned(),
+            title: Some("Queue Orchestrator".to_owned()),
+            description: Some(
+                "Helps remote assistants create, monitor, and cancel project E2E queues."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "http_probe_assistant".to_owned(),
+            title: Some("HTTP Probe Assistant".to_owned()),
+            description: Some(
+                "Uses proxied HTTP requests to inspect live endpoint behavior before proposing persistent pipeline changes."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "project_migration_assistant".to_owned(),
+            title: Some("Project Migration Assistant".to_owned()),
+            description: Some(
+                "Guides export and import workflows for moving projects between environments."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "safe_change_reviewer".to_owned(),
+            title: Some("Safe Change Reviewer".to_owned()),
+            description: Some(
+                "Reviews risky create, update, delete, and import actions before they are applied."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
+            name: "spec_to_pipeline_bootstrap".to_owned(),
+            title: Some("Spec To Pipeline Bootstrap".to_owned()),
+            description: Some(
+                "Turns project specs into an initial executable pipeline plan with valid assertions and template usage."
                     .to_owned(),
             ),
             arguments: Vec::new(),
@@ -935,32 +1760,65 @@ fn prompt_definitions() -> Vec<PromptDefinition> {
 
 fn prompt_result(name: &str) -> Option<PromptGetResult> {
     match name {
-        "default" | "pipeline_test_assistant" => Some(PromptGetResult {
-            description: Some(
-                "Operational prompt for pipeline authoring, test analysis, and step repair."
-                    .to_owned(),
-            ),
-            messages: vec![PromptMessage {
-                role: "user".to_owned(),
-                content: PromptTextContent {
-                    kind: "text",
-                    text: pipeline_test_assistant_prompt(),
-                },
-            }],
-        }),
-        "pipeline_creation_specialist" => Some(PromptGetResult {
-            description: Some(
-                "Detailed prompt for authoring Previa pipelines through MCP.".to_owned(),
-            ),
-            messages: vec![PromptMessage {
-                role: "user".to_owned(),
-                content: PromptTextContent {
-                    kind: "text",
-                    text: pipeline_creation_specialist_prompt(),
-                },
-            }],
-        }),
+        "default" | "pipeline_test_assistant" => Some(prompt_text_result(
+            "Operational prompt for pipeline authoring, test analysis, and step repair.",
+            pipeline_test_assistant_prompt(),
+        )),
+        "previa_pipeline_author" | "pipeline_creation_specialist" => Some(prompt_text_result(
+            "Detailed prompt for authoring Previa pipelines through MCP.",
+            previa_pipeline_author_prompt(),
+        )),
+        "project_onboarding_guide" => Some(prompt_text_result(
+            "Guided prompt for safely discovering project context before acting.",
+            project_onboarding_guide_prompt(),
+        )),
+        "pipeline_failure_triage" => Some(prompt_text_result(
+            "Prompt for investigating failures across E2E and load executions.",
+            pipeline_failure_triage_prompt(),
+        )),
+        "openapi_spec_ingestion_advisor" => Some(prompt_text_result(
+            "Prompt for validating and ingesting OpenAPI specs into a project.",
+            openapi_spec_ingestion_advisor_prompt(),
+        )),
+        "pipeline_repair_planner" => Some(prompt_text_result(
+            "Prompt for planning evidence-based pipeline repairs before updates.",
+            pipeline_repair_planner_prompt(),
+        )),
+        "load_test_designer" => Some(prompt_text_result(
+            "Prompt for designing safe, justified load test executions.",
+            load_test_designer_prompt(),
+        )),
+        "queue_orchestrator" => Some(prompt_text_result(
+            "Prompt for operating project E2E queues.",
+            queue_orchestrator_prompt(),
+        )),
+        "http_probe_assistant" => Some(prompt_text_result(
+            "Prompt for inspecting live HTTP behavior through proxy requests.",
+            http_probe_assistant_prompt(),
+        )),
+        "project_migration_assistant" => Some(prompt_text_result(
+            "Prompt for exporting, reviewing, and importing project bundles.",
+            project_migration_assistant_prompt(),
+        )),
+        "safe_change_reviewer" => Some(prompt_text_result(
+            "Prompt for reviewing the impact of risky project changes before execution.",
+            safe_change_reviewer_prompt(),
+        )),
+        "spec_to_pipeline_bootstrap" => Some(prompt_text_result(
+            "Prompt for converting project specs into an initial pipeline design.",
+            spec_to_pipeline_bootstrap_prompt(),
+        )),
         _ => None,
+    }
+}
+
+fn prompt_text_result(description: &str, text: String) -> PromptGetResult {
+    PromptGetResult {
+        description: Some(description.to_owned()),
+        messages: vec![PromptMessage {
+            role: "user".to_owned(),
+            content: PromptTextContent { kind: "text", text },
+        }],
     }
 }
 
@@ -984,6 +1842,396 @@ fn tool_error(message: String) -> ToolCallResult {
         structured_content: None,
         is_error: true,
     }
+}
+
+async fn ensure_project_exists(state: &AppState, project_id: &str) -> Result<(), String> {
+    if project_exists(&state.db, project_id)
+        .await
+        .map_err(|err| format!("failed to load project: {err}"))?
+    {
+        Ok(())
+    } else {
+        Err(format!("project '{}' not found", project_id))
+    }
+}
+
+fn queue_tool_outcome(err: QueueError) -> Result<ToolCallResult, String> {
+    match err {
+        QueueError::BadRequest(message) | QueueError::NotFound(message) => Ok(tool_error(message)),
+        QueueError::Internal(message) => Err(message),
+    }
+}
+
+fn normalize_project_spec_payload(
+    mut payload: crate::server::models::ProjectSpecUpsertRequest,
+) -> Result<crate::server::models::ProjectSpecUpsertRequest, String> {
+    payload.slug = normalize_spec_slug(payload.slug.as_deref())?;
+    payload.urls =
+        normalize_spec_urls_with_legacy(payload.urls, std::mem::take(&mut payload.servers))?;
+    Ok(payload)
+}
+
+async fn resolve_project_e2e_request(
+    state: &AppState,
+    args: RunProjectE2eTestArgs,
+) -> Result<E2eTestRequest, String> {
+    let (pipeline, pipeline_index) = match (args.pipeline_id.clone(), args.pipeline) {
+        (Some(pipeline_id), _) if !pipeline_id.trim().is_empty() => {
+            match crate::server::db::load_project_pipeline_for_execution(
+                &state.db,
+                &args.project_id,
+                &pipeline_id,
+            )
+            .await
+            .map_err(|err| format!("failed to load pipeline for execution: {err}"))?
+            {
+                Some((pipeline, position)) => (pipeline, Some(position)),
+                None => return Err("pipelineId not found for project".to_owned()),
+            }
+        }
+        (_, Some(pipeline)) => (pipeline, args.pipeline_index),
+        _ => return Err("pipelineId is required".to_owned()),
+    };
+
+    Ok(E2eTestRequest {
+        pipeline,
+        selected_base_url_key: args.selected_base_url_key,
+        project_id: Some(args.project_id),
+        pipeline_index,
+        specs: args.specs,
+    })
+}
+
+async fn resolve_project_load_request(
+    state: &AppState,
+    args: RunProjectLoadTestArgs,
+) -> Result<LoadTestRequest, String> {
+    let (pipeline, pipeline_index) = match (args.pipeline_id.clone(), args.pipeline) {
+        (Some(pipeline_id), _) if !pipeline_id.trim().is_empty() => {
+            match crate::server::db::load_project_pipeline_for_execution(
+                &state.db,
+                &args.project_id,
+                &pipeline_id,
+            )
+            .await
+            .map_err(|err| format!("failed to load pipeline for execution: {err}"))?
+            {
+                Some((pipeline, position)) => (pipeline, Some(position)),
+                None => return Err("pipelineId not found for project".to_owned()),
+            }
+        }
+        (_, Some(pipeline)) => (pipeline, args.pipeline_index),
+        _ => return Err("pipelineId is required".to_owned()),
+    };
+
+    Ok(LoadTestRequest {
+        pipeline,
+        config: args.config,
+        selected_base_url_key: args.selected_base_url_key,
+        project_id: Some(args.project_id),
+        pipeline_index,
+        specs: args.specs,
+    })
+}
+
+fn execution_start_tool_outcome(err: StartE2eExecutionError) -> Result<ToolCallResult, String> {
+    match err {
+        StartE2eExecutionError::BadRequest(message)
+        | StartE2eExecutionError::ServiceUnavailable(message) => Ok(tool_error(message)),
+        StartE2eExecutionError::Internal(message) => Err(message),
+    }
+}
+
+fn load_execution_start_tool_outcome(
+    err: StartLoadExecutionError,
+) -> Result<ToolCallResult, String> {
+    match err {
+        StartLoadExecutionError::BadRequest(message)
+        | StartLoadExecutionError::ServiceUnavailable(message) => Ok(tool_error(message)),
+        StartLoadExecutionError::Internal(message) => Err(message),
+    }
+}
+
+async fn execution_started_payload(state: &AppState, execution_id: &str, kind: &str) -> Value {
+    let init_payload = {
+        let ctx = {
+            let executions = state.executions.read().await;
+            executions.get(execution_id).cloned()
+        };
+        match ctx {
+            Some(ctx) => ctx.init_payload.get().await,
+            None => Value::Null,
+        }
+    };
+    let status = init_payload
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("running");
+    json!({
+        "executionId": execution_id,
+        "status": status,
+        "kind": kind,
+        "initPayload": init_payload
+    })
+}
+
+async fn execution_snapshot(
+    state: &AppState,
+    project_id: &str,
+    execution_id: &str,
+) -> Result<Option<Value>, String> {
+    let active = {
+        let executions = state.executions.read().await;
+        executions.get(execution_id).cloned()
+    };
+
+    if let Some(execution) = active {
+        if execution.project_id != project_id {
+            return Ok(None);
+        }
+        let kind = match execution.kind {
+            ExecutionKind::E2e => "e2e",
+            ExecutionKind::Load => "load",
+        };
+        let init_payload = execution.init_payload.get().await;
+        return Ok(Some(json!({
+            "executionId": execution_id,
+            "projectId": project_id,
+            "active": true,
+            "kind": kind,
+            "initPayload": init_payload,
+        })));
+    }
+
+    if let Some(record) = load_e2e_history_record_by_id(&state.db, project_id, execution_id)
+        .await
+        .map_err(|err| format!("failed to load e2e execution: {err}"))?
+    {
+        return Ok(Some(json!({
+            "executionId": execution_id,
+            "projectId": project_id,
+            "active": false,
+            "kind": "e2e",
+            "result": record
+        })));
+    }
+
+    if let Some(record) = load_load_history_record_by_id(&state.db, project_id, execution_id)
+        .await
+        .map_err(|err| format!("failed to load load execution: {err}"))?
+    {
+        return Ok(Some(json!({
+            "executionId": execution_id,
+            "projectId": project_id,
+            "active": false,
+            "kind": "load",
+            "result": record
+        })));
+    }
+
+    Ok(None)
+}
+
+async fn cancel_execution_payload(
+    state: &AppState,
+    execution_id: &str,
+) -> Result<Option<Value>, String> {
+    let execution = {
+        let executions = state.executions.read().await;
+        executions.get(execution_id).cloned()
+    };
+
+    let Some(execution) = execution else {
+        return Ok(None);
+    };
+    let already_cancelled = execution.cancel.is_cancelled();
+    execution.cancel.cancel();
+    Ok(Some(json!({
+        "executionId": execution_id,
+        "cancelled": true,
+        "alreadyCancelled": already_cancelled,
+        "message": if already_cancelled {
+            "cancellation already requested"
+        } else {
+            "cancellation requested"
+        }
+    })))
+}
+
+async fn delete_history_rows(
+    db: &sqlx::SqlitePool,
+    table: &str,
+    project_id: &str,
+    pipeline_index: Option<i64>,
+) -> Result<u64, String> {
+    let mut query = format!("DELETE FROM {table} WHERE project_id = ?");
+    if pipeline_index.is_some() {
+        query.push_str(" AND pipeline_index = ?");
+    }
+    let mut statement = sqlx::query(&query).bind(project_id);
+    if let Some(pipeline_index) = pipeline_index {
+        statement = statement.bind(pipeline_index);
+    }
+    statement
+        .execute(db)
+        .await
+        .map(|result| result.rows_affected())
+        .map_err(|err| format!("failed to delete history from {table}: {err}"))
+}
+
+fn render_proxy_request(payload: ProxyRequest) -> Result<ProxyRequest, String> {
+    let value = serde_json::to_value(payload).map_err(|err| {
+        format!(
+            "failed to serialize proxy payload for template render: {}",
+            err
+        )
+    })?;
+    let rendered = previa_runner::render_template_value_simple(&value);
+    serde_json::from_value(rendered)
+        .map_err(|err| format!("failed to parse rendered proxy payload: {}", err))
+}
+
+async fn proxy_tool_request(
+    state: &AppState,
+    payload: ProxyRequest,
+    max_events: usize,
+    timeout_ms: u64,
+) -> Result<Value, String> {
+    let method = Method::from_bytes(payload.method.trim().as_bytes())
+        .map_err(|_| format!("invalid method: {}", payload.method))?;
+    let url = payload.url.trim();
+    if url.is_empty() {
+        return Err("url is required and cannot be empty".to_owned());
+    }
+    reqwest::Url::parse(url).map_err(|err| format!("invalid url: {}", err))?;
+
+    let mut request = state.client.request(method, url);
+    for (name, value) in &payload.headers {
+        let header_name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| format!("invalid header name: {}", name))?;
+        let header_value = HeaderValue::from_str(value)
+            .map_err(|_| format!("invalid header value for {}: {}", name, value))?;
+        request = request.header(header_name, header_value);
+    }
+    if let Some(body) = payload.body {
+        request = match body {
+            Value::Null => request,
+            Value::String(raw) => request.body(raw),
+            value => request.json(&value),
+        };
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("proxy request failed: {err}"))?;
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.to_string(), Value::String(v.to_owned())))
+        })
+        .collect::<serde_json::Map<String, Value>>();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if content_type.contains("text/event-stream") {
+        let collected = collect_sse_events(response, max_events, timeout_ms).await?;
+        return Ok(json!({
+            "status": status,
+            "headers": headers,
+            "sse": true,
+            "events": collected.events,
+            "truncated": collected.truncated,
+            "timedOut": collected.timed_out
+        }));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("failed to read upstream response body: {err}"))?;
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    let json_body = serde_json::from_slice::<Value>(&bytes).ok();
+    Ok(json!({
+        "status": status,
+        "headers": headers,
+        "sse": false,
+        "bodyText": text,
+        "bodyJson": json_body
+    }))
+}
+
+struct CollectedSseEvents {
+    events: Vec<Value>,
+    truncated: bool,
+    timed_out: bool,
+}
+
+async fn collect_sse_events(
+    response: reqwest::Response,
+    max_events: usize,
+    timeout_ms: u64,
+) -> Result<CollectedSseEvents, String> {
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut events = Vec::new();
+    let mut timed_out = false;
+
+    loop {
+        let next = timeout(Duration::from_millis(timeout_ms), stream.next()).await;
+        match next {
+            Ok(Some(chunk_result)) => {
+                let chunk = chunk_result
+                    .map_err(|err| format!("failed to read upstream SSE stream: {}", err))?;
+                buffer.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
+
+                while let Some(idx) = buffer.find("\n\n") {
+                    let block = buffer[..idx].to_owned();
+                    buffer = buffer[idx + 2..].to_owned();
+                    if let Some((event, data_text)) = parse_sse_block(&block) {
+                        let parsed = serde_json::from_str::<Value>(&data_text)
+                            .unwrap_or_else(|_| Value::String(data_text));
+                        events.push(json!({ "event": event, "data": parsed }));
+                        if events.len() >= max_events {
+                            return Ok(CollectedSseEvents {
+                                events,
+                                truncated: true,
+                                timed_out: false,
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(_) => {
+                timed_out = true;
+                break;
+            }
+        }
+    }
+
+    if !buffer.trim().is_empty() {
+        if let Some((event, data_text)) = parse_sse_block(&buffer) {
+            let parsed = serde_json::from_str::<Value>(&data_text)
+                .unwrap_or_else(|_| Value::String(data_text));
+            events.push(json!({ "event": event, "data": parsed }));
+        }
+    }
+
+    Ok(CollectedSseEvents {
+        events,
+        truncated: false,
+        timed_out,
+    })
 }
 
 fn validate_pipeline_input(pipeline: &Pipeline) -> Result<(), String> {
@@ -1168,7 +2416,7 @@ fn pipeline_test_assistant_prompt() -> String {
     .join("\n")
 }
 
-fn pipeline_creation_specialist_prompt() -> String {
+fn previa_pipeline_author_prompt() -> String {
     let pipeline_schema = serde_json::to_string_pretty(&pipeline_schema()).unwrap();
     let step_schema = serde_json::to_string_pretty(&pipeline_step_schema()).unwrap();
     let assertion_schema = serde_json::to_string_pretty(&assertion_schema()).unwrap();
@@ -1249,19 +2497,205 @@ Output requirements:\n\
     )
 }
 
+fn project_onboarding_guide_prompt() -> String {
+    [
+        "You are onboarding yourself to a Previa project through MCP before making any change.",
+        "Your first job is to build a concise mental model of the project and expose it to the user.",
+        "Recommended workflow:",
+        "1. Call list_projects or get_project to identify the target project.",
+        "2. Call list_project_specs to discover available specs, slugs, and base URL names.",
+        "3. Call list_project_pipelines to understand what is already automated.",
+        "4. If the user mentions failures or runs, inspect list_e2e_history or list_load_history before proposing edits.",
+        "5. Summarize the current state, open risks, and the best next MCP action.",
+        "Output requirements:",
+        "- Return a short onboarding summary with project purpose, known specs, existing pipelines, and obvious gaps.",
+        "- Distinguish facts gathered from MCP from assumptions that still need confirmation.",
+        "- Do not propose create, update, delete, or import actions until you have shown the current context.",
+        "- If critical context is missing, name the exact MCP tool that should be called next.",
+    ]
+    .join("\n")
+}
+
+fn pipeline_failure_triage_prompt() -> String {
+    [
+        "You are triaging a failed Previa execution through MCP.",
+        "Always begin with evidence, not guesses.",
+        "Required workflow:",
+        "1. Use list_e2e_history or list_load_history to identify the relevant failure when the execution is not already known.",
+        "2. Use get_e2e_test, get_load_test, or get_execution to inspect the exact request, response, asserts, and failed steps.",
+        "3. Identify the most likely root cause and explain why it is more plausible than nearby alternatives.",
+        "4. Recommend the next safe action: observe more data, probe the endpoint, adjust a pipeline, or rerun after confirmation.",
+        "Output requirements:",
+        "- Name the failing step or execution segment.",
+        "- Separate observed evidence, likely cause, confidence level, and next action.",
+        "- When you recommend a pipeline change, mention update_project_pipeline but do not apply it without user approval.",
+        "- If the failure points to live API behavior, propose proxy_request before editing the pipeline.",
+    ]
+    .join("\n")
+}
+
+fn openapi_spec_ingestion_advisor_prompt() -> String {
+    [
+        "You are responsible for safely ingesting OpenAPI content into a Previa project through MCP.",
+        "Your goal is to validate the source, explain issues clearly, and produce the correct create or update action.",
+        "Required workflow:",
+        "1. Validate the provided source with validate_openapi before proposing persistence.",
+        "2. Inspect the target project with get_project and list_project_specs.",
+        "3. Decide whether the operation should use create_project_spec or update_project_spec.",
+        "4. Verify slug, URL names, and any project-specific conventions before proposing a final payload.",
+        "Output requirements:",
+        "- Report validation findings first.",
+        "- Call out schema errors, missing servers, ambiguous slugs, and naming conflicts explicitly.",
+        "- Return a payload compatible with create_project_spec or update_project_spec only when the source is valid enough.",
+        "- If the source is not ready, explain what must change before the MCP write call should happen.",
+    ]
+    .join("\n")
+}
+
+fn pipeline_repair_planner_prompt() -> String {
+    [
+        "You are planning a safe repair for an existing Previa pipeline.",
+        "Use execution data and current pipeline state together before proposing a fix.",
+        "Required workflow:",
+        "1. Inspect the failing execution with get_e2e_test, get_load_test, or get_execution.",
+        "2. Fetch the saved pipeline with get_project_pipeline.",
+        "3. Compare observed failure data with the current step definitions, template references, URLs, headers, and assertions.",
+        "4. Propose the smallest effective patch that resolves the evidence-backed issue.",
+        "Output requirements:",
+        "- Name the exact step to change.",
+        "- Show the before-and-after intent in plain language.",
+        "- Mention update_project_pipeline as the write tool, but wait for explicit approval before applying it.",
+        "- If the evidence is weak, ask for one more diagnostic MCP call instead of overfitting the fix.",
+    ]
+    .join("\n")
+}
+
+fn load_test_designer_prompt() -> String {
+    [
+        "You are designing Previa load tests through MCP.",
+        "Your job is to choose realistic parameters and explain why they fit the user's goal.",
+        "Required workflow:",
+        "1. Confirm the target project and pipeline with get_project, list_project_pipelines, or get_project_pipeline.",
+        "2. If needed, inspect prior load results with list_load_history and get_load_test.",
+        "3. Propose config values for totalRequests, concurrency, and rampUpSeconds with rationale.",
+        "4. Highlight operational risks such as unstable environments, missing assertions, or overly aggressive concurrency.",
+        "Output requirements:",
+        "- Present a runnable payload for run_project_load_test when enough context exists.",
+        "- Explain what the run is trying to learn.",
+        "- Distinguish smoke, baseline, and stress-style configurations when helpful.",
+        "- If the underlying pipeline looks weak, recommend fixing the pipeline before scaling load.",
+    ]
+    .join("\n")
+}
+
+fn queue_orchestrator_prompt() -> String {
+    [
+        "You are operating Previa E2E queues for a remote user through MCP.",
+        "Your job is to sequence pipelines clearly, track queue state, and avoid surprise actions.",
+        "Required workflow:",
+        "1. Inspect available pipelines with list_project_pipelines.",
+        "2. Use create_project_e2e_queue only after confirming the intended pipeline order and base URL selection.",
+        "3. Use get_current_project_e2e_queue or get_project_e2e_queue to explain progress and current status.",
+        "4. Use cancel_project_e2e_queue only when the user requests cancellation or when you are explicitly asked what the cancel path is.",
+        "Output requirements:",
+        "- Summarize queue composition, active item, completed items, failures, and remaining work.",
+        "- Make it obvious whether the queue is running, completed, or canceled.",
+        "- Do not invent queue tools or background monitoring features that do not exist.",
+    ]
+    .join("\n")
+}
+
+fn http_probe_assistant_prompt() -> String {
+    [
+        "You are inspecting live HTTP behavior before changing saved Previa assets.",
+        "Use proxy_request to gather real evidence from endpoints, auth flows, headers, payloads, redirects, and SSE streams.",
+        "Required workflow:",
+        "1. Define the smallest probe that can answer the user's question.",
+        "2. Use proxy_request with explicit request details and bounded maxEvents or timeoutMs when probing SSE.",
+        "3. Report status code, headers, body shape, and any mismatches with current pipeline expectations.",
+        "4. Recommend whether the next step should be another probe, a pipeline update, a spec update, or no change.",
+        "Output requirements:",
+        "- Keep the probe purpose clear and narrow.",
+        "- Call out sensitive headers or auth assumptions when relevant.",
+        "- Treat proxy evidence as a diagnostic input, not an automatic justification to edit saved pipelines.",
+    ]
+    .join("\n")
+}
+
+fn project_migration_assistant_prompt() -> String {
+    [
+        "You are guiding a project migration through Previa MCP export and import tools.",
+        "Your job is to move data carefully between environments and explain what is included.",
+        "Required workflow:",
+        "1. Inspect the source project with get_project, list_project_pipelines, and list_project_specs when needed.",
+        "2. Use export_project to create a bundle and decide deliberately whether includeHistory should be true.",
+        "3. Review the bundle contents at a high level before import_project.",
+        "4. After import, verify the destination state with get_project, list_project_pipelines, and list_project_specs.",
+        "Output requirements:",
+        "- Explain what will move: metadata, specs, pipelines, and optionally history.",
+        "- Call out overwrite or duplication risks before import.",
+        "- If the user asks for a migration plan only, do not execute import_project automatically.",
+    ]
+    .join("\n")
+}
+
+fn safe_change_reviewer_prompt() -> String {
+    [
+        "You are reviewing potentially risky MCP write actions before they are executed.",
+        "You should make the blast radius visible and keep remote changes deliberate.",
+        "Review scope includes create_project, update_project, delete_project, import_project, create_project_pipeline, update_project_pipeline, delete_project_pipeline, create_project_spec, update_project_spec, and delete_project_spec.",
+        "Output requirements:",
+        "- Summarize the intended action, affected resources, likely impact, and rollback path.",
+        "- Highlight destructive or irreversible consequences explicitly.",
+        "- When the action depends on assumptions, list them before recommending execution.",
+        "- Ask for explicit confirmation before delete and import flows or any broad update with uncertain impact.",
+    ]
+    .join("\n")
+}
+
+fn spec_to_pipeline_bootstrap_prompt() -> String {
+    [
+        "You are turning existing project specs into an initial Previa pipeline design.",
+        "Your goal is to bootstrap a useful saved pipeline from the API contract without inventing unsupported variables or tools.",
+        "Required workflow:",
+        "1. Inspect the target project with get_project and list_project_specs.",
+        "2. Use get_project_spec and get_pipeline_creation_guide to understand the available base URLs, schema hints, and supported template variables.",
+        "3. Build a practical first pipeline with explicit status assertions and stable step ids.",
+        "4. Return a payload compatible with create_project_pipeline.",
+        "Output requirements:",
+        "- Prefer a narrow smoke-style flow over an overly ambitious end-to-end journey.",
+        "- Use specs.<slug>.url.<name> only after verifying the exact slug and URL name.",
+        "- If the spec is too incomplete to bootstrap safely, explain the gap before generating a payload.",
+    ]
+    .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use previa_runner::{Pipeline, PipelineStep};
     use serde_json::json;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tokio::sync::RwLock;
 
     use super::{
-        parse_tool_arguments, pipeline_creation_guide, pipeline_creation_specialist_prompt,
-        pipeline_test_assistant_prompt, prompt_definitions, prompt_result, tool_definitions,
-        validate_pipeline_input,
+        execute_tool, parse_tool_arguments, pipeline_creation_guide,
+        pipeline_test_assistant_prompt, previa_pipeline_author_prompt, prompt_definitions,
+        prompt_result, tool_definitions, validate_pipeline_input,
     };
+    use crate::server::db::{
+        insert_project_pipeline, load_e2e_queue_record, upsert_project_metadata,
+    };
+    use crate::server::execution::ExecutionScheduler;
     use crate::server::mcp::models::{
-        CreateProjectPipelineArgs, ProjectByIdArgs, ProjectHistoryToolArgs,
+        CreateProjectArgs, CreateProjectE2eQueueArgs, CreateProjectPipelineArgs, ProjectByIdArgs,
+        ProjectHistoryToolArgs, ToolCallParams,
     };
+    use crate::server::models::ProjectMetadataUpsertRequest;
+    use crate::server::state::AppState;
 
     #[test]
     fn project_tools_require_project_id() {
@@ -1318,6 +2752,35 @@ mod tests {
     }
 
     #[test]
+    fn parse_create_e2e_queue_arguments() {
+        let args = parse_tool_arguments::<CreateProjectE2eQueueArgs>(json!({
+            "projectId": "project-1",
+            "pipelineIds": ["pipeline-1", "pipeline-2"],
+            "selectedBaseUrlKey": "hml",
+            "specs": []
+        }))
+        .expect("valid create e2e queue args");
+
+        assert_eq!(args.project_id, "project-1");
+        assert_eq!(args.pipeline_ids, vec!["pipeline-1", "pipeline-2"]);
+        assert_eq!(args.selected_base_url_key.as_deref(), Some("hml"));
+    }
+
+    #[test]
+    fn parse_create_project_arguments() {
+        let args = parse_tool_arguments::<CreateProjectArgs>(json!({
+            "project": {
+                "name": "Project A",
+                "description": "desc",
+                "pipelines": []
+            }
+        }))
+        .expect("valid create project args");
+
+        assert_eq!(args.project.name, "Project A");
+    }
+
+    #[test]
     fn validate_pipeline_requires_name() {
         let pipeline = Pipeline {
             id: None,
@@ -1352,6 +2815,41 @@ mod tests {
             .expect("pipeline guide tool definition");
 
         assert_eq!(tool.input_schema["type"], json!("object"));
+    }
+
+    #[test]
+    fn e2e_queue_tools_are_available() {
+        let tools = tool_definitions();
+
+        for name in [
+            "create_project",
+            "update_project",
+            "delete_project",
+            "export_project",
+            "import_project",
+            "get_project_spec",
+            "create_project_spec",
+            "update_project_spec",
+            "delete_project_spec",
+            "create_project_e2e_queue",
+            "get_current_project_e2e_queue",
+            "get_project_e2e_queue",
+            "cancel_project_e2e_queue",
+            "run_project_e2e_test",
+            "run_project_load_test",
+            "get_execution",
+            "cancel_execution",
+            "delete_e2e_history",
+            "delete_e2e_test",
+            "delete_load_history",
+            "delete_load_test",
+            "proxy_request",
+        ] {
+            assert!(
+                tools.iter().any(|tool| tool.name == name),
+                "missing MCP tool definition for {name}"
+            );
+        }
     }
 
     #[test]
@@ -1411,7 +2909,7 @@ mod tests {
     fn pipeline_creation_prompt_is_available() {
         let prompt = prompt_definitions()
             .into_iter()
-            .find(|prompt| prompt.name == "pipeline_creation_specialist")
+            .find(|prompt| prompt.name == "previa_pipeline_author")
             .expect("pipeline creation prompt definition");
 
         assert_eq!(prompt.arguments.len(), 0);
@@ -1419,7 +2917,7 @@ mod tests {
 
     #[test]
     fn pipeline_creation_prompt_mentions_schema_variables_and_examples() {
-        let text = pipeline_creation_specialist_prompt();
+        let text = previa_pipeline_author_prompt();
 
         assert!(text.contains("Schema for pipeline"));
         assert!(text.contains("{{steps.<stepId>.<fieldPath>}}"));
@@ -1431,7 +2929,7 @@ mod tests {
     #[test]
     fn pipeline_creation_prompt_result_is_available() {
         let prompt =
-            prompt_result("pipeline_creation_specialist").expect("pipeline creation prompt result");
+            prompt_result("previa_pipeline_author").expect("pipeline creation prompt result");
 
         assert!(
             prompt.messages[0]
@@ -1439,6 +2937,64 @@ mod tests {
                 .text
                 .contains("create_project_pipeline")
         );
+    }
+
+    #[test]
+    fn legacy_pipeline_creation_prompt_alias_is_still_available() {
+        let prompt = prompt_result("pipeline_creation_specialist")
+            .expect("legacy pipeline creation prompt result");
+
+        assert!(
+            prompt.messages[0]
+                .content
+                .text
+                .contains("create_project_pipeline")
+        );
+    }
+
+    #[test]
+    fn remote_assistant_prompts_are_available() {
+        let prompts = prompt_definitions();
+
+        for name in [
+            "project_onboarding_guide",
+            "pipeline_failure_triage",
+            "openapi_spec_ingestion_advisor",
+            "pipeline_repair_planner",
+            "load_test_designer",
+            "queue_orchestrator",
+            "http_probe_assistant",
+            "project_migration_assistant",
+            "safe_change_reviewer",
+            "spec_to_pipeline_bootstrap",
+        ] {
+            assert!(
+                prompts.iter().any(|prompt| prompt.name == name),
+                "missing MCP prompt definition for {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_assistant_prompts_reference_expected_tools() {
+        for (name, expected) in [
+            ("project_onboarding_guide", "list_project_pipelines"),
+            ("pipeline_failure_triage", "get_e2e_test"),
+            ("openapi_spec_ingestion_advisor", "validate_openapi"),
+            ("pipeline_repair_planner", "get_project_pipeline"),
+            ("load_test_designer", "run_project_load_test"),
+            ("queue_orchestrator", "create_project_e2e_queue"),
+            ("http_probe_assistant", "proxy_request"),
+            ("project_migration_assistant", "export_project"),
+            ("safe_change_reviewer", "delete_project_pipeline"),
+            ("spec_to_pipeline_bootstrap", "get_pipeline_creation_guide"),
+        ] {
+            let prompt = prompt_result(name).expect("prompt result");
+            assert!(
+                prompt.messages[0].content.text.contains(expected),
+                "prompt {name} should mention {expected}"
+            );
+        }
     }
 
     #[test]
@@ -1455,5 +3011,248 @@ mod tests {
         assert_eq!(args.project_id, "project-1");
         assert_eq!(args.pipeline_index, Some(2));
         assert_eq!(args.limit, Some(50));
+    }
+
+    #[tokio::test]
+    async fn create_and_get_project_e2e_queue_tools_return_snapshots() {
+        let state = test_state().await;
+        seed_project_with_pipeline(&state, "project-1", "pipeline-1").await;
+
+        let created = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "create_project_e2e_queue".to_owned(),
+                arguments: json!({
+                    "projectId": "project-1",
+                    "pipelineIds": ["pipeline-1"]
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("create queue tool result");
+
+        assert!(!created.is_error);
+        let queue = created
+            .structured_content
+            .expect("create queue structured content");
+        let queue_id = queue["id"].as_str().expect("queue id").to_owned();
+        assert_eq!(queue["status"], json!("pending"));
+
+        let terminal = wait_for_terminal_queue(&state, "project-1", &queue_id).await;
+        assert_eq!(terminal["id"], json!(queue_id.clone()));
+        assert!(matches!(
+            terminal["status"].as_str(),
+            Some("failed" | "completed" | "cancelled")
+        ));
+
+        let loaded = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "get_project_e2e_queue".to_owned(),
+                arguments: json!({
+                    "projectId": "project-1",
+                    "queueId": queue_id
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("get queue tool result");
+
+        assert!(!loaded.is_error);
+        assert_eq!(loaded.structured_content.expect("queue snapshot"), terminal);
+    }
+
+    #[tokio::test]
+    async fn get_current_project_e2e_queue_returns_error_without_active_queue() {
+        let state = test_state().await;
+        seed_project_with_pipeline(&state, "project-1", "pipeline-1").await;
+
+        let result = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "get_current_project_e2e_queue".to_owned(),
+                arguments: json!({ "projectId": "project-1" }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("current queue tool result");
+
+        assert!(result.is_error);
+        assert!(result.structured_content.is_none());
+        assert_eq!(
+            result.content[0].text,
+            "no active e2e queue for project".to_owned()
+        );
+    }
+
+    #[tokio::test]
+    async fn project_and_spec_crud_tools_work() {
+        let state = test_state().await;
+
+        let created = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "create_project".to_owned(),
+                arguments: json!({
+                    "project": {
+                        "name": "Project A",
+                        "description": "desc",
+                        "pipelines": []
+                    }
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("create project");
+        assert!(!created.is_error);
+        let project = created.structured_content.expect("project body");
+        let project_id = project["id"].as_str().expect("project id").to_owned();
+
+        let created_spec = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "create_project_spec".to_owned(),
+                arguments: json!({
+                    "projectId": project_id,
+                    "spec": {
+                        "spec": {
+                            "openapi": "3.0.0",
+                            "info": { "title": "API", "version": "1.0.0" },
+                            "paths": {}
+                        },
+                        "slug": "users",
+                        "urls": [{"name":"hml","url":"https://example.com"}],
+                        "sync": false,
+                        "live": false
+                    }
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("create spec");
+        assert!(!created_spec.is_error);
+        let spec = created_spec.structured_content.expect("spec body");
+        let spec_id = spec["id"].as_str().expect("spec id").to_owned();
+
+        let deleted_spec = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "delete_project_spec".to_owned(),
+                arguments: json!({
+                    "projectId": project["id"],
+                    "specId": spec_id
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("delete spec");
+        assert!(!deleted_spec.is_error);
+
+        let deleted_project = execute_tool(
+            &state,
+            ToolCallParams {
+                name: "delete_project".to_owned(),
+                arguments: json!({
+                    "projectId": project["id"]
+                }),
+                meta: None,
+            },
+        )
+        .await
+        .expect("delete project");
+        assert!(!deleted_project.is_error);
+    }
+
+    async fn test_state() -> AppState {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory db");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations");
+
+        AppState {
+            client: reqwest::Client::new(),
+            db,
+            context_name: "test".to_owned(),
+            runner_endpoints: Vec::new(),
+            runner_auth_key: None,
+            rps_per_node: 1,
+            scheduler: ExecutionScheduler::new(Default::default()),
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            e2e_queues: Arc::new(RwLock::new(HashMap::new())),
+            mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    async fn seed_project_with_pipeline(state: &AppState, project_id: &str, pipeline_id: &str) {
+        upsert_project_metadata(
+            &state.db,
+            project_id.to_owned(),
+            ProjectMetadataUpsertRequest {
+                name: "Project".to_owned(),
+                description: Some("Queue test project".to_owned()),
+            },
+        )
+        .await
+        .expect("project upsert");
+
+        insert_project_pipeline(
+            &state.db,
+            project_id,
+            Pipeline {
+                id: Some(pipeline_id.to_owned()),
+                name: "Pipeline".to_owned(),
+                description: Some("Queue test pipeline".to_owned()),
+                steps: vec![PipelineStep {
+                    id: "step-1".to_owned(),
+                    name: "Step 1".to_owned(),
+                    description: None,
+                    method: "GET".to_owned(),
+                    url: "https://example.com".to_owned(),
+                    headers: Default::default(),
+                    body: None,
+                    operation_id: None,
+                    delay: None,
+                    retry: None,
+                    asserts: Vec::new(),
+                }],
+            },
+        )
+        .await
+        .expect("pipeline insert");
+    }
+
+    async fn wait_for_terminal_queue(
+        state: &AppState,
+        project_id: &str,
+        queue_id: &str,
+    ) -> serde_json::Value {
+        for _ in 0..20 {
+            let snapshot = load_e2e_queue_record(&state.db, project_id, queue_id)
+                .await
+                .expect("queue load")
+                .expect("queue exists");
+            let value = serde_json::to_value(snapshot).expect("queue to value");
+            if matches!(
+                value["status"].as_str(),
+                Some("failed" | "completed" | "cancelled")
+            ) {
+                return value;
+            }
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+
+        panic!("queue {queue_id} did not reach a terminal state in time");
     }
 }

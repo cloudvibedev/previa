@@ -1,4 +1,5 @@
 pub mod common;
+pub mod e2e_queues;
 pub mod history;
 pub mod pipelines;
 pub mod projects;
@@ -7,18 +8,24 @@ pub mod specs;
 pub mod transfers;
 
 pub use common::project_exists;
+pub use e2e_queues::{
+    cancel_non_terminal_e2e_queue, cancel_stale_e2e_queues, insert_e2e_queue,
+    load_e2e_queue_record, queue_request_json, update_e2e_queue_item_status,
+    update_e2e_queue_status,
+};
 pub use history::{
     list_e2e_history_records, list_load_history_records, load_e2e_history_record_by_id,
     load_load_history_record_by_id, save_e2e_history, save_load_history, upsert_e2e_history,
     upsert_load_history,
 };
 pub use pipelines::{
-    delete_pipeline_record, insert_project_pipeline, load_pipelines_for_project,
+    delete_pipeline_record, insert_project_pipeline, load_existing_pipeline_ids,
+    load_existing_project_pipeline_ids, load_pipelines_for_project,
     load_project_pipeline_for_execution, load_project_pipeline_record, update_project_pipeline,
 };
 pub use projects::{
-    list_project_records, load_project_record, upsert_project_metadata,
-    upsert_project_with_pipelines,
+    create_project_with_pipelines, list_project_records, load_project_record, project_name_exists,
+    upsert_project_metadata, upsert_project_with_pipelines,
 };
 pub use query_utils::{clamp_history_limit, clamp_history_offset, history_order_to_sql};
 pub use specs::{

@@ -75,6 +75,14 @@ pub async fn load_project_record(
     }))
 }
 
+pub async fn project_name_exists(db: &SqlitePool, project_name: &str) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_scalar::<_, i64>("SELECT 1 FROM projects WHERE name = ? LIMIT 1")
+        .bind(project_name)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.is_some())
+}
+
 pub async fn upsert_project_metadata(
     db: &SqlitePool,
     project_id: String,
@@ -199,6 +207,59 @@ pub async fn upsert_project_with_pipelines(
         .bind(&pipeline.description)
         .bind(&now_iso)
         .bind(&updated_at)
+        .bind(serde_json::to_string(&pipeline).unwrap_or_else(|_| "{}".to_owned()))
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    load_project_record(db, &project_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)
+}
+
+pub async fn create_project_with_pipelines(
+    db: &SqlitePool,
+    project_name: String,
+    pipelines: Vec<Pipeline>,
+) -> Result<ProjectRecord, sqlx::Error> {
+    let project_id = new_uuid_v7();
+    let now_iso = now_iso();
+    let now_ms_i64 = now_ms() as i64;
+    let mut tx = db.begin().await?;
+
+    sqlx::query(
+        "INSERT INTO projects (
+            id, name, description, created_at, updated_at, created_at_ms, updated_at_ms, spec_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&project_id)
+    .bind(&project_name)
+    .bind(Option::<String>::None)
+    .bind(&now_iso)
+    .bind(&now_iso)
+    .bind(now_ms_i64)
+    .bind(now_ms_i64)
+    .bind(Option::<String>::None)
+    .execute(&mut *tx)
+    .await?;
+
+    for (index, mut pipeline) in pipelines.into_iter().enumerate() {
+        let pipeline_id = pipeline.id.clone().unwrap_or_else(new_uuid_v7);
+        pipeline.id = Some(pipeline_id.clone());
+
+        sqlx::query(
+            "INSERT INTO pipelines (
+                id, project_id, position, name, description, created_at, updated_at, pipeline_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(pipeline_id)
+        .bind(&project_id)
+        .bind(index as i64)
+        .bind(&pipeline.name)
+        .bind(&pipeline.description)
+        .bind(&now_iso)
+        .bind(&now_iso)
         .bind(serde_json::to_string(&pipeline).unwrap_or_else(|_| "{}".to_owned()))
         .execute(&mut *tx)
         .await?;

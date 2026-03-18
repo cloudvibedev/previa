@@ -1,0 +1,28 @@
+id: api-smoke
+name: API Smoke Test
+description: Pipeline de exemplo para importar e validar o fluxo basico do Previa.
+steps:
+  - id: get_status
+    name: Check 200
+    description: Garante que um endpoint simples responde com sucesso.
+    method: GET
+    url: https://httpbin.org/status/200
+    headers: {}
+    asserts:
+      - field: status
+        operator: equals
+        expected: "200"
+
+  - id: inspect_anything
+    name: Inspect Payload
+    description: Valida que o corpo JSON e retornado e pode usar dados do passo anterior.
+    method: GET
+    url: https://httpbin.org/anything/{{steps.get_status.status}}
+    headers: {}
+    asserts:
+      - field: status
+        operator: equals
+        expected: "200"
+      - field: body.url
+        operator: contains
+        expected: /anything/200

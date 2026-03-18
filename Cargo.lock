@@ -1885,8 +1885,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "previa"
+version = "0.0.8"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "dotenvy",
+ "fs2",
+ "nix",
+ "previa-runner",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "urlencoding",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "previa-engine"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "chrono",
  "fakeit",
@@ -1904,11 +1926,12 @@ dependencies = [
 
 [[package]]
 name = "previa-main"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "chrono",
  "dotenvy",
+ "http-body-util",
  "md5",
  "oas3",
  "previa-runner",
@@ -1932,7 +1955,7 @@ dependencies = [
 
 [[package]]
 name = "previa-runner"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "dotenvy",
@@ -1945,32 +1968,12 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
  "utoipa",
  "uuid 1.22.0",
-]
-
-[[package]]
-name = "previactl"
-version = "0.0.7"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "chrono",
- "clap",
- "dotenvy",
- "fs2",
- "nix",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokio",
- "urlencoding",
- "windows-sys 0.59.0",
 ]
 
 [[package]]

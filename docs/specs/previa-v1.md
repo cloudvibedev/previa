@@ -1,10 +1,10 @@
-# `previactl` v1 Specification
+# `previa` v1 Specification
 
 ## Summary
 
-`previactl` is the local operations CLI for Previa. Version 1 is Linux-first and
+`previa` is the local operations CLI for Previa. Version 1 is Linux-first and
 local-only: it runs and manages a local Previa context through Docker Compose
-and exposes the local `previactl` version.
+and exposes the local `previa` version.
 
 This document is implementation-ready. Anything not defined here is out of
 scope for v1 and must not be invented during implementation.
@@ -15,13 +15,13 @@ scope for v1 and must not be invented during implementation.
   `previa-runner` processes.
 - Allow attaching existing runner endpoints that are already running.
 - Support foreground and detached execution modes.
-- Persist all `previactl`-generated files under `PREVIA_HOME`.
+- Persist all `previa`-generated files under `PREVIA_HOME`.
 - Reuse the current environment-variable contract already supported by the
   binaries.
 - Provide machine-readable status and listing output for automation.
 - Provide context-scoped log access for detached execution.
 - Detect unhealthy processes using both PID liveness and HTTP health probes.
-- Expose the local `previactl` version.
+- Expose the local `previa` version.
 - Pull published container images for `previa-main` and `previa-runner`.
 
 ## Non-Goals
@@ -40,23 +40,23 @@ scope for v1 and must not be invented during implementation.
 The v1 CLI surface is fixed to the commands below:
 
 ```text
-previactl up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run] [-d, --detach] [--version <tag>]
-previactl pull [main|runner|all] [--version <version>]
-previactl down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]
-previactl restart [--context <context-name>] [--version <tag>]
-previactl status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]
-previactl list [--json]
-previactl ps [--context <context-name>] [--json]
-previactl logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
-previactl open [--context <context-name>]
-previactl version
+previa [--home <path>] up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners <N>] [--attach-runner, -a <address|address:port|port> ...] [--import, -i <path>] [--recursive, -r] [--stack, -s <name>] [--dry-run] [-d, --detach] [--version <tag>]
+previa [--home <path>] pull [main|runner|all] [--version <version>]
+previa [--home <path>] down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]
+previa [--home <path>] restart [--context <context-name>] [--version <tag>]
+previa [--home <path>] status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]
+previa [--home <path>] list [--json]
+previa [--home <path>] ps [--context <context-name>] [--json]
+previa [--home <path>] logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]
+previa [--home <path>] open [--context <context-name>]
+previa version
 ```
 
 No additional v1 commands are required beyond the surface listed above.
 
 ### Command Semantics
 
-#### `previactl up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners, -r <N>] [--attach-runner, -a <address|address:port|port> ...] [--dry-run]`
+#### `previa [--home <path>] up [--context <context-name>] [<source>] [--main-address <address>] [--main-port, -p <port>] [--runner-address <address>] [--runner-port-range, -P <start:end>] [--runners <N>] [--attach-runner, -a <address|address:port|port> ...] [--import, -i <path>] [--recursive, -r] [--stack, -s <name>] [--dry-run]`
 
 - Bootstraps a local context on the current host.
 - Executes exactly one `previa-main` process.
@@ -82,13 +82,19 @@ No additional v1 commands are required beyond the surface listed above.
 - Optionally overrides the `previa-main` listen port through
   `--main-port <port>` or `-p <port>`.
 - Optionally spawns the number of local `previa-runner` processes declared by
-  `--runners <N>` or `-r <N>`.
+  `--runners <N>`.
 - Optionally overrides the local runner bind address through
   `--runner-address <address>`.
 - Optionally overrides the local runner port allocation window through
   `--runner-port-range <start:end>` or `-P <start:end>`.
 - Optionally attaches one or more existing runner targets provided through
   repeated `--attach-runner <selector>` or `-a <selector>` flags.
+- Optionally imports pipelines from a local file or directory through
+  `--import <path>` or `-i <path>`.
+- Accepts `--recursive` or `-r` only together with `--import` to scan a
+  directory recursively for pipeline files.
+- Accepts `--stack <name>` or `-s <name>` together with `--import` to name the
+  new project created by the import.
 - `--attach-runner <selector>` accepts:
   - `port`, for example `55880`
   - `address:port`, for example `10.0.0.12:55880`
@@ -128,6 +134,24 @@ No additional v1 commands are required beyond the surface listed above.
   runner `ADDRESS`.
 - Accepts `--dry-run` to validate configuration and print the resolved context
   plan without spawning child processes or mutating runtime state.
+- In this version, `--import` requires `--detach`.
+- `--import` must not be combined with `--dry-run`.
+- `--stack` is required whenever `--import` is present.
+- Without `--recursive`, `--import <path>` must resolve to a single file whose
+  name ends with `.previa`, `.previa.json`, `.previa.yaml`, or `.previa.yml`.
+- With `--recursive`, `--import <path>` must resolve to a directory and `up`
+  must recursively collect only files ending with `.previa`, `.previa.json`,
+  `.previa.yaml`, or `.previa.yml`.
+- In recursive mode, files outside those suffixes are ignored.
+- Every collected import file must parse as a direct `Pipeline` object in JSON
+  or YAML according to its suffix; any candidate file that fails to parse or
+  validate must fail the command and report the offending path.
+- After the local `previa-main` becomes healthy, `up` must send the collected
+  pipelines to the local API endpoint `/api/v1/projects/import/pipelines`.
+- The backend import must create a new project named by `--stack` and persist
+  all pipelines atomically.
+- If the import fails after the runtime has started, the runtime remains
+  running and the CLI returns the import error.
 - Accepts `-d` and `--detach` to leave the spawned processes running in
   background.
 - Before validating local bind availability or spawning any child process, `up`
@@ -174,7 +198,7 @@ No additional v1 commands are required beyond the surface listed above.
   `PREVIA_HOME/stacks/<context-name>/logs/runners/<port>.log`.
 - Does not rewrite the context-scoped `main.env` or `runner.env`.
 
-#### `previactl pull [main|runner|all] [--version <version>]`
+#### `previa pull [main|runner|all] [--version <version>]`
 
 - Pulls published container images using the local Docker CLI.
 - Accepts `main`, `runner`, or `all` as the optional target selector.
@@ -188,9 +212,9 @@ No additional v1 commands are required beyond the surface listed above.
 - Must fail with a clear error when the Docker CLI is unavailable in `PATH`.
 - Must not require local `previa-main` or `previa-runner` binaries to exist.
 
-#### `previactl down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]`
+#### `previa down [--context <context-name>] [--all-contexts] [--runner <address|address:port|port> ...]`
 
-- Stops a local detached context started by `previactl up --detach`.
+- Stops a local detached context started by `previa up --detach`.
 - Accepts `--context <context-name>` and defaults to `default` when omitted.
 - Accepts `--all-contexts` to stop every detached context recorded under
   `PREVIA_HOME/stacks/`.
@@ -228,14 +252,14 @@ No additional v1 commands are required beyond the surface listed above.
   runner endpoints.
 - Fails with a clear error if no detached runtime file exists.
 - Does not send termination signals to attached runner endpoints because they
-  are not child processes of `previactl`.
+  are not child processes of `previa`.
 
-#### `previactl restart [--context <context-name>]`
+#### `previa restart [--context <context-name>]`
 
-- Restarts a detached local context previously started by `previactl up --detach`.
+- Restarts a detached local context previously started by `previa up --detach`.
 - Accepts `--context <context-name>` and defaults to `default` when omitted.
 - Reads the runtime file for the selected context name.
-- Stops the recorded local processes using the same behavior as `previactl down`.
+- Stops the recorded local processes using the same behavior as `previa down`.
 - Starts a new detached context using the same effective configuration recorded in
   the runtime file:
   - the recorded `main.address`
@@ -250,9 +274,9 @@ No additional v1 commands are required beyond the surface listed above.
 - Fails with a clear error if no detached runtime file exists.
 - Does not send termination signals to attached runner endpoints.
 
-#### `previactl status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]`
+#### `previa status [--context <context-name>] [--main] [--runner <address|address:port|port>] [--json]`
 
-- Reports the status of the detached local context managed by `previactl up`.
+- Reports the status of the detached local context managed by `previa up`.
 - Accepts `--context <context-name>` and defaults to `default` when omitted.
 - Reads the runtime file for the selected context name when it exists.
 - Without filters, checks both PID liveness and HTTP health for the recorded
@@ -291,12 +315,12 @@ No additional v1 commands are required beyond the surface listed above.
   section of this specification.
 - Does not interact with native service managers.
 
-#### `previactl list [--json]`
+#### `previa list [--json]`
 
 - Lists the context names currently known under `PREVIA_HOME/stacks/`.
 - Prints one context per line with its current status.
 - Context status is derived from the same runtime-state rules used by
-  `previactl status`.
+  `previa status`.
 - `list` must inspect context directories and their runtime files under
   `PREVIA_HOME/stacks/`.
 - `list` must include contexts with runtime state even if their processes are no
@@ -307,7 +331,7 @@ No additional v1 commands are required beyond the surface listed above.
 - `list --json` must use the exact schema defined in the `List JSON Schema`
   section of this specification.
 
-#### `previactl ps [--context <context-name>] [--json]`
+#### `previa ps [--context <context-name>] [--json]`
 
 - Lists the local processes tracked for a detached context.
 - Accepts `--context <context-name>` and defaults to `default` when omitted.
@@ -334,7 +358,7 @@ No additional v1 commands are required beyond the surface listed above.
 - `ps --json` must use the exact schema defined in the `PS JSON Schema`
   section of this specification.
 
-#### `previactl logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]`
+#### `previa logs [--context <context-name>] [--main] [--runner <address|address:port|port>] [--follow] [--tail, -t [<lines>]]`
 
 - Reads detached context logs from context-scoped log files.
 - Accepts `--context <context-name>` and defaults to `default` when omitted.
@@ -358,7 +382,7 @@ No additional v1 commands are required beyond the surface listed above.
 - `logs` must fail clearly when no detached runtime file exists for the
   selected context name.
 
-#### `previactl open [--context <context-name>]`
+#### `previa open [--context <context-name>]`
 
 - Opens the Previa UI in the user's default browser for the selected detached
   context.
@@ -378,18 +402,24 @@ No additional v1 commands are required beyond the surface listed above.
   name.
 - Prints the opened UI URL to stdout after the browser launch succeeds.
 
-#### `previactl version`
+#### `previa version`
 
-- Prints the `previactl` binary version.
+- Prints the `previa` binary version.
 - Does not inspect running processes.
 
 ## Filesystem Layout
 
-v1 uses `PREVIA_HOME` as the base directory for all `previactl`-generated
+v1 uses `PREVIA_HOME` as the base directory for all `previa`-generated
 files.
 
 - Environment variable:
   - `PREVIA_HOME`
+- Global CLI override:
+  - `--home <path>`
+- Resolution precedence:
+  1. `--home <path>`
+  2. `PREVIA_HOME`
+  3. `$HOME/.previa`
 - Default value when `PREVIA_HOME` is not set:
   - `$HOME/.previa`
 - Directory layout:
@@ -403,7 +433,7 @@ files.
   - `PREVIA_HOME/stacks/<context-name>/run/state.json`
   - `PREVIA_HOME/stacks/<context-name>/run/lock`
 
-Any `previactl` command that writes files must create parent directories as
+Any `previa` command that writes files must create parent directories as
 needed.
 
 In v1, context naming isolates runtime state, generated config, and generated data
@@ -455,7 +485,7 @@ Schema:
 
 Rules:
 
-- `previactl up --detach --context <context-name>` must fail if the runtime file for
+- `previa up --detach --context <context-name>` must fail if the runtime file for
   that context already exists.
 - The runtime file is written only after all child processes have been spawned
   successfully.
@@ -466,12 +496,12 @@ Rules:
 - Locking is per context name; operations against different context names may
   proceed concurrently.
 - `status`, `list`, and `ps` do not require an exclusive lock.
-- `previactl down` reads this file, terminates the recorded local processes,
+- `previa down` reads this file, terminates the recorded local processes,
   waits for them to stop, and then removes the file when stopping the full
   stack.
-- `previactl down --runner <selector>` rewrites this file after removing the
+- `previa down --runner <selector>` rewrites this file after removing the
   selected local runner entries.
-- `previactl restart` reads this file, stops the recorded local processes, and
+- `previa restart` reads this file, stops the recorded local processes, and
   uses the recorded main address, main port, local runner addresses, local
   runner count, `runner_port_range`, `attached_runners`, and compose `source`
   path when present to launch a new detached context.
@@ -480,7 +510,7 @@ Rules:
   `up` started from a compose file.
 - The runtime file must persist `log_path` for the detached `previa-main`
   process and for each detached local runner.
-- `previactl status` reads this file and reports `running`, `degraded`, or
+- `previa status` reads this file and reports `running`, `degraded`, or
   `stopped` based on file presence, PID liveness, and local `GET /health`
   probe results.
 - The runtime file must persist attached runner endpoints for status reporting
@@ -491,7 +521,7 @@ Rules:
 
 ## Health Model
 
-- `previactl status`, `list`, and `ps` must probe detached local processes
+- `previa status`, `list`, and `ps` must probe detached local processes
   using `GET /health`.
 - The `previa-main` health URL is
   `http://<main.address>:<main.port>/health`.
@@ -503,13 +533,13 @@ Rules:
   - `running` when its PID is alive and its health probe is `healthy`
   - `degraded` when its PID is alive but its health probe is not `healthy`
   - `stopped` when its PID is no longer alive
-- Attached runner endpoints are not process-managed by `previactl`, so v1 does
+- Attached runner endpoints are not process-managed by `previa`, so v1 does
   not include them in the overall stack health calculation beyond reporting
   them as configured endpoints.
 
 ## Status JSON Schema
 
-`previactl status --json` must emit a single JSON object with this exact shape:
+`previa status --json` must emit a single JSON object with this exact shape:
 
 ```json
 {
@@ -549,7 +579,7 @@ Rules:
 
 ## List JSON Schema
 
-`previactl list --json` must emit a JSON array of stack entries with this exact
+`previa list --json` must emit a JSON array of stack entries with this exact
 shape:
 
 ```json
@@ -575,7 +605,7 @@ Rules:
 
 ## PS JSON Schema
 
-`previactl ps --json` must emit a JSON array of tracked local process entries
+`previa ps --json` must emit a JSON array of tracked local process entries
 with this exact shape:
 
 ```json
@@ -611,7 +641,7 @@ Rules:
 
 ## Configuration Model
 
-`previactl` must reuse the environment variables already supported by the
+`previa` must reuse the environment variables already supported by the
 existing binaries.
 
 ### `previa-compose`
@@ -701,7 +731,7 @@ Rules:
   child process.
 - `runners.local.address` maps to the `ADDRESS` environment variable for
   spawned local `previa-runner` processes.
-- `runners.local.count` is equivalent to `--runners` / `-r`.
+- `runners.local.count` is equivalent to `--runners`.
 - `runners.local.port_range.start` and `runners.local.port_range.end` together are
   equivalent to `--runner-port-range` / `-P`.
 - `runners.local.env` injects additional environment variables into spawned
@@ -712,13 +742,13 @@ Rules:
   define only local runners, only attached runners, or both.
 - CLI flags always override values loaded from the compose file.
 - Effective environment variable precedence for each child process is:
-  - CLI-derived values that `previactl` must control directly
+  - CLI-derived values that `previa` must control directly
   - compose `env`
   - the stack-scoped `main.env` or `runner.env`
   - built-in defaults from this specification
-- `RUNNER_ENDPOINTS` is always controlled by `previactl` and must not be taken
+- `RUNNER_ENDPOINTS` is always controlled by `previa` and must not be taken
   from `main.env` in the compose file.
-- The compose file is read-only input. `previactl` must never rewrite it.
+- The compose file is read-only input. `previa` must never rewrite it.
 
 ### `main.env`
 
@@ -758,7 +788,7 @@ Notes:
 
 ## Runtime Rules
 
-`previactl up` is the v1 bootstrap command for local development, single-host
+`previa up` is the v1 bootstrap command for local development, single-host
 evaluation, and hybrid local-plus-remote runner attachment.
 
 Rules:
@@ -778,7 +808,7 @@ Rules:
 - It accepts `--main-port <port>` / `-p <port>` to override the `PORT`
   environment variable passed to the `previa-main` child process.
 - It executes exactly the local runner count declared by the operator in
-  `--runners <N>` or `-r <N>`.
+  `--runners <N>`.
 - It accepts `--runner-address <address>` to override the `ADDRESS`
   environment variable passed to spawned local `previa-runner` processes.
 - It accepts `--runner-port-range <start:end>` / `-P <start:end>` to define the
@@ -790,7 +820,7 @@ Rules:
 - It may load `main.address`, `main.port`, `main.env`, `runners.local.address`,
   `runners.local.count`, `runners.local.port_range`, `runners.local.env`, and
   `runners.attach` from a compose file.
-- It must reject `up` if `--runners 0` / `-r 0` is combined with no
+- It must reject `up` if `--runners 0` is combined with no
   `--attach-runner` / `-a`.
 - `previa-main` binds to the configured `ADDRESS` and `PORT` from
   the context-scoped `main.env` when present, except that `PORT` is overridden by
@@ -809,7 +839,7 @@ Rules:
   process so that it points to all local spawned runners followed by all
   attached runner endpoints after selector normalization.
 - Attached runner endpoints are treated as externally managed and are never
-  spawned, restarted, or terminated by `previactl`.
+  spawned, restarted, or terminated by `previa`.
 - If a compose file is used, `up` must resolve it to an absolute path before
   recording it in runtime state.
 - When `--detach` is used, stdout and stderr must be redirected to context-scoped
@@ -870,7 +900,7 @@ The implementation must surface explicit user-facing errors for:
 
 The implementation is complete only when these scenarios are covered:
 
-1. `version` prints the `previactl` binary version without requiring network.
+1. `version` prints the `previa` binary version without requiring network.
 2. `up --context api .` uses `api` as the context name.
 3. `up .` resolves `./previa-compose.yaml`, `./previa-compose.yml`, or
    `./previa-compose.json` using the documented lookup order.
@@ -881,30 +911,30 @@ The implementation is complete only when these scenarios are covered:
    `version`, main address, main port, main `env`, local runner address, local
    runner count, local runner port range, local runner `env`, and attached
    runners.
-7. `up /workspace/demo/previa-compose.yaml -p 7788 -r 2` lets the CLI flags
+7. `up /workspace/demo/previa-compose.yaml -p 7788 --runners 2` lets the CLI flags
     override the compose file values.
 8. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is
    missing.
 9. `up /workspace/demo/previa-compose.yaml` fails clearly when `version` is not
    `1`.
-10. `up --main-address 0.0.0.0 --runner-address 127.0.0.1 -r 3` starts one
+10. `up --main-address 0.0.0.0 --runner-address 127.0.0.1 --runners 3` starts one
     `previa-main` and three local runners with the requested bind addresses.
-11. `up -r 3` starts one `previa-main`, three local runners, and injects
+11. `up --runners 3` starts one `previa-main`, three local runners, and injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://127.0.0.1:55881,http://127.0.0.1:55882`
    into the `previa-main` child process.
-12. `up -p 6688 -r 1` starts `previa-main` with `PORT=6688`.
-13. `up -P 56000:56002 -r 3` starts local runners on ports
+12. `up -p 6688 --runners 1` starts `previa-main` with `PORT=6688`.
+13. `up -P 56000:56002 --runners 3` starts local runners on ports
    `56000`, `56001`, and `56002`.
-14. `up -P 56000:56001 -r 3` fails validation before spawning
+14. `up -P 56000:56001 --runners 3` fails validation before spawning
    any local child process because the range capacity is insufficient.
 15. `up` fails before spawning any child process when a requested local main or
     runner bind target is already in use.
-16. `up -r 1 -a 10.0.0.12:55880` injects
+16. `up --runners 1 -a 10.0.0.12:55880` injects
    `RUNNER_ENDPOINTS=http://127.0.0.1:55880,http://10.0.0.12:55880`
    into the `previa-main` child process.
-17. `up -r 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
+17. `up --runners 0 -a 10.0.0.12:55880` is valid and starts only `previa-main`
    locally while attaching the remote runner endpoint.
-18. `up -r 0` with no attached runner fails validation before spawning any
+18. `up --runners 0` with no attached runner fails validation before spawning any
    process.
 19. `up -a 55880` normalizes the attached runner target to
    `http://127.0.0.1:55880`.
@@ -920,7 +950,7 @@ The implementation is complete only when these scenarios are covered:
 25. `up /workspace/demo/previa-compose.yaml --detach --context api` writes the
     resolved absolute compose file path to
     `PREVIA_HOME/stacks/api/run/state.json`.
-26. `up -r 3 --detach` writes
+26. `up --runners 3 --detach` writes
     `PREVIA_HOME/stacks/default/run/state.json` with the
    `previa-main` PID and the three runner PIDs, then exits without stopping the
    spawned processes.
@@ -1016,7 +1046,7 @@ The implementation is complete only when these scenarios are covered:
     selected context name.
 72. `up --detach` fails clearly when
     `PREVIA_HOME/stacks/default/run/state.json` already exists.
-73. Any file generated by `previactl` is written under `PREVIA_HOME`.
+73. Any file generated by `previa` is written under `PREVIA_HOME`.
 
 ## Rollback and Recovery
 
@@ -1030,8 +1060,8 @@ The implementation is complete only when these scenarios are covered:
   before rewriting the runtime file, the operator must reconcile the runtime
   file manually before the next `status`, `down`, or `restart`.
 - If `restart` fails after stopping the previous detached context but before the
-  new detached context is fully ready, the operator must rerun `previactl up` or
-  `previactl restart` manually.
+  new detached context is fully ready, the operator must rerun `previa up` or
+  `previa restart` manually.
 
 ## Security and Known Risks
 
@@ -1040,7 +1070,7 @@ The implementation is complete only when these scenarios are covered:
 
 ## Implementation Notes
 
-- The future crate will be named `previactl`.
+- The crate is named `previa`.
 - It should remain separate from HTTP transport concerns and reuse dedicated
   modules for runtime state persistence, process spawning, endpoint
   validation, health probing, log access, and teardown behavior.

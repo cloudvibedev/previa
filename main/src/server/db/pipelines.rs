@@ -1,5 +1,7 @@
+use std::collections::HashSet;
+
 use previa_runner::Pipeline;
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::server::db::common::touch_project_updated_at;
 use crate::server::utils::{new_uuid_v7, now_iso, now_ms};
@@ -72,6 +74,75 @@ pub async fn load_project_pipeline_for_execution(
     Ok(serde_json::from_str::<Pipeline>(&raw)
         .ok()
         .map(|pipeline| (pipeline, position)))
+}
+
+pub async fn load_existing_project_pipeline_ids(
+    db: &SqlitePool,
+    project_id: &str,
+    pipeline_ids: &[String],
+) -> Result<HashSet<String>, sqlx::Error> {
+    if pipeline_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let unique_ids = pipeline_ids
+        .iter()
+        .map(|pipeline_id| pipeline_id.trim())
+        .filter(|pipeline_id| !pipeline_id.is_empty())
+        .collect::<Vec<_>>();
+    if unique_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let mut qb = QueryBuilder::<Sqlite>::new("SELECT id FROM pipelines WHERE project_id = ");
+    qb.push_bind(project_id);
+    qb.push(" AND id IN (");
+    {
+        let mut separated = qb.separated(", ");
+        for pipeline_id in &unique_ids {
+            separated.push_bind(*pipeline_id);
+        }
+    }
+    qb.push(")");
+
+    let rows = qb.build().fetch_all(db).await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<String, _>("id").ok())
+        .collect())
+}
+
+pub async fn load_existing_pipeline_ids(
+    db: &SqlitePool,
+    pipeline_ids: &[String],
+) -> Result<HashSet<String>, sqlx::Error> {
+    if pipeline_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let unique_ids = pipeline_ids
+        .iter()
+        .map(|pipeline_id| pipeline_id.trim())
+        .filter(|pipeline_id| !pipeline_id.is_empty())
+        .collect::<Vec<_>>();
+    if unique_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let mut qb = QueryBuilder::<Sqlite>::new("SELECT id FROM pipelines WHERE id IN (");
+    {
+        let mut separated = qb.separated(", ");
+        for pipeline_id in &unique_ids {
+            separated.push_bind(*pipeline_id);
+        }
+    }
+    qb.push(")");
+
+    let rows = qb.build().fetch_all(db).await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<String, _>("id").ok())
+        .collect())
 }
 
 pub async fn insert_project_pipeline(

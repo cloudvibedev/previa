@@ -10,6 +10,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::server::execution::forward::{parse_sse_block, send_sse_best_effort};
 use crate::server::execution::history_capture::{extract_error_message, push_load_error};
+use crate::server::execution::runner_auth::apply_runner_auth;
+use crate::server::execution::scheduler::SharedValue;
+use crate::server::execution::snapshot::build_live_load_snapshot_payload;
 use crate::server::models::{
     ConsolidatedLoadMetrics, LoadEventContext, LoadLatencyAccumulator, LoadLatencySummary,
     RunnerLoadLine,
@@ -28,8 +31,11 @@ pub async fn forward_runner_stream_load_chunked(
     load_latency: Arc<Mutex<LoadLatencyAccumulator>>,
     load_errors: Arc<Mutex<Vec<String>>>,
     load_context: Arc<LoadEventContext>,
+    execution_id: String,
+    snapshot_payload: SharedValue<Value>,
     endpoint_path: &str,
     transaction_id: Option<String>,
+    runner_auth_key: Option<&str>,
 ) {
     if cancel.is_cancelled() {
         return;
@@ -37,10 +43,13 @@ pub async fn forward_runner_stream_load_chunked(
 
     let url = format!("{}{}", node.trim_end_matches('/'), endpoint_path);
 
-    let mut request = client
-        .post(url)
-        .header("Content-Type", "application/json")
-        .header("Accept", "text/event-stream");
+    let mut request = apply_runner_auth(
+        client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream"),
+        runner_auth_key,
+    );
 
     if let Some(transaction_id) = transaction_id.as_deref() {
         request = request.header(TRANSACTION_ID_HEADER, transaction_id);
@@ -52,6 +61,16 @@ pub async fn forward_runner_stream_load_chunked(
         Ok(Ok(response)) => response,
         Ok(Err(err)) => {
             push_load_error(&load_errors, format!("runner request failed: {}", err)).await;
+            refresh_load_snapshot(
+                &execution_id,
+                &snapshot_payload,
+                &load_latest,
+                &load_latency,
+                &load_errors,
+                load_context.as_ref(),
+                "running",
+            )
+            .await;
             let payload = add_load_context_fields(
                 json!({
                     "message": format!("runner request failed: {}", err),
@@ -69,6 +88,16 @@ pub async fn forward_runner_stream_load_chunked(
         }
         Err(_) => {
             push_load_error(&load_errors, "runner request timeout".to_owned()).await;
+            refresh_load_snapshot(
+                &execution_id,
+                &snapshot_payload,
+                &load_latest,
+                &load_latency,
+                &load_errors,
+                load_context.as_ref(),
+                "running",
+            )
+            .await;
             let payload = add_load_context_fields(
                 json!({
                     "message": "runner request timeout",
@@ -91,6 +120,16 @@ pub async fn forward_runner_stream_load_chunked(
         let body_text = response.text().await.unwrap_or_default();
         let message = format!("runner returned HTTP {}: {}", status, body_text);
         push_load_error(&load_errors, message.clone()).await;
+        refresh_load_snapshot(
+            &execution_id,
+            &snapshot_payload,
+            &load_latest,
+            &load_latency,
+            &load_errors,
+            load_context.as_ref(),
+            "running",
+        )
+        .await;
         let payload = add_load_context_fields(
             json!({
                 "message": message,
@@ -126,6 +165,16 @@ pub async fn forward_runner_stream_load_chunked(
             Ok(chunk) => chunk,
             Err(err) => {
                 push_load_error(&load_errors, format!("runner stream read error: {}", err)).await;
+                refresh_load_snapshot(
+                    &execution_id,
+                    &snapshot_payload,
+                    &load_latest,
+                    &load_latency,
+                    &load_errors,
+                    load_context.as_ref(),
+                    "running",
+                )
+                .await;
                 let payload = add_load_context_fields(
                     json!({
                         "message": format!("runner stream read error: {}", err),
@@ -182,18 +231,32 @@ pub async fn forward_runner_stream_load_chunked(
 
             let mut latest_lock = load_latest.lock().await;
             latest_lock.insert(node.clone(), line);
+            drop(latest_lock);
+            refresh_load_snapshot(
+                &execution_id,
+                &snapshot_payload,
+                &load_latest,
+                &load_latency,
+                &load_errors,
+                load_context.as_ref(),
+                "running",
+            )
+            .await;
         }
     }
 }
 
 pub async fn flush_load_batches(
+    execution_id: String,
     tx: broadcast::Sender<crate::server::models::SseMessage>,
     cancel: CancellationToken,
     stop: CancellationToken,
     load_chunk: Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
     load_latest: Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
     load_latency: Arc<Mutex<LoadLatencyAccumulator>>,
+    load_errors: Arc<Mutex<Vec<String>>>,
     load_context: Arc<LoadEventContext>,
+    snapshot_payload: SharedValue<Value>,
 ) {
     let mut interval =
         tokio::time::interval(Duration::from_millis(load_context.batch_window_ms.max(1)));
@@ -212,12 +275,48 @@ pub async fn flush_load_batches(
         }
 
         let consolidated = snapshot_consolidated_metrics(&load_latest, &load_latency).await;
+        let errors = load_errors.lock().await.clone();
+        let latest_lines = snapshot_latest_lines(&load_latest).await;
+        snapshot_payload
+            .set(build_live_load_snapshot_payload(
+                &execution_id,
+                "running",
+                load_context.as_ref(),
+                &latest_lines,
+                consolidated.as_ref(),
+                &errors,
+            ))
+            .await;
         let payload = add_load_context_fields(
             json!({ "lines": lines, "consolidated": consolidated }),
             load_context.as_ref(),
         );
         let _ = send_sse_best_effort(&tx, "metrics", payload);
     }
+}
+
+async fn refresh_load_snapshot(
+    execution_id: &str,
+    snapshot_payload: &SharedValue<Value>,
+    load_latest: &Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
+    load_latency: &Arc<Mutex<LoadLatencyAccumulator>>,
+    load_errors: &Arc<Mutex<Vec<String>>>,
+    load_context: &LoadEventContext,
+    status: &str,
+) {
+    let lines = snapshot_latest_lines(load_latest).await;
+    let consolidated = snapshot_consolidated_metrics(load_latest, load_latency).await;
+    let errors = load_errors.lock().await.clone();
+    snapshot_payload
+        .set(build_live_load_snapshot_payload(
+            execution_id,
+            status,
+            load_context,
+            &lines,
+            consolidated.as_ref(),
+            &errors,
+        ))
+        .await;
 }
 
 pub async fn drain_load_chunk(
