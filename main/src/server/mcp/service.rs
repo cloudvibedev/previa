@@ -1657,8 +1657,8 @@ fn prompt_definitions() -> Vec<PromptDefinition> {
             arguments: Vec::new(),
         },
         PromptDefinition {
-            name: "pipeline_creation_specialist".to_owned(),
-            title: Some("Pipeline Creation Specialist".to_owned()),
+            name: "previa_pipeline_author".to_owned(),
+            title: Some("Previa Pipeline Author".to_owned()),
             description: Some(
                 "Detailed prompt for creating valid Previa pipelines with schemas, template variables, rules, and examples."
                     .to_owned(),
@@ -1683,7 +1683,7 @@ fn prompt_result(name: &str) -> Option<PromptGetResult> {
                 },
             }],
         }),
-        "pipeline_creation_specialist" => Some(PromptGetResult {
+        "previa_pipeline_author" | "pipeline_creation_specialist" => Some(PromptGetResult {
             description: Some(
                 "Detailed prompt for authoring Previa pipelines through MCP.".to_owned(),
             ),
@@ -1691,7 +1691,7 @@ fn prompt_result(name: &str) -> Option<PromptGetResult> {
                 role: "user".to_owned(),
                 content: PromptTextContent {
                     kind: "text",
-                    text: pipeline_creation_specialist_prompt(),
+                    text: previa_pipeline_author_prompt(),
                 },
             }],
         }),
@@ -2293,7 +2293,7 @@ fn pipeline_test_assistant_prompt() -> String {
     .join("\n")
 }
 
-fn pipeline_creation_specialist_prompt() -> String {
+fn previa_pipeline_author_prompt() -> String {
     let pipeline_schema = serde_json::to_string_pretty(&pipeline_schema()).unwrap();
     let step_schema = serde_json::to_string_pretty(&pipeline_step_schema()).unwrap();
     let assertion_schema = serde_json::to_string_pretty(&assertion_schema()).unwrap();
@@ -2387,7 +2387,7 @@ mod tests {
 
     use super::{
         execute_tool, parse_tool_arguments, pipeline_creation_guide,
-        pipeline_creation_specialist_prompt, pipeline_test_assistant_prompt, prompt_definitions,
+        previa_pipeline_author_prompt, pipeline_test_assistant_prompt, prompt_definitions,
         prompt_result, tool_definitions, validate_pipeline_input,
     };
     use crate::server::db::{
@@ -2613,7 +2613,7 @@ mod tests {
     fn pipeline_creation_prompt_is_available() {
         let prompt = prompt_definitions()
             .into_iter()
-            .find(|prompt| prompt.name == "pipeline_creation_specialist")
+            .find(|prompt| prompt.name == "previa_pipeline_author")
             .expect("pipeline creation prompt definition");
 
         assert_eq!(prompt.arguments.len(), 0);
@@ -2621,7 +2621,7 @@ mod tests {
 
     #[test]
     fn pipeline_creation_prompt_mentions_schema_variables_and_examples() {
-        let text = pipeline_creation_specialist_prompt();
+        let text = previa_pipeline_author_prompt();
 
         assert!(text.contains("Schema for pipeline"));
         assert!(text.contains("{{steps.<stepId>.<fieldPath>}}"));
@@ -2633,7 +2633,20 @@ mod tests {
     #[test]
     fn pipeline_creation_prompt_result_is_available() {
         let prompt =
-            prompt_result("pipeline_creation_specialist").expect("pipeline creation prompt result");
+            prompt_result("previa_pipeline_author").expect("pipeline creation prompt result");
+
+        assert!(
+            prompt.messages[0]
+                .content
+                .text
+                .contains("create_project_pipeline")
+        );
+    }
+
+    #[test]
+    fn legacy_pipeline_creation_prompt_alias_is_still_available() {
+        let prompt = prompt_result("pipeline_creation_specialist")
+            .expect("legacy pipeline creation prompt result");
 
         assert!(
             prompt.messages[0]
