@@ -28,6 +28,8 @@ stack management, runtime inspection, and pipeline import.
 - [E2E queues](./e2e-queues.md)
 - [Release and install](./release-install.md)
 - [Operations cheatsheet](./operations-cheatsheet.md)
+- [Proxy](./proxy.md)
+- [FAQ](./faq.md)
 - [Home and contexts](./home-and-contexts.md)
 - [Compose source](./compose.md)
 - [Up and runtime](./up-and-runtime.md)

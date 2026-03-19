@@ -98,6 +98,8 @@ Core guides:
 - [E2E queues](docs/previa/e2e-queues.md)
 - [Release and install](docs/previa/release-install.md)
 - [Operations cheatsheet](docs/previa/operations-cheatsheet.md)
+- [Proxy](docs/previa/proxy.md)
+- [FAQ](docs/previa/faq.md)
 
 Existing operator guides:
 
