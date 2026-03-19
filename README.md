@@ -96,6 +96,8 @@ Core guides:
 - [Remote runners](docs/previa/remote-runners.md)
 - [MCP integration](docs/previa/mcp.md)
 - [E2E queues](docs/previa/e2e-queues.md)
+- [Release and install](docs/previa/release-install.md)
+- [Operations cheatsheet](docs/previa/operations-cheatsheet.md)
 
 Existing operator guides:
 
