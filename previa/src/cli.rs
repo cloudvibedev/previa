@@ -27,15 +27,25 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    #[command(about = "Start a Previa context")]
     Up(UpArgs),
+    #[command(about = "Pull published runtime images")]
     Pull(PullArgs),
+    #[command(about = "Stop a detached context or selected local runners")]
     Down(DownArgs),
+    #[command(about = "Restart a detached context")]
     Restart(RestartArgs),
+    #[command(about = "Show the current state of a context")]
     Status(StatusArgs),
+    #[command(about = "List known contexts")]
     List(ListArgs),
+    #[command(about = "Show recorded processes for a context")]
     Ps(PsArgs),
+    #[command(about = "Read logs from a detached context")]
     Logs(LogsArgs),
+    #[command(about = "Open the Previa IDE with the current context")]
     Open(OpenArgs),
+    #[command(about = "Print the CLI version")]
     Version,
 }
 
@@ -47,6 +57,7 @@ pub enum PullTarget {
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Pull published runtime images")]
 pub struct PullArgs {
     #[arg(value_enum, default_value_t = PullTarget::All)]
     pub target: PullTarget,
@@ -55,6 +66,7 @@ pub struct PullArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Start a Previa context")]
 pub struct UpArgs {
     #[arg(
         long = "context",
@@ -93,6 +105,7 @@ pub struct UpArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Stop a detached context or selected local runners")]
 pub struct DownArgs {
     #[arg(
         long = "context",
@@ -108,6 +121,7 @@ pub struct DownArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Restart a detached context")]
 pub struct RestartArgs {
     #[arg(
         long = "context",
@@ -121,6 +135,7 @@ pub struct RestartArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Show the current state of a context")]
 pub struct StatusArgs {
     #[arg(
         long = "context",
@@ -138,12 +153,14 @@ pub struct StatusArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(about = "List known contexts")]
 pub struct ListArgs {
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Show recorded processes for a context")]
 pub struct PsArgs {
     #[arg(
         long = "context",
@@ -157,6 +174,7 @@ pub struct PsArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Read logs from a detached context")]
 pub struct LogsArgs {
     #[arg(
         long = "context",
@@ -182,6 +200,7 @@ pub struct LogsArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Open the Previa IDE with the current context")]
 pub struct OpenArgs {
     #[arg(
         long = "context",
