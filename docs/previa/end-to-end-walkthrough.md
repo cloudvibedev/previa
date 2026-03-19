@@ -52,7 +52,7 @@ Create a minimal project spec with a named runtime URL such as `hml`:
 {
   "slug": "users",
   "urls": [
-    { "name": "hml", "url": "https://hml.cloudvibe.dev" }
+    { "name": "hml", "url": "https://hml.example.com" }
   ],
   "sync": false,
   "live": false,
