@@ -4,11 +4,14 @@
 
 # Previa
 
-Previa is a local-first CLI for running and operating a Previa stack on your machine.
-With `previa` you can start a local `previa-main`, manage local and attached runners,
-inspect runtime health, open the UI, and import pipeline files for local testing.
+Previa is a platform for simulating, executing, and tracing real end-to-end operations,
+so you can see exactly what happened, where a failure occurred, and why.
 
-## What You Can Do With `previa`
+The `previa` CLI is the local-first entry point for running and operating a Previa stack
+on your machine. With it, you can start a local `previa-main`, manage local and attached
+runners, inspect runtime health, open the UI, and import pipeline files for local testing.
+
+## What You Can Do With Previa
 
 - Start a local stack with `previa-main` and local runners
 - Isolate environments with `context` names and `--home`
