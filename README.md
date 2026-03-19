@@ -4,118 +4,520 @@
 
 # Previa
 
-Previa is a platform for simulating, executing, and tracing real end-to-end operations,
-so you can see exactly what happened, where a failure occurred, and why.
+**The first AI-First IDE for QA. Test, design, and validate APIs with AI assistance from your desktop, CI/CD, or your favorite AI assistant.**
 
-The `previa` CLI is the local-first entry point for running and operating a Previa stack
-on your machine. With it, you can start a local `previa-main`, manage local and attached
-runners, inspect runtime health, open the UI, and import pipeline files for local testing.
+Previa is a platform for simulating, executing, and tracing real end-to-end API operations so you can understand exactly what happened, where a failure occurred, and why.
 
-## What You Can Do With Previa
+The `previa` CLI is the local entry point for running a Previa stack on your machine. It starts `previa-main`, manages local and attached `previa-runner` instances, opens the IDE in the browser, and helps you bootstrap projects from pipeline files.
 
-- Start a local stack with `previa-main` and local runners
-- Isolate environments with `context` names and `--home`
-- Run in detached mode and inspect state later
-- Use a `previa-compose.yaml|yml|json` file as runtime input
-- Import local pipeline files with `--import`
-- Check status, processes, logs, and open the hosted UI with your local context
+## What Is Previa?
+
+Previa combines local runtime operations with project-scoped API testing workflows:
+
+- `previa` runs and manages the local stack
+- `previa-main` is the orchestrator API for projects, specs, pipelines, history, proxying, and test execution
+- `previa-runner` executes E2E and load tests
+- `previa-engine` resolves templates, performs HTTP steps, and evaluates assertions
+- the browser IDE at `https://ide.previa.dev` connects to your local `previa-main`
+- MCP integrations can drive project, spec, pipeline, and execution workflows through the same platform
+
+## Summary
+
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Use Cases](#use-cases)
+- [Previa Compose](#previa-compose)
+- [PREVIA_HOME](#previa_home)
+- [Import Pipeline Files From a Repository](#import-pipeline-files-from-a-repository)
+- [Import and Export Projects](#import-and-export-projects)
+- [Final Notes](#final-notes)
+- [License](#license)
 
 ## Install
 
-### Linux
+Install the CLI with:
 
 ```bash
 curl -fsSL https://downloads.previa.dev/install.sh | sh
 ```
 
-Direct script URL:
-
-```text
-https://downloads.previa.dev/install.sh
-```
-
-The installer writes `previa` to `~/.previa/bin`, sets `PREVIA_HOME="$HOME/.previa"`,
-and updates `~/.zshrc` and `~/.bashrc` when they exist.
+Today the installer targets Linux and writes `previa` under `~/.previa/bin`, while also setting `PREVIA_HOME="$HOME/.previa"`.
 
 ## Quick Start
 
-Start the local stack:
+`-d` is the short form of `--detach`.
+
+Start a Docker-backed stack:
 
 ```bash
-previa up --detach
+previa up -d
 ```
 
-Check status and open the UI:
+This is the general runtime path when Docker is available.
+
+Start a binary-backed stack without Docker:
+
+```bash
+previa up -d --bin
+```
+
+This mode uses local `previa-main` and `previa-runner` binaries. Published runtime binaries are currently Linux-only.
+
+Inspect the runtime and open the IDE:
 
 ```bash
 previa status
 previa open
 ```
 
-Use a local runtime home inside your repo:
+`previa open` launches your default browser with a URL in this shape:
+
+```text
+https://ide.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588
+```
+
+That URL attaches your local `previa-main` context to the hosted IDE at `https://ide.previa.dev`.
+
+## Use Cases
+
+The examples below assume you already started a local stack with `previa up -d` or `previa up -d --bin`.
+
+Important boundary:
+
+- use the CLI to start and operate the local stack
+- use the IDE, API, or MCP to create projects, specs, pipelines, and executions
+
+### 1. Create a CRUD users API spec
+
+Create a project:
 
 ```bash
-previa --home ./.previa up --detach
+curl -sS http://127.0.0.1:5588/api/v1/projects \
+  -H 'content-type: application/json' \
+  -d '{
+    "name": "Users API",
+    "description": "CRUD validation for the users service",
+    "pipelines": []
+  }'
+```
+
+Copy the returned `id` and reuse it below:
+
+```bash
+PROJECT_ID="<project-id>"
+```
+
+Create a project spec with multiple base URLs and an OpenAPI document:
+
+```bash
+curl -sS http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/specs \
+  -H 'content-type: application/json' \
+  -d @- <<'JSON'
+{
+  "slug": "users",
+  "urls": [
+    {
+      "name": "hml",
+      "url": "https://hml.cloudvibe.dev",
+      "description": "Homologation environment"
+    },
+    {
+      "name": "prd",
+      "url": "https://api.cloudvibe.dev",
+      "description": "Production environment"
+    }
+  ],
+  "sync": false,
+  "live": false,
+  "spec": {
+    "openapi": "3.0.3",
+    "info": {
+      "title": "Users API",
+      "version": "1.0.0"
+    },
+    "paths": {
+      "/users": {
+        "get": {
+          "responses": {
+            "200": {
+              "description": "List users"
+            }
+          }
+        },
+        "post": {
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["name", "email"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "email": { "type": "string", "format": "email" }
+                  }
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": "User created"
+            }
+          }
+        }
+      },
+      "/users/{id}": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "get": {
+          "responses": {
+            "200": { "description": "User found" },
+            "404": { "description": "User not found" }
+          }
+        },
+        "delete": {
+          "responses": {
+            "204": { "description": "User deleted" }
+          }
+        }
+      }
+    }
+  }
+}
+JSON
+```
+
+At this point the project has a runtime spec slug called `users`, which can be referenced from pipelines as `{{specs.users.url.hml}}` or `{{specs.users.url.prd}}`.
+
+### 2. Create a pipeline for that API
+
+Create a project pipeline through the API:
+
+```bash
+curl -sS http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/pipelines \
+  -H 'content-type: application/json' \
+  -d @- <<'JSON'
+{
+  "name": "Users CRUD flow",
+  "description": "Creates, fetches, and deletes a user through the users API.",
+  "steps": [
+    {
+      "id": "create_user",
+      "name": "Create user",
+      "method": "POST",
+      "url": "{{specs.users.url.hml}}/users",
+      "headers": {
+        "content-type": "application/json",
+        "x-request-id": "{{helpers.uuid}}"
+      },
+      "body": {
+        "name": "{{helpers.name}}",
+        "email": "{{helpers.email}}"
+      },
+      "asserts": [
+        {
+          "field": "status",
+          "operator": "equals",
+          "expected": "201"
+        }
+      ]
+    },
+    {
+      "id": "get_user",
+      "name": "Get user",
+      "method": "GET",
+      "url": "{{specs.users.url.hml}}/users/{{steps.create_user.id}}",
+      "headers": {},
+      "asserts": [
+        {
+          "field": "status",
+          "operator": "equals",
+          "expected": "200"
+        },
+        {
+          "field": "body.email",
+          "operator": "equals",
+          "expected": "{{steps.create_user.email}}"
+        }
+      ]
+    },
+    {
+      "id": "delete_user",
+      "name": "Delete user",
+      "method": "DELETE",
+      "url": "{{specs.users.url.hml}}/users/{{steps.create_user.id}}",
+      "headers": {},
+      "asserts": [
+        {
+          "field": "status",
+          "operator": "equals",
+          "expected": "204"
+        }
+      ]
+    }
+  ]
+}
+JSON
+```
+
+Copy the returned pipeline `id` for execution:
+
+```bash
+PIPELINE_ID="<pipeline-id>"
+```
+
+### 3. Run an E2E test against the users API
+
+Run the stored project pipeline as an E2E execution:
+
+```bash
+curl -N http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/tests/e2e \
+  -H 'content-type: application/json' \
+  -d @- <<JSON
+{
+  "pipelineId": "$PIPELINE_ID",
+  "selectedBaseUrlKey": "hml",
+  "specs": []
+}
+JSON
+```
+
+The response is an SSE stream with events such as `execution:init`, `step:start`, `step:result`, and `pipeline:complete`.
+
+### 4. Run a load test against the users API
+
+Run a load test for the same stored pipeline:
+
+```bash
+curl -N http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/tests/load \
+  -H 'content-type: application/json' \
+  -d @- <<JSON
+{
+  "pipelineId": "$PIPELINE_ID",
+  "selectedBaseUrlKey": "hml",
+  "config": {
+    "totalRequests": 1000,
+    "concurrency": 20,
+    "rampUpSeconds": 10
+  },
+  "specs": []
+}
+JSON
+```
+
+This response is also an SSE stream, with repeated `metrics` events followed by `complete`.
+
+## Previa Compose
+
+`previa up` can read a compose-like runtime description from:
+
+- `previa-compose.yaml`
+- `previa-compose.yml`
+- `previa-compose.json`
+
+Example `previa-compose.yaml`:
+
+```yaml
+version: 1
+main:
+  address: 0.0.0.0
+  port: 5588
+  env:
+    RUST_LOG: info
+runners:
+  local:
+    address: 127.0.0.1
+    count: 2
+    port_range:
+      start: 55880
+      end: 55889
+    env:
+      RUST_LOG: info
+  attach:
+    - 10.0.0.12:55880
+```
+
+Run it from the current directory:
+
+```bash
+previa up .
+```
+
+Run it from an explicit file path:
+
+```bash
+previa up ./previa-compose.yaml
+```
+
+CLI flags still override values from the compose source.
+
+## PREVIA_HOME
+
+`PREVIA_HOME` is the root directory for local Previa state.
+
+Resolution order:
+
+1. `--home <path>`
+2. `PREVIA_HOME`
+3. `$HOME/.previa`
+
+Typical layout:
+
+```text
+$PREVIA_HOME/
+  bin/
+    previa
+    previa-main
+    previa-runner
+  stacks/
+    <context>/
+      config/
+        main.env
+        runner.env
+      data/
+        main/
+          orchestrator.db
+      logs/
+        main.log
+        runners/
+          <port>.log
+      run/
+        docker-compose.generated.yaml
+        lock
+        state.json
+```
+
+Use a project-local home when you want a self-contained environment inside a repository:
+
+```bash
+previa --home ./.previa up -d
 previa --home ./.previa status
+previa --home ./.previa open
 ```
 
-Import local pipeline files into a new project:
+That is the current way to create a local Previa environment scoped to the repo. A future `--local` convenience flag could wrap the same idea, but `--local` is not a CLI flag today.
+
+## Import Pipeline Files From a Repository
+
+Previa can bootstrap a new local project from pipeline files when the runtime starts.
+
+Supported pipeline suffixes are:
+
+- `.previa`
+- `.previa.json`
+- `.previa.yaml`
+- `.previa.yml`
+
+Example pipeline file:
+
+```yaml
+id: users-crud
+name: Users CRUD flow
+description: CRUD regression coverage for the users API.
+steps:
+  - id: create_user
+    name: Create user
+    method: POST
+    url: https://hml.cloudvibe.dev/users
+    headers:
+      content-type: application/json
+      x-request-id: "{{helpers.uuid}}"
+    body:
+      name: "{{helpers.name}}"
+      email: "{{helpers.email}}"
+    asserts:
+      - field: status
+        operator: equals
+        expected: "201"
+  - id: get_user
+    name: Get user
+    method: GET
+    url: https://hml.cloudvibe.dev/users/{{steps.create_user.id}}
+    headers: {}
+    asserts:
+      - field: status
+        operator: equals
+        expected: "200"
+  - id: delete_user
+    name: Delete user
+    method: DELETE
+    url: https://hml.cloudvibe.dev/users/{{steps.create_user.id}}
+    headers: {}
+    asserts:
+      - field: status
+        operator: equals
+        expected: "204"
+```
+
+Import a single file into a freshly started detached stack:
 
 ```bash
-previa up --detach --import ./api-smoke.previa.yaml --stack smoke_tests
+previa up -d --import ./tests/e2e/users-crud.previa.yaml --stack users_api
 ```
 
-Import a directory recursively:
+Import an entire directory recursively:
 
 ```bash
-previa up --detach -i ./tests/e2e -r -s app_e2e
+previa up -d -i ./tests/e2e -r -s users_api
 ```
 
-Optionally pull a specific image tag first:
+This creates a new local project named by `--stack` and stores the imported pipelines under that project.
+
+## Import and Export Projects
+
+Project bundle import and export exist today through the platform API, not as dedicated `previa import` or `previa export` CLI commands.
+
+Export a project bundle:
 
 ```bash
-previa pull all --version 0.0.7
-previa up --detach --version 0.0.7
+curl -sS "http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/export?includeHistory=true" \
+  -o users-api.project.json
 ```
 
-## Documentation
+Import the same bundle into another Previa environment:
 
-Start here for the full CLI docs:
+```bash
+curl -sS http://127.0.0.1:5588/api/v1/projects/import?includeHistory=true \
+  -H 'content-type: application/json' \
+  -d @users-api.project.json
+```
+
+This flow is useful for moving project definitions, specs, pipelines, and optional execution history between environments. If you are using MCP, the same capability is also exposed there through project migration tools.
+
+## Final Notes
+
+Previa can be used in several layers at once:
+
+- locally through the `previa` CLI
+- visually through the IDE at `https://ide.previa.dev`
+- programmatically through the HTTP API exposed by `previa-main`
+- remotely through MCP-enabled assistants
+
+For more detail, start with:
 
 - [Previa CLI docs index](docs/previa/README.md)
-
-Feature guides:
-
 - [Getting started](docs/previa/getting-started.md)
-- [Home and contexts](docs/previa/home-and-contexts.md)
 - [Compose source](docs/previa/compose.md)
-- [Up and runtime](docs/previa/up-and-runtime.md)
+- [Home and contexts](docs/previa/home-and-contexts.md)
 - [Pipeline import](docs/previa/pipeline-import.md)
 - [Operations](docs/previa/operations.md)
 - [Troubleshooting](docs/previa/troubleshooting.md)
-
-Technical reference:
-
 - [CLI specification](docs/specs/previa-v1.md)
 
-## Workspace
-
-Previa is built from four Rust crates:
+Workspace components:
 
 - `previa` - local operations CLI
 - `previa-main` - orchestrator API
 - `previa-runner` - execution API
 - `previa-engine` - pipeline execution core
 
-Crate READMEs:
+## License
 
-- [engine/README.md](engine/README.md)
-- [runner/README.md](runner/README.md)
-- [main/README.md](main/README.md)
-
-## Local Verification
-
-```bash
-cargo check --workspace
-cargo test --workspace
-```
+Previa is released under the MIT License.
