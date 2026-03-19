@@ -2,6 +2,15 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.7] - 2026-03-19
+
+### Other Changes
+- Atualiza versão para 1.0.0-alpha.7 no Cargo.lock e Cargo.toml (53d95bf)
+- Use legacy-compatible compose port syntax (6b9a918)
+- Refresh README badge URLs (e688c15)
+
+Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.6...v1.0.0-alpha.7
+
 ## [v1.0.0-alpha.6] - 2026-03-19
 
 ### Other Changes
