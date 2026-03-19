@@ -14,6 +14,7 @@ It currently:
 
 - downloads `latest.json` from `https://downloads.previa.dev/latest.json`
 - resolves the latest published version and links
+- detects Linux or macOS before choosing the `previa` control binary to install
 - installs the `previa` CLI under `~/.previa/bin`
 - sets `PREVIA_HOME="$HOME/.previa"`
 - updates `~/.zshrc` and `~/.bashrc` when they exist
@@ -23,6 +24,8 @@ It currently:
 The installer installs the `previa` control binary.
 
 Published Linux binaries are built against `musl` so they stay portable across a wider range of Linux distributions and do not depend on a very recent host `glibc`.
+
+On macOS, the installer resolves the `previa` control binary for macOS. When the manifest does not yet expose a direct macOS download link, the installer falls back to the matching GitHub Release asset for the resolved version.
 
 At runtime, `previa up --bin` can also fetch missing runtime binaries such as:
 

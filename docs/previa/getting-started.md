@@ -14,13 +14,13 @@ If you want the shortest operator flow, it is:
 
 ## Install
 
-On Linux:
+On Linux or macOS:
 
 ```bash
 curl -fsSL https://downloads.previa.dev/install.sh | sh
 ```
 
-The installer places `previa` under `~/.previa/bin` and configures
+The installer detects the local OS, places `previa` under `~/.previa/bin`, and configures
 `PREVIA_HOME="$HOME/.previa"`.
 
 ## First Local Stack

@@ -2,7 +2,8 @@
 
 set -eu
 
-MANIFEST_URL="https://downloads.previa.dev/latest.json"
+MANIFEST_URL="${MANIFEST_URL:-https://downloads.previa.dev/latest.json}"
+PREVIA_RELEASE_BASE_URL="${PREVIA_RELEASE_BASE_URL:-https://github.com/cloudvibedev/previa/releases/download}"
 PREVIA_HOME_DEFAULT="${HOME}/.previa"
 PREVIA_BIN_DIR="${PREVIA_HOME_DEFAULT}/bin"
 RC_BEGIN="# >>> Previa installer >>>"
@@ -136,18 +137,52 @@ PY
 }
 
 detect_platform() {
-  os_name="$(uname -s)"
-  arch_name="$(uname -m)"
+  os_name="${PREVIA_INSTALL_OS:-$(uname -s)}"
+  arch_name="${PREVIA_INSTALL_ARCH:-$(uname -m)}"
 
   case "${os_name}" in
     Linux) OS_SLUG="linux" ;;
-    *) fail "Unsupported operating system: ${os_name}. Previa binaries are published for Linux only." ;;
+    Darwin) OS_SLUG="macos" ;;
+    *) fail "Unsupported operating system: ${os_name}. Previa install script currently supports Linux and macOS." ;;
   esac
 
   case "${arch_name}" in
     x86_64|amd64) ARCH_SLUG="amd64" ;;
-    arm64|aarch64) ARCH_SLUG="arm64" ;;
+    arm64|aarch64)
+      if [ "${OS_SLUG}" = "linux" ]; then
+        ARCH_SLUG="arm64"
+      else
+        ARCH_SLUG="amd64"
+        warn "macOS arm64 currently installs the published amd64 control binary. Rosetta 2 may be required."
+      fi
+      ;;
     *) fail "Unsupported architecture: ${arch_name}." ;;
+  esac
+}
+
+release_asset_url() {
+  asset_name="$1"
+  printf "%s/v%s/%s\n" "${PREVIA_RELEASE_BASE_URL}" "${VERSION}" "${asset_name}"
+}
+
+resolve_binary_url() {
+  manifest_key="$1"
+  asset_name="$2"
+
+  url="$(manifest_value ".links[\"${manifest_key}\"]")"
+  if [ -n "${url}" ] && [ "${url}" != "null" ]; then
+    printf "%s\n" "${url}"
+    return
+  fi
+
+  case "${OS_SLUG}" in
+    macos)
+      warn "Manifest is missing link '${manifest_key}'. Falling back to GitHub Release asset ${asset_name}."
+      release_asset_url "${asset_name}"
+      ;;
+    *)
+      fail "Manifest is missing link '${manifest_key}'."
+      ;;
   esac
 }
 
@@ -206,18 +241,17 @@ configure_shell_env() {
 }
 
 install_binary() {
-  remote_name="$1"
+  asset_name="$1"
   local_name="$2"
   manifest_key="$3"
   target_path="${PREVIA_BIN_DIR}/${local_name}"
 
-  url="$(manifest_value ".links[\"${manifest_key}\"]")"
-  [ -n "${url}" ] && [ "${url}" != "null" ] || fail "Manifest is missing link '${manifest_key}'."
+  url="$(resolve_binary_url "${manifest_key}" "${asset_name}")"
 
   info "Downloading ${local_name}"
-  download_to "${url}" "${TEMP_DIR}/${remote_name}"
-  chmod +x "${TEMP_DIR}/${remote_name}" || fail "Failed to mark ${local_name} as executable."
-  cp "${TEMP_DIR}/${remote_name}" "${target_path}" || fail "Failed to install ${local_name} into ${PREVIA_BIN_DIR}."
+  download_to "${url}" "${TEMP_DIR}/${asset_name}"
+  chmod +x "${TEMP_DIR}/${asset_name}" || fail "Failed to mark ${local_name} as executable."
+  cp "${TEMP_DIR}/${asset_name}" "${target_path}" || fail "Failed to install ${local_name} into ${PREVIA_BIN_DIR}."
   chmod +x "${target_path}" || fail "Failed to finalize permissions for ${local_name}."
   success "Installed ${local_name} -> ${target_path}"
 }
@@ -246,7 +280,7 @@ main() {
 
   info "Installing previa into ${PREVIA_BIN_DIR}"
   mkdir -p "${PREVIA_BIN_DIR}" || fail "Failed to create ${PREVIA_BIN_DIR}."
-  install_binary "previa" "previa" "previa_${OS_SLUG}_${ARCH_SLUG}"
+  install_binary "previa-${OS_SLUG}-${ARCH_SLUG}" "previa" "previa_${OS_SLUG}_${ARCH_SLUG}"
 
   info "Configuring PREVIA_HOME and PATH"
   configure_shell_env
