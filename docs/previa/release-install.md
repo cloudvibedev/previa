@@ -35,6 +35,36 @@ Those are installed under:
 $PREVIA_HOME/bin
 ```
 
+## Uninstall
+
+To remove a default installation, delete `~/.previa` and remove the installer block from your shell rc files.
+
+Remove the default home:
+
+```bash
+rm -rf ~/.previa
+```
+
+If you installed Previa into a custom home, remove that directory instead:
+
+```bash
+rm -rf "$PREVIA_HOME"
+```
+
+Then remove the lines added by the installer between:
+
+```text
+# >>> Previa installer >>>
+# <<< Previa installer <<<
+```
+
+The installer may write that block to:
+
+- `~/.zshrc`
+- `~/.bashrc`
+
+After removing the block, open a new shell or reload your rc file so `PATH` no longer includes `PREVIA_HOME/bin`.
+
 ## `latest.json`
 
 The release workflow publishes a manifest at:
