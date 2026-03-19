@@ -2,6 +2,13 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.8] - 2026-03-19
+
+### Other Changes
+- Atualiza versão para 1.0.0-alpha.8 no Cargo.lock e Cargo.toml (b668f2e)
+
+Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.7...v1.0.0-alpha.8
+
 ## [v1.0.0-alpha.7] - 2026-03-19
 
 ### Other Changes
