@@ -33,6 +33,7 @@ use crate::compose::{
     desired_state_from_resolved, write_generated_compose,
 };
 use crate::config::{ResolvedUpConfig, resolve_up_config};
+use crate::envfile::{read_env_file, write_env_file};
 use crate::health::{
     DerivedState, probe_health, state_from_pid_and_health, state_from_running_and_health,
 };
@@ -100,6 +101,7 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
 
     let _lock = acquire_lock(&stack_paths)?;
     ensure_context_not_running(&stack_paths).await?;
+    persist_generated_runner_auth_key(&stack_paths, &resolved)?;
 
     match resolved.backend {
         RuntimeBackend::Compose => {
@@ -521,6 +523,25 @@ async fn ensure_context_not_running(stack_paths: &StackPaths) -> Result<()> {
             }
         }
     }
+
+    Ok(())
+}
+
+fn persist_generated_runner_auth_key(
+    stack_paths: &StackPaths,
+    resolved: &ResolvedUpConfig,
+) -> Result<()> {
+    let Some(generated_key) = resolved.generated_runner_auth_key.as_ref() else {
+        return Ok(());
+    };
+
+    let mut main_env = read_env_file(&stack_paths.main_env)?;
+    main_env.insert("RUNNER_AUTH_KEY".to_owned(), generated_key.clone());
+    write_env_file(&stack_paths.main_env, &main_env)?;
+
+    let mut runner_env = read_env_file(&stack_paths.runner_env)?;
+    runner_env.insert("RUNNER_AUTH_KEY".to_owned(), generated_key.clone());
+    write_env_file(&stack_paths.runner_env, &runner_env)?;
 
     Ok(())
 }

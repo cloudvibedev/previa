@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::cli::UpArgs;
 use crate::download::ensure_runtime_binaries;
@@ -30,6 +31,7 @@ pub struct ResolvedUpConfig {
     pub local_runners: Vec<RunnerLaunch>,
     pub local_runner_ports: Vec<(String, u16)>,
     pub attached_runners: Vec<String>,
+    pub generated_runner_auth_key: Option<String>,
     pub dry_run: bool,
     pub detach: bool,
 }
@@ -124,6 +126,7 @@ impl ResolvedUpConfig {
                 .map(|runner| (runner.address.clone(), runner.port))
                 .collect(),
             attached_runners: state.attached_runners.clone(),
+            generated_runner_auth_key: None,
             dry_run: false,
             detach: true,
         })
@@ -316,6 +319,13 @@ pub async fn resolve_up_config(
         .iter()
         .map(|value| normalize_attach_runner(value))
         .collect::<Result<Vec<_>>>()?;
+    let compose_main_env = compose
+        .as_ref()
+        .and_then(|compose| compose.main.as_ref()?.env.clone());
+    let compose_runner_env = compose
+        .as_ref()
+        .and_then(|compose| compose.runners.as_ref()?.local.as_ref()?.env.clone())
+        .unwrap_or_default();
 
     if local_runner_count == 0 && attached_runners.is_empty() {
         bail!("up requires at least one local or attached runner");
@@ -329,10 +339,8 @@ pub async fn resolve_up_config(
     }
 
     let mut main_env = merge_env(default_main_env_map(stack_paths), main_env_file);
-    if let Some(compose_main) = compose.as_ref().and_then(|compose| compose.main.as_ref()) {
-        if let Some(extra_env) = &compose_main.env {
-            main_env = merge_env(main_env, extra_env.clone());
-        }
+    if let Some(extra_env) = &compose_main_env {
+        main_env = merge_env(main_env, extra_env.clone());
     }
     main_env.insert("ADDRESS".to_owned(), main_address.clone());
     main_env.insert("PORT".to_owned(), main_port.to_string());
@@ -340,19 +348,32 @@ pub async fn resolve_up_config(
     main_env
         .entry("ORCHESTRATOR_DATABASE_URL".to_owned())
         .or_insert_with(|| sqlite_database_url(&stack_paths.orchestrator_db));
-    if let Some(runner_auth_key) = process_runner_auth_key() {
-        main_env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key);
+    let mut effective_runner_auth_key = resolve_runner_auth_key(
+        process_runner_auth_key(),
+        compose_main_env.as_ref(),
+        &compose_runner_env,
+        &main_env,
+        &runner_env_file,
+    );
+    let generated_runner_auth_key = if effective_runner_auth_key.is_none()
+        && attached_runners.is_empty()
+        && local_runner_count > 0
+    {
+        let key = Uuid::new_v4().to_string();
+        effective_runner_auth_key = Some(key.clone());
+        Some(key)
+    } else {
+        None
+    };
+    if let Some(runner_auth_key) = effective_runner_auth_key.as_ref() {
+        main_env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key.clone());
     }
-    if !attached_runners.is_empty() && configured_runner_auth_key(&main_env).is_none() {
+    if !attached_runners.is_empty() && effective_runner_auth_key.is_none() {
         bail!("RUNNER_AUTH_KEY is required when using --attach-runner");
     }
 
     let mut local_runners = Vec::with_capacity(local_runner_count);
     let mut local_runner_ports = Vec::with_capacity(local_runner_count);
-    let compose_runner_env = compose
-        .as_ref()
-        .and_then(|compose| compose.runners.as_ref()?.local.as_ref()?.env.clone())
-        .unwrap_or_default();
 
     for offset in 0..local_runner_count {
         let port = runner_port_range.start + offset as u16;
@@ -360,8 +381,8 @@ pub async fn resolve_up_config(
         env = merge_env(env, compose_runner_env.clone());
         env.insert("ADDRESS".to_owned(), runner_address.clone());
         env.insert("PORT".to_owned(), port.to_string());
-        if let Some(runner_auth_key) = process_runner_auth_key() {
-            env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key);
+        if let Some(runner_auth_key) = effective_runner_auth_key.as_ref() {
+            env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key.clone());
         }
         local_runners.push(RunnerLaunch {
             address: runner_address.clone(),
@@ -394,6 +415,7 @@ pub async fn resolve_up_config(
         local_runners,
         local_runner_ports,
         attached_runners,
+        generated_runner_auth_key,
         dry_run: args.dry_run,
         detach: args.detach,
     })
@@ -410,6 +432,23 @@ fn configured_runner_auth_key(env: &BTreeMap<String, String>) -> Option<&str> {
     env.get("RUNNER_AUTH_KEY")
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
+}
+
+fn resolve_runner_auth_key(
+    process_value: Option<String>,
+    compose_main_env: Option<&BTreeMap<String, String>>,
+    compose_runner_env: &BTreeMap<String, String>,
+    main_env: &BTreeMap<String, String>,
+    runner_env: &BTreeMap<String, String>,
+) -> Option<String> {
+    process_value.or_else(|| {
+        compose_main_env
+            .and_then(configured_runner_auth_key)
+            .or_else(|| configured_runner_auth_key(compose_runner_env))
+            .or_else(|| configured_runner_auth_key(main_env))
+            .or_else(|| configured_runner_auth_key(runner_env))
+            .map(ToOwned::to_owned)
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -557,9 +596,10 @@ mod tests {
     use tempfile::TempDir;
     use tokio::net::TcpListener;
 
-    use super::{configured_runner_auth_key, resolve_up_config};
+    use super::{configured_runner_auth_key, resolve_runner_auth_key, resolve_up_config};
     use crate::cli::UpArgs;
     use crate::paths::PreviaPaths;
+    use uuid::Uuid;
 
     #[derive(Clone)]
     struct TestServerState {
@@ -799,5 +839,68 @@ mod tests {
             Some("attached-secret")
         );
         assert_eq!(resolved.attached_runners, vec!["http://127.0.0.1:55880"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_up_config_generates_runner_auth_key_for_local_runners() {
+        let (_temp, paths) = temp_paths();
+        let stack_paths = paths.stack("default");
+        let mut args = base_args();
+        args.bin = false;
+
+        let resolved = resolve_up_config(&paths, &stack_paths, args)
+            .await
+            .expect("local-only config resolves");
+
+        let generated = resolved
+            .generated_runner_auth_key
+            .as_ref()
+            .expect("generated auth key");
+        assert!(Uuid::parse_str(generated).is_ok());
+        assert_eq!(
+            configured_runner_auth_key(&resolved.main_env),
+            Some(generated.as_str())
+        );
+        assert_eq!(
+            configured_runner_auth_key(&resolved.local_runners[0].env),
+            Some(generated.as_str())
+        );
+    }
+
+    #[test]
+    fn resolve_runner_auth_key_prefers_process_then_compose_then_env_files() {
+        let compose_main = BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "compose-main".to_owned())]);
+        let compose_runner =
+            BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "compose-runner".to_owned())]);
+        let main_env = BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "main-env".to_owned())]);
+        let runner_env =
+            BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "runner-env".to_owned())]);
+
+        assert_eq!(
+            resolve_runner_auth_key(
+                Some("process".to_owned()),
+                Some(&compose_main),
+                &compose_runner,
+                &main_env,
+                &runner_env
+            ),
+            Some("process".to_owned())
+        );
+        assert_eq!(
+            resolve_runner_auth_key(None, Some(&compose_main), &compose_runner, &main_env, &runner_env),
+            Some("compose-main".to_owned())
+        );
+        assert_eq!(
+            resolve_runner_auth_key(None, None, &compose_runner, &main_env, &runner_env),
+            Some("compose-runner".to_owned())
+        );
+        assert_eq!(
+            resolve_runner_auth_key(None, None, &BTreeMap::new(), &main_env, &runner_env),
+            Some("main-env".to_owned())
+        );
+        assert_eq!(
+            resolve_runner_auth_key(None, None, &BTreeMap::new(), &BTreeMap::new(), &runner_env),
+            Some("runner-env".to_owned())
+        );
     }
 }

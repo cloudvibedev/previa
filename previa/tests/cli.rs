@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use assert_cmd::prelude::*;
 use tempfile::TempDir;
+use uuid::Uuid;
 
 fn python3_available() -> bool {
     Command::new("python3").arg("--version").output().is_ok()
@@ -710,6 +711,13 @@ fn read_generated_compose(previa_home: &Path, context: &str) -> serde_json::Valu
     .expect("generated compose json")
 }
 
+fn read_env_var(path: &Path, key: &str) -> Option<String> {
+    fs::read_to_string(path)
+        .expect("read env file")
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}=")).map(|value| value.to_owned()))
+}
+
 #[test]
 fn dry_run_rejects_detach() {
     let temp = setup_fake_docker();
@@ -1123,6 +1131,55 @@ runners:
         generated["services"][format!("runner-{runner_port}")]["environment"]["RUNNER_AUTH_KEY"],
         "process-key"
     );
+}
+
+#[test]
+fn up_auto_generates_runner_auth_key_for_local_runners() {
+    let temp = setup_fake_docker();
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    command
+        .args([
+            "up",
+            "--detach",
+            "-p",
+            &main_port.to_string(),
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "--runners",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let generated = read_generated_compose(temp.path(), "default");
+    let main_key = generated["services"]["main"]["environment"]["RUNNER_AUTH_KEY"]
+        .as_str()
+        .expect("main runner auth key");
+    let runner_key =
+        generated["services"][format!("runner-{runner_port}")]["environment"]["RUNNER_AUTH_KEY"]
+            .as_str()
+            .expect("runner auth key");
+
+    assert_eq!(main_key, runner_key);
+    assert!(Uuid::parse_str(main_key).is_ok());
+
+    let main_env_key = read_env_var(
+        &temp.path().join("stacks/default/config/main.env"),
+        "RUNNER_AUTH_KEY",
+    )
+    .expect("main env key");
+    let runner_env_key = read_env_var(
+        &temp.path().join("stacks/default/config/runner.env"),
+        "RUNNER_AUTH_KEY",
+    )
+    .expect("runner env key");
+
+    assert_eq!(main_env_key, main_key);
+    assert_eq!(runner_env_key, main_key);
 }
 
 #[test]

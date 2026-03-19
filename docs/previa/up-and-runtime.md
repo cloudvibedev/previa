@@ -115,6 +115,10 @@ RUNNER_AUTH_KEY=local-dev-secret previa up --detach
 
 The same shared key is used for all runners in one local context.
 
+When no `RUNNER_AUTH_KEY` is configured and the stack uses only local runners,
+`previa up` generates a UUID v4 automatically and persists it to the
+context-scoped `main.env` and `runner.env` files.
+
 When `--attach-runner` is used, `RUNNER_AUTH_KEY` becomes required. `previa`
 must know the shared key up front so `previa-main` can authenticate against the
 attached runner endpoints.

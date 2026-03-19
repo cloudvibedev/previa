@@ -435,6 +435,7 @@ mod tests {
             }],
             local_runner_ports: vec![("127.0.0.1".to_owned(), 55880)],
             attached_runners: vec!["http://10.0.0.10:55880".to_owned()],
+            generated_runner_auth_key: None,
             dry_run: false,
             detach: true,
         };

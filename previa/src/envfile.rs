@@ -21,6 +21,10 @@ pub fn read_env_file(path: &Path) -> Result<BTreeMap<String, String>> {
     Ok(values)
 }
 
+pub fn write_env_file(path: &Path, values: &BTreeMap<String, String>) -> Result<()> {
+    write_file(path, &render_env(values.clone()))
+}
+
 pub fn ensure_default_env_files(stack_paths: &StackPaths) -> Result<()> {
     stack_paths.ensure_parent_dirs()?;
     if !stack_paths.main_env.exists() {

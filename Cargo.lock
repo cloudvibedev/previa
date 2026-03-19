@@ -1942,6 +1942,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "urlencoding",
+ "uuid 1.22.0",
  "windows-sys 0.59.0",
 ]
 
