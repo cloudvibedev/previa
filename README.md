@@ -127,6 +127,17 @@ Recommended first reads:
 - [Operations cheatsheet](docs/previa/operations-cheatsheet.md)
 - [Contributing](CONTRIBUTING.md)
 
+## Release Scope
+
+The release workflow supports four manual publishing scopes:
+
+- `linux`: GitHub Release assets for Linux plus Docker, crates.io, and bucket/R2 publishing
+- `mac`: GitHub Release asset for macOS only
+- `windows`: GitHub Release asset for Windows only
+- `all`: Linux full publishing plus macOS and Windows release assets
+
+Today, macOS and Windows release assets contain only the `previa` control binary. Linux continues to publish `previa`, `previa-main`, and `previa-runner`.
+
 ## Community
 
 - [Contributing guide](CONTRIBUTING.md)

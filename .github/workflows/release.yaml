@@ -2,6 +2,17 @@ name: Release Binaries, Docker Images and Crates
 
 on:
   workflow_dispatch:
+    inputs:
+      release_scope:
+        description: Release scope to publish: Linux full, macOS release, Windows release, or all platforms
+        required: true
+        default: all
+        type: choice
+        options:
+          - linux
+          - mac
+          - windows
+          - all
 
 permissions:
   contents: write
@@ -52,6 +63,78 @@ jobs:
           echo "workspace=${workspace_version}"
 
           echo "version=${workspace_version}" >> "${GITHUB_OUTPUT}"
+
+  resolve_scope:
+    name: Resolve Release Scope
+    needs: version_check
+    runs-on: ubuntu-latest
+    outputs:
+      release_scope: ${{ steps.scope.outputs.release_scope }}
+      build_linux: ${{ steps.scope.outputs.build_linux }}
+      build_macos: ${{ steps.scope.outputs.build_macos }}
+      build_windows: ${{ steps.scope.outputs.build_windows }}
+      publish_docker: ${{ steps.scope.outputs.publish_docker }}
+      publish_crates: ${{ steps.scope.outputs.publish_crates }}
+      publish_bucket: ${{ steps.scope.outputs.publish_bucket }}
+      publish_github_release: ${{ steps.scope.outputs.publish_github_release }}
+    steps:
+      - name: Normalize release scope
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          scope="${{ github.event.inputs.release_scope || 'all' }}"
+
+          case "${scope}" in
+            linux)
+              build_linux=true
+              build_macos=false
+              build_windows=false
+              publish_docker=true
+              publish_crates=true
+              publish_bucket=true
+              ;;
+            mac)
+              build_linux=false
+              build_macos=true
+              build_windows=false
+              publish_docker=false
+              publish_crates=false
+              publish_bucket=false
+              ;;
+            windows)
+              build_linux=false
+              build_macos=false
+              build_windows=true
+              publish_docker=false
+              publish_crates=false
+              publish_bucket=false
+              ;;
+            all)
+              build_linux=true
+              build_macos=true
+              build_windows=true
+              publish_docker=true
+              publish_crates=true
+              publish_bucket=true
+              ;;
+            *)
+              echo "::error::Unsupported release scope: ${scope}"
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "release_scope=${scope}"
+            echo "build_linux=${build_linux}"
+            echo "build_macos=${build_macos}"
+            echo "build_windows=${build_windows}"
+            echo "publish_docker=${publish_docker}"
+            echo "publish_crates=${publish_crates}"
+            echo "publish_bucket=${publish_bucket}"
+            echo "publish_github_release=true"
+          } >> "${GITHUB_OUTPUT}"
 
   prepare_changelog:
     name: Prepare changelog
@@ -112,13 +195,18 @@ jobs:
 
   build_binaries:
     name: Build binaries (${{ matrix.name }})
-    needs: [version_check, prepare_changelog, tag_release]
+    needs: [version_check, resolve_scope, prepare_changelog, tag_release]
+    if: >-
+      (matrix.scope_group == 'linux' && needs.resolve_scope.outputs.build_linux == 'true') ||
+      (matrix.scope_group == 'mac' && needs.resolve_scope.outputs.build_macos == 'true') ||
+      (matrix.scope_group == 'windows' && needs.resolve_scope.outputs.build_windows == 'true')
     runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: linux-amd64
+            artifact_name: release-linux-amd64
             runs_on: ubuntu-latest
             target: x86_64-unknown-linux-musl
             os_slug: linux
@@ -128,7 +216,9 @@ jobs:
             build_runner: true
             build_main: true
             build_ctl: true
+            scope_group: linux
           - name: linux-arm64
+            artifact_name: release-linux-arm64
             runs_on: ubuntu-latest
             target: aarch64-unknown-linux-musl
             os_slug: linux
@@ -138,6 +228,31 @@ jobs:
             build_runner: true
             build_main: true
             build_ctl: true
+            scope_group: linux
+          - name: macos-amd64
+            artifact_name: release-macos-amd64
+            runs_on: macos-latest
+            target: x86_64-apple-darwin
+            os_slug: macos
+            arch_slug: amd64
+            exe_ext: ""
+            use_cross: false
+            build_runner: false
+            build_main: false
+            build_ctl: true
+            scope_group: mac
+          - name: windows-amd64
+            artifact_name: release-windows-amd64
+            runs_on: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_slug: windows
+            arch_slug: amd64
+            exe_ext: .exe
+            use_cross: false
+            build_runner: false
+            build_main: false
+            build_ctl: true
+            scope_group: windows
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -215,13 +330,14 @@ jobs:
       - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.name }}
+          name: ${{ matrix.artifact_name }}
           path: dist/*
           if-no-files-found: error
 
   upload_r2_artifacts:
     name: Upload release artifacts to Cloudflare R2
-    needs: [version_check, prepare_changelog, build_binaries]
+    needs: [version_check, resolve_scope, prepare_changelog, build_binaries]
+    if: needs.resolve_scope.outputs.publish_bucket == 'true'
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version_check.outputs.version }}
@@ -237,10 +353,10 @@ jobs:
         with:
           ref: ${{ needs.prepare_changelog.outputs.release_sha }}
 
-      - name: Download all release artifacts
+      - name: Download Linux release artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: release-*
+          pattern: release-linux-*
           merge-multiple: true
           path: release-assets
 
@@ -376,7 +492,8 @@ jobs:
 
   github_release:
     name: Publish GitHub Release
-    needs: [version_check, prepare_changelog, tag_release, build_binaries]
+    needs: [version_check, resolve_scope, prepare_changelog, tag_release, build_binaries]
+    if: needs.resolve_scope.outputs.publish_github_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download all release artifacts
@@ -406,7 +523,8 @@ jobs:
 
   docker_build_arch:
     name: Build and push Docker (${{ matrix.service }}-${{ matrix.arch }})
-    needs: [version_check, prepare_changelog, build_binaries]
+    needs: [version_check, resolve_scope, prepare_changelog, build_binaries]
+    if: needs.resolve_scope.outputs.publish_docker == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -478,7 +596,8 @@ jobs:
 
   docker_manifest:
     name: Create Docker manifests
-    needs: [version_check, docker_build_arch]
+    needs: [version_check, resolve_scope, docker_build_arch]
+    if: needs.resolve_scope.outputs.publish_docker == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -512,7 +631,8 @@ jobs:
 
   publish_crates:
     name: Publish crates.io packages
-    needs: [version_check, prepare_changelog, build_binaries]
+    needs: [version_check, resolve_scope, prepare_changelog, build_binaries]
+    if: needs.resolve_scope.outputs.publish_crates == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

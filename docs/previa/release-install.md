@@ -116,12 +116,36 @@ These are the images used by compose-backed runtime flows.
 At a high level, the release workflow:
 
 1. resolves the workspace version
-2. builds Linux binaries
-3. uploads binaries to Cloudflare R2
-4. publishes `latest.json`
-5. publishes `install.sh`
-6. creates a git tag and GitHub release
-7. builds and pushes Docker images to GHCR
+2. builds binaries for the selected release scope
+3. creates a git tag and GitHub release
+4. optionally uploads Linux binaries to Cloudflare R2
+5. optionally publishes `latest.json`
+6. optionally publishes `install.sh`
+7. optionally builds and pushes Docker images to GHCR
+8. optionally publishes runtime crates to crates.io
+
+The workflow dispatch now accepts a `release_scope` choice:
+
+- `linux`: publishes Linux release assets and also runs Docker, crates.io, and bucket/R2 publishing
+- `mac`: publishes only the macOS release asset
+- `windows`: publishes only the Windows release asset
+- `all`: publishes Linux release assets plus Docker, crates.io, bucket/R2, and also adds macOS and Windows release assets
+
+Current platform coverage:
+
+- Linux:
+  - `previa`
+  - `previa-main`
+  - `previa-runner`
+  - `amd64` and `arm64`
+- macOS:
+  - `previa`
+  - `amd64`
+- Windows:
+  - `previa.exe`
+  - `amd64`
+
+Only Linux artifacts are uploaded to Cloudflare R2 and included in `latest.json`, because the installer and runtime binary download flow remain Linux-centric in this release model.
 
 ## Practical Notes
 
@@ -129,6 +153,7 @@ At a high level, the release workflow:
 - binary-backed mode uses local binaries and can auto-download missing runtime binaries
 - the default path keeps CLI and runtime versions aligned
 - published runtime binaries currently target Linux
+- macOS and Windows release assets currently ship only the control binary `previa`
 
 ## See Also
 
