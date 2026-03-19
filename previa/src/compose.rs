@@ -47,12 +47,20 @@ struct ComposeService {
     volumes: Vec<ComposeVolume>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 struct ComposePort {
     target: u16,
     published: u16,
     host_ip: String,
-    protocol: &'static str,
+}
+
+impl Serialize for ComposePort {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&format!("{}:{}:{}", self.host_ip, self.published, self.target))
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -317,7 +325,6 @@ fn compose_document(resolved: &ResolvedUpConfig) -> Result<ComposeDocument> {
                 target: resolved.main.port,
                 published: resolved.main.port,
                 host_ip: resolved.main.address.clone(),
-                protocol: "tcp",
             }],
             volumes: vec![ComposeVolume {
                 kind: "bind",
@@ -341,7 +348,6 @@ fn compose_document(resolved: &ResolvedUpConfig) -> Result<ComposeDocument> {
                     target: runner.port,
                     published: runner.port,
                     host_ip: runner.address.clone(),
-                    protocol: "tcp",
                 }],
                 volumes: Vec::new(),
             },
@@ -511,6 +517,8 @@ mod tests {
         assert!(contents.contains("runner-55880"));
         assert!(contents.contains("ghcr.io/cloudvibedev/main:latest"));
         assert!(contents.contains("ghcr.io/cloudvibedev/runner:latest"));
+        assert!(contents.contains("\"127.0.0.1:5588:5588\""));
+        assert!(contents.contains("\"127.0.0.1:55880:55880\""));
     }
 
     #[test]
