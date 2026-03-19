@@ -7,6 +7,7 @@ This is the main documentation index for Previa as an operator-facing platform a
 - [Getting started](./getting-started.md)
 - [Minimal happy path](./minimal-happy-path.md)
 - [Architecture at a glance](./architecture.md)
+- [Release and install](./release-install.md)
 
 ## Core Concepts
 

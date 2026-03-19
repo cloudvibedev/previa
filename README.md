@@ -20,6 +20,12 @@ Previa combines local runtime operations with project-scoped API testing workflo
 - `previa-engine` resolves templates, performs HTTP steps, and evaluates assertions
 - the browser IDE at `https://ide.previa.dev` connects to your local `previa-main`
 
+In practice, the flow looks like this:
+
+```text
+previa CLI -> previa-main -> previa-runner -> previa-engine -> target API
+```
+
 ## Why Previa Exists
 
 I created Previa to make end-to-end and load testing simple enough for any AI to understand, generate, and execute through pipelines. The goal was to build a testing system that could become the preferred runtime for AI-first development workflows.
@@ -29,6 +35,17 @@ I have been building with an AI-first mindset since 2025, when I started using t
 That led to a simple idea: end-to-end testing should live outside the application as an independent runtime that any team, developer, or AI assistant can use to verify whether a real workflow broke. And once that runtime already understands the system, it should also make load testing just as easy, whether through a few clicks in the IDE or a prompt sent from an AI assistant.
 
 *Philippe Assis*
+
+## AI-First Workflow
+
+Previa is designed to work well in AI-first development loops:
+
+- the CLI starts a real test runtime outside your application codebase
+- the IDE gives you a visual place to inspect specs, pipelines, executions, and failures
+- the HTTP API lets CI/CD and automation trigger the same workflows
+- the MCP server lets assistants inspect, generate, validate, and troubleshoot using the same runtime
+
+The main idea is simple: your assistant should not have to guess whether a workflow still works. It should be able to ask Previa to run it.
 
 ## Install
 
@@ -43,6 +60,12 @@ Today the installer targets Linux and writes `previa` under `~/.previa/bin`, whi
 ## Quick Start
 
 `-d` is the short form of `--detach`.
+
+The shortest happy path is:
+
+```text
+install -> up -> open -> create or import a pipeline -> run tests
+```
 
 Start a Docker-backed stack:
 
@@ -81,6 +104,7 @@ Recommended first reads:
 - [Minimal happy path](docs/previa/minimal-happy-path.md)
 - [Architecture at a glance](docs/previa/architecture.md)
 - [Runtime modes](docs/previa/runtime-modes.md)
+- [Release and install](docs/previa/release-install.md)
 - [MCP integration](docs/previa/mcp.md)
 - [Operations cheatsheet](docs/previa/operations-cheatsheet.md)
 

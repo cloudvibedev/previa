@@ -2,6 +2,16 @@
 
 This guide covers the shortest path to a working local Previa stack.
 
+## Fast Path
+
+If you want the shortest operator flow, it is:
+
+1. install `previa`
+2. start a local stack with `previa up -d`
+3. open the IDE with `previa open`
+4. create or import a pipeline
+5. run E2E or load tests from the IDE, API, or MCP-connected assistant
+
 ## Install
 
 On Linux:
@@ -33,6 +43,19 @@ Open the UI with your local context:
 previa open
 ```
 
+This opens:
+
+```text
+https://ide.previa.dev?add_context=<your-local-main-url>
+```
+
+From there, you can:
+
+- create a project and add specs
+- create or import pipelines
+- run E2E and load tests
+- inspect failures and history
+
 Stop the stack:
 
 ```bash
@@ -58,6 +81,8 @@ previa pull all --version 0.0.7
 previa up --detach --version 0.0.7
 ```
 
+By default, `previa up` and `previa pull` use the same version tag as the running `previa` CLI.
+
 ## What Gets Created
 
 When you start a detached stack, `previa` writes files under:
@@ -78,4 +103,5 @@ Notably:
 
 - [Home and contexts](./home-and-contexts.md)
 - [Up and runtime](./up-and-runtime.md)
+- [Release and install](./release-install.md)
 - [Operations](./operations.md)

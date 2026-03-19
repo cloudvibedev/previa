@@ -37,6 +37,22 @@ $PREVIA_HOME/bin
 
 When `previa up --bin` downloads those runtime binaries, it targets the exact same release version as the running `previa` CLI.
 
+## Compatibility
+
+Previa keeps local runtime pieces aligned by version:
+
+- `previa up` uses the current CLI version tag by default for Docker-backed runtimes
+- `previa pull` uses the current CLI version tag by default
+- `previa up --bin` downloads `previa-main` and `previa-runner` for the exact current CLI version
+
+That means the default behavior is:
+
+```text
+previa == previa-main == previa-runner
+```
+
+unless you explicitly override the image tag for a compose-backed runtime with `--version`.
+
 ## Uninstall
 
 To remove a default installation, delete `~/.previa` and remove the installer block from your shell rc files.
@@ -111,6 +127,7 @@ At a high level, the release workflow:
 
 - compose-backed mode uses published Docker images
 - binary-backed mode uses local binaries and can auto-download missing runtime binaries
+- the default path keeps CLI and runtime versions aligned
 - published runtime binaries currently target Linux
 
 ## See Also
