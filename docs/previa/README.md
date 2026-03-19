@@ -6,11 +6,13 @@ This is the main documentation index for Previa as an operator-facing platform a
 
 - [Getting started](./getting-started.md)
 - [Minimal happy path](./minimal-happy-path.md)
+- [End-to-end walkthrough](./end-to-end-walkthrough.md)
 - [Architecture at a glance](./architecture.md)
 - [Release and install](./release-install.md)
 
 ## Core Concepts
 
+- [Glossary](./glossary.md)
 - [Runtime modes](./runtime-modes.md)
 - [Home and contexts](./home-and-contexts.md)
 - [Main and runner authentication](./main-runner-auth.md)
@@ -40,6 +42,7 @@ This is the main documentation index for Previa as an operator-facing platform a
 ## Reference
 
 - [CLI commands](./cli-commands.md)
+- [Version compatibility](./version-compatibility.md)
 - [Security](./security.md)
 - [Release and install](./release-install.md)
 - [FAQ](./faq.md)
