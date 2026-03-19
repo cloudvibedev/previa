@@ -1,0 +1,61 @@
+# Architecture At a Glance
+
+Previa is made of four main parts:
+
+- `previa`: the local CLI used to start and operate a stack
+- `previa-main`: the orchestrator API for projects, specs, pipelines, history, proxying, queues, and MCP
+- `previa-runner`: the execution API for E2E and load requests
+- `previa-engine`: the execution core that resolves templates, performs HTTP steps, and evaluates assertions
+
+## End-to-End Flow
+
+```text
+previa CLI -> previa-main -> previa-runner -> previa-engine -> target API
+```
+
+Typical operator flow:
+
+1. Start a local stack with `previa up -d`
+2. Open the IDE with `previa open`
+3. Create projects, specs, and pipelines through the IDE, API, or MCP
+4. Run E2E tests, load tests, or E2E queues through `previa-main`
+5. Inspect history, logs, and runtime state
+
+## Ports and Default Interfaces
+
+By default:
+
+- `previa-main` listens on `0.0.0.0:5588`
+- local `previa-runner` instances start at `127.0.0.1:55880`
+- the MCP endpoint is `http://localhost:5588/mcp` when enabled
+- `previa open` opens `https://ide.previa.dev?add_context=<main-url>`
+
+## Feature Map
+
+CLI:
+
+- start and stop local stacks
+- inspect status, processes, logs, and contexts
+- import local pipeline files
+
+IDE:
+
+- connect to a local `previa-main`
+- manage projects, specs, pipelines, and executions visually
+
+HTTP API:
+
+- create and update projects, specs, and pipelines
+- run E2E, load, and queue workflows
+- export and import project bundles
+
+MCP:
+
+- expose the same Previa platform capabilities to AI assistants
+- support project inspection, pipeline authoring, failure triage, queue operations, and migrations
+
+## See Also
+
+- [Minimal happy path](./minimal-happy-path.md)
+- [Runtime modes](./runtime-modes.md)
+- [MCP integration](./mcp.md)

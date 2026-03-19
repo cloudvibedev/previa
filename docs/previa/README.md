@@ -13,7 +13,14 @@ stack management, runtime inspection, and pipeline import.
 
 ## Guides
 
+- [Architecture at a glance](./architecture.md)
 - [Getting started](./getting-started.md)
+- [Minimal happy path](./minimal-happy-path.md)
+- [Runtime modes](./runtime-modes.md)
+- [Main and runner authentication](./main-runner-auth.md)
+- [Remote runners](./remote-runners.md)
+- [MCP integration](./mcp.md)
+- [E2E queues](./e2e-queues.md)
 - [Home and contexts](./home-and-contexts.md)
 - [Compose source](./compose.md)
 - [Up and runtime](./up-and-runtime.md)
@@ -46,4 +53,5 @@ previa --version
 ## See Also
 
 - [Getting started](./getting-started.md)
+- [Architecture at a glance](./architecture.md)
 - [Operations](./operations.md)

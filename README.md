@@ -25,6 +25,7 @@ Previa combines local runtime operations with project-scoped API testing workflo
 
 - [Install](#install)
 - [Quick Start](#quick-start)
+- [Documentation](#documentation)
 - [MCP Integration](#mcp-integration)
 - [Use Cases](#use-cases)
 - [Previa Compose](#previa-compose)
@@ -78,6 +79,28 @@ https://ide.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588
 ```
 
 That URL attaches your local `previa-main` context to the hosted IDE at `https://ide.previa.dev`.
+
+## Documentation
+
+Core guides:
+
+- [Architecture at a glance](docs/previa/architecture.md)
+- [Minimal happy path](docs/previa/minimal-happy-path.md)
+- [Runtime modes](docs/previa/runtime-modes.md)
+- [Main and runner authentication](docs/previa/main-runner-auth.md)
+- [Remote runners](docs/previa/remote-runners.md)
+- [MCP integration](docs/previa/mcp.md)
+- [E2E queues](docs/previa/e2e-queues.md)
+
+Existing operator guides:
+
+- [Previa CLI docs index](docs/previa/README.md)
+- [Getting started](docs/previa/getting-started.md)
+- [Home and contexts](docs/previa/home-and-contexts.md)
+- [Compose source](docs/previa/compose.md)
+- [Pipeline import](docs/previa/pipeline-import.md)
+- [Operations](docs/previa/operations.md)
+- [Troubleshooting](docs/previa/troubleshooting.md)
 
 ## MCP Integration
 
