@@ -8,6 +8,8 @@ This guide covers how `previa up` starts a stack and how runtime behavior is res
 previa up [--context <context>] [SOURCE] [--main-address <addr>] [-p, --main-port <port>] [--runner-address <addr>] [-P, --runner-port-range <start:end>] [--runners <N>] [-a, --attach-runner <selector> ...] [-i, --import <path>] [-r, --recursive] [-s, --stack <name>] [--dry-run] [-d, --detach] [--version <tag>] [--bin]
 ```
 
+Note: `--bin` is available on Linux only. On macOS and Windows, `previa up` exposes only the compose-backed path.
+
 ## What `up` Does
 
 - generates a `docker-compose.generated.yaml` per context
@@ -83,7 +85,7 @@ You need at least one runner source:
 `--bin` starts the locally resolved `previa-main` and `previa-runner` binaries
 instead of the published container images.
 
-This is useful for local development, but remember that `previa` resolves
+This is Linux-only and useful for local development, but remember that `previa` resolves
 binaries from `PREVIA_HOME/bin` before falling back to workspace targets.
 When installed runtime binaries do not match the current CLI version, `previa`
 replaces them with matching binaries automatically.

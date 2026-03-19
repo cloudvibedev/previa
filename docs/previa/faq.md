@@ -2,7 +2,8 @@
 
 ## When should I use Docker vs `--bin`?
 
-Use `previa up -d` for the general case. Use `previa up -d --bin` when you want local binary execution, especially during runtime development.
+Use `previa up -d` for the general case. Use `previa up -d --bin` when you want local binary execution, especially during runtime development on Linux.
+On macOS and Windows, the control binary is supported, but `--bin` is not exposed.
 
 ## Does `--bin` download missing binaries automatically?
 

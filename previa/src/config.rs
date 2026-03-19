@@ -196,10 +196,10 @@ pub async fn resolve_up_config(
     if args.dry_run && args.detach {
         bail!("--dry-run cannot be combined with --detach");
     }
-    if args.bin && args.version != env!("CARGO_PKG_VERSION") {
+    if args.bin_requested() && args.version != env!("CARGO_PKG_VERSION") {
         bail!("--version cannot be used with --bin");
     }
-    let backend = if args.bin {
+    let backend = if args.bin_requested() {
         RuntimeBackend::Bin
     } else {
         RuntimeBackend::Compose
@@ -680,8 +680,24 @@ mod tests {
             attach_runners: Vec::new(),
             dry_run: false,
             detach: false,
+            #[cfg(target_os = "linux")]
             bin: true,
             version: env!("CARGO_PKG_VERSION").to_owned(),
+        }
+    }
+
+    fn set_bin(args: &mut UpArgs, value: bool) {
+        #[cfg(target_os = "linux")]
+        {
+            args.bin = value;
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            assert!(
+                !value,
+                "--bin should not be set on non-Linux targets in these tests"
+            );
         }
     }
 
@@ -778,7 +794,7 @@ mod tests {
         let (_temp, paths) = temp_paths();
         let stack_paths = paths.stack("default");
         let mut args = base_args();
-        args.bin = false;
+        set_bin(&mut args, false);
         args.attach_runners = vec!["55880".to_owned()];
 
         let error = resolve_up_config(&paths, &stack_paths, args)
@@ -806,7 +822,7 @@ mod tests {
         .expect("write main.env");
 
         let mut args = base_args();
-        args.bin = false;
+        set_bin(&mut args, false);
         args.attach_runners = vec!["55880".to_owned()];
 
         let resolved = resolve_up_config(&paths, &stack_paths, args)
@@ -825,7 +841,7 @@ mod tests {
         let (_temp, paths) = temp_paths();
         let stack_paths = paths.stack("default");
         let mut args = base_args();
-        args.bin = false;
+        set_bin(&mut args, false);
 
         let resolved = resolve_up_config(&paths, &stack_paths, args)
             .await

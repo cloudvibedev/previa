@@ -92,7 +92,8 @@ Start a binary-backed stack without Docker:
 previa up -d --bin
 ```
 
-This path is aimed at Linux environments and local runtime development.
+This path is Linux-only and aimed at local runtime development.
+On macOS and Windows, the control binary is supported, but the `--bin` feature is not exposed.
 
 Inspect the runtime and open the IDE:
 

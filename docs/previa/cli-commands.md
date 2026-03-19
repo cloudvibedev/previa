@@ -60,7 +60,7 @@ previa up [OPTIONS] [SOURCE]
 Main uses:
 
 - start a Docker-backed stack
-- start a binary-backed stack with `--bin`
+- start a binary-backed stack with `--bin` on Linux
 - apply a `previa-compose` source
 - attach remote runners
 - import pipelines after startup
@@ -78,7 +78,7 @@ Important options:
 - `--stack <STACK>`: required when using `--import`
 - `--dry-run`: prints the planned runtime without starting it
 - `-d, --detach`: starts the stack in detached mode
-- `--bin`: uses local binaries instead of container images
+- `--bin`: Linux-only, uses local binaries instead of container images
 - `--version <TAG>`: image tag for compose-backed runtimes, default is the current CLI version
 
 Examples:
@@ -103,6 +103,7 @@ Notes:
 - when `--bin` cannot find local runtime binaries, `previa` can bootstrap them into `PREVIA_HOME/bin`
 - when only local runners are used and `RUNNER_AUTH_KEY` is missing, `previa up` generates one automatically
 - when `--attach-runner` is used, `RUNNER_AUTH_KEY` is required
+- on macOS and Windows, the control binary is supported but `previa up` does not expose `--bin`
 
 See also:
 

@@ -98,10 +98,25 @@ pub struct UpArgs {
     pub dry_run: bool,
     #[arg(short = 'd', long)]
     pub detach: bool,
+    #[cfg(target_os = "linux")]
     #[arg(long = "bin")]
     pub bin: bool,
     #[arg(long, default_value = env!("CARGO_PKG_VERSION"))]
     pub version: String,
+}
+
+impl UpArgs {
+    pub fn bin_requested(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self.bin
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Args)]
