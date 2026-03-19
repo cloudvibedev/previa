@@ -17,7 +17,6 @@ Previa combines local runtime operations with project-scoped API testing workflo
 - `previa` runs and manages the local stack
 - `previa-main` is the orchestrator API for projects, specs, pipelines, history, proxying, queues, and MCP
 - `previa-runner` executes E2E and load tests
-- `previa-engine` resolves templates, performs HTTP steps, and evaluates assertions
 - the browser IDE at `https://ide.previa.dev` connects to your local `previa-main`
 
 In practice, the flow looks like this:
