@@ -98,6 +98,7 @@ $PREVIA_HOME/stacks/<context>/run/state.json
 
 ## See Also
 
+- [CLI commands](./cli-commands.md)
 - [Operations](./operations.md)
 - [Troubleshooting](./troubleshooting.md)
 - [Main and runner authentication](./main-runner-auth.md)

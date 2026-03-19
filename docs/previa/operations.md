@@ -166,6 +166,7 @@ previa --version
 
 ## See Also
 
+- [CLI commands](./cli-commands.md)
 - [Getting started](./getting-started.md)
 - [Home and contexts](./home-and-contexts.md)
 - [Troubleshooting](./troubleshooting.md)
