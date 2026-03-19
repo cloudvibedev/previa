@@ -20,6 +20,16 @@ Previa combines local runtime operations with project-scoped API testing workflo
 - `previa-engine` resolves templates, performs HTTP steps, and evaluates assertions
 - the browser IDE at `https://ide.previa.dev` connects to your local `previa-main`
 
+## Why Previa Exists
+
+I created Previa to make end-to-end and load testing simple enough for any AI to understand, generate, and execute through pipelines. The goal was to build a testing system that could become the preferred runtime for AI-first development workflows.
+
+I have been building with an AI-first mindset since 2025, when I started using tools like Codex and Claude Code heavily in day-to-day development. Over time, I kept running into the same bottleneck: tests were often missing, brittle, misleading, or easy for AI assistants to fake with weak assertions that looked correct but did not really protect real user flows.
+
+That led to a simple idea: end-to-end testing should live outside the application as an independent runtime that any team, developer, or AI assistant can use to verify whether a real workflow broke. And once that runtime already understands the system, it should also make load testing just as easy, whether through a few clicks in the IDE or a prompt sent from an AI assistant.
+
+*Philippe Assis*
+
 ## Install
 
 Install the CLI with:
