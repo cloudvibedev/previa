@@ -314,6 +314,54 @@ JSON
 
 This response is also an SSE stream, with repeated `metrics` events followed by `complete`.
 
+### 5. Run an E2E queue
+
+When you want to execute multiple stored pipelines in order for the same project, create an E2E queue:
+
+```bash
+curl -sS -D queue.headers \
+  http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/tests/e2e/queue \
+  -H 'content-type: application/json' \
+  -d @- <<JSON
+{
+  "pipelineIds": [
+    "$PIPELINE_ID",
+    "another-pipeline-id"
+  ],
+  "selectedBaseUrlKey": "hml",
+  "specs": []
+}
+JSON
+```
+
+The API responds with `202 Accepted`, returns a JSON snapshot of the queue, and also includes:
+
+- `x-queue-id`
+- `Location: /api/v1/projects/<projectId>/tests/e2e/queue/<queueId>`
+
+You can inspect the current active queue snapshot for the project:
+
+```bash
+curl -sS http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/tests/e2e/queue
+```
+
+And you can follow a specific queue by ID:
+
+```bash
+QUEUE_ID="<queue-id>"
+
+curl -N http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/tests/e2e/queue/$QUEUE_ID
+```
+
+While the queue is active, that endpoint returns SSE updates such as `queue:update`. Once the queue finishes, the same endpoint returns the final JSON snapshot instead.
+
+If needed, cancel the queue:
+
+```bash
+curl -X DELETE \
+  http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/tests/e2e/queue/$QUEUE_ID
+```
+
 ## Previa Compose
 
 `previa up` can read a compose-like runtime description from:
