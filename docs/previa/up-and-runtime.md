@@ -84,8 +84,9 @@ You need at least one runner source:
 instead of the published container images.
 
 This is useful for local development, but remember that `previa` resolves
-binaries from `PREVIA_HOME/bin` before falling back to workspace targets. Old
-installed binaries can therefore shadow newer workspace builds.
+binaries from `PREVIA_HOME/bin` before falling back to workspace targets.
+When installed runtime binaries do not match the current CLI version, `previa`
+replaces them with matching binaries automatically.
 
 ## `RUNNER_AUTH_KEY`
 
@@ -125,7 +126,8 @@ attached runner endpoints.
 
 ## `--version`
 
-For compose-backed runtimes, `--version` selects the container image tag:
+For compose-backed runtimes, `--version` selects the container image tag.
+If you do not pass `--version`, `previa up` uses the same version as the running CLI:
 
 ```bash
 previa pull all --version 0.0.7

@@ -46,17 +46,29 @@ Save the returned `id` as `PROJECT_ID`.
 
 ## 3. Add a Spec
 
-Create a minimal OpenAPI source with a named base URL such as `hml`:
+Create a minimal project spec with a named runtime URL such as `hml`:
 
 ```json
 {
   "slug": "users",
-  "name": "Users API",
-  "selectedBaseUrlKey": "hml",
-  "baseUrls": {
-    "hml": "https://hml.cloudvibe.dev"
-  },
-  "source": "openapi: 3.0.0\ninfo:\n  title: Users API\n  version: 1.0.0\npaths:\n  /users:\n    get:\n      responses:\n        '200':\n          description: ok\n"
+  "urls": [
+    { "name": "hml", "url": "https://hml.cloudvibe.dev" }
+  ],
+  "sync": false,
+  "live": false,
+  "spec": {
+    "openapi": "3.0.3",
+    "info": { "title": "Users API", "version": "1.0.0" },
+    "paths": {
+      "/users": {
+        "get": {
+          "responses": {
+            "200": { "description": "ok" }
+          }
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -67,6 +79,8 @@ curl -sS http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/specs \
   -H 'content-type: application/json' \
   -d @spec.json
 ```
+
+This uses the same spec shape described in [Spec-driven testing](./spec-driven-testing.md).
 
 ## 4. Add a Pipeline
 

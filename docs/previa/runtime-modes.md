@@ -52,6 +52,7 @@ Use `--bin` when:
 - compose-backed mode uses the current CLI version tag by default unless `--version` is provided explicitly
 - `--version` applies to compose-backed runtimes, not `--bin`
 - `--bin` resolves binaries from `PREVIA_HOME/bin` before workspace targets
+- if a binary in `PREVIA_HOME/bin` does not match the current CLI version, `previa` replaces it automatically
 
 ## See Also
 

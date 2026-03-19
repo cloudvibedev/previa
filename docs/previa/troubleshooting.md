@@ -60,7 +60,7 @@ What it means:
 - the configured `-P/--runner-port-range` cannot fit the requested
   `--runners` count
 
-## Old Binaries in `PREVIA_HOME/bin`
+## Unexpected `--bin` Behavior Inside the Workspace
 
 This is a common source of confusion when using `--bin` inside the workspace.
 
@@ -70,8 +70,12 @@ This is a common source of confusion when using `--bin` inside the workspace.
 2. workspace `target/debug`
 3. workspace `target/release`
 
-So an older installed `previa-main` or `previa-runner` under `PREVIA_HOME/bin`
-can shadow a newer workspace build.
+By default, `previa up --bin` tries to keep `previa-main` and `previa-runner`
+aligned with the current CLI version. That means:
+
+- matching binaries under `PREVIA_HOME/bin` are reused
+- mismatched binaries under `PREVIA_HOME/bin` are replaced automatically
+- workspace binaries are still useful during active local development when they already match the current CLI version
 
 Typical workaround:
 
@@ -109,7 +113,7 @@ Check these first:
 - `RUNNER_AUTH_KEY` is the same on `main` and the runner
 - the value is present in the environment used by `previa up`
 - attached external runners are using the same shared key
-- you are not accidentally using older binaries from `PREVIA_HOME/bin`
+- the runtime binaries in use match the current CLI version
 
 When auth is enabled, even `/health` and `/info` require the key. A mismatch
 there makes the runner appear unhealthy or unavailable.

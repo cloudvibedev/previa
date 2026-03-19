@@ -30,6 +30,8 @@ also provided.
 $PREVIA_HOME/
   bin/
     previa
+    previa-main
+    previa-runner
   stacks/
     <context>/
       config/
@@ -47,6 +49,9 @@ $PREVIA_HOME/
         lock
         state.json
 ```
+
+`previa-main` and `previa-runner` appear under `PREVIA_HOME/bin` when `previa up --bin`
+downloads or refreshes local runtime binaries for the current CLI version.
 
 ## Contexts
 
