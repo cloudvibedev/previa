@@ -22,6 +22,8 @@ It currently:
 
 The installer installs the `previa` control binary.
 
+Published Linux binaries are built against `musl` so they stay portable across a wider range of Linux distributions and do not depend on a very recent host `glibc`.
+
 At runtime, `previa up --bin` can also fetch missing runtime binaries such as:
 
 - `previa-main`
