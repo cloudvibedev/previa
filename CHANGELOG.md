@@ -4,6 +4,9 @@ All notable changes to Previa are documented in this file.
 
 ## [v1.0.0-alpha.9] - 2026-03-19
 
+### Documentation
+- Changelog: update for v1.0.0-alpha.9 (5324594)
+
 ### Other Changes
 - Atualiza versão para 1.0.0-alpha.9 no Cargo.lock e Cargo.toml (c70f6ed)
 - Print manual URL when browser launch fails (babede7)
