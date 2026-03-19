@@ -4,6 +4,11 @@
 
 # Previa
 
+[![Release](https://img.shields.io/github/v/release/cloudvibedev/previa?display_name=tag)](https://github.com/cloudvibedev/previa/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/cloudvibedev/previa/release.yaml?branch=main&label=build)](https://github.com/cloudvibedev/previa/actions/workflows/release.yaml)
+[![License](https://img.shields.io/github/license/cloudvibedev/previa)](https://github.com/cloudvibedev/previa/blob/main/LICENSE)
+[![Stars](https://img.shields.io/github/stars/cloudvibedev/previa?style=social)](https://github.com/cloudvibedev/previa/stargazers)
+
 **The first AI-First IDE for QA. Test, design, and validate APIs with AI assistance from your desktop, CI/CD, or your favorite AI assistant.**
 
 Previa is a platform for simulating, executing, and tracing real end-to-end API operations so you can see what happened, where a failure occurred, and why.
@@ -22,7 +27,7 @@ Previa combines local runtime operations with project-scoped API testing workflo
 In practice, the flow looks like this:
 
 ```text
-previa CLI -> previa-main -> previa-runner -> previa-engine -> target API
+previa CLI -> previa-main -> previa-runner -> target API
 ```
 
 ## Why Previa Exists
