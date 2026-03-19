@@ -55,6 +55,23 @@ fail() {
   exit 1
 }
 
+print_banner() {
+  cat <<'EOF'
+ ++++++++++++++++++ 
++++++++++++++++++++
+++++++++++++++::+++
++++++++++++++-  :+++
+++++++++++=.   :+++
+++++++++=.     :+++
++++++++:.  :-  :+++
++++++-.  .++-  :+++
++++=.  .=+++-  :+++
++++++++++++++++++++
+ ++++++++++++++++++ 
+previa.dev
+EOF
+}
+
 require_home() {
   [ -n "${HOME:-}" ] || fail "HOME is not set."
 }
@@ -209,6 +226,7 @@ install_binary() {
 main() {
   setup_colors
   require_home
+  print_banner
 
   info "Previa installer"
   info "Detecting platform"
