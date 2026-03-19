@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{Command as StdCommand, Stdio};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,12 @@ pub const MAIN_SERVICE_NAME: &str = "main";
 pub struct ComposeProject {
     pub project_name: String,
     pub compose_file: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComposeCli {
+    DockerPlugin,
+    DockerComposeBinary,
 }
 
 #[derive(Debug, Clone)]
@@ -147,7 +153,7 @@ pub fn desired_state_from_resolved(
 
 impl ComposeProject {
     pub async fn up(&self, detached: bool, force_recreate: bool) -> Result<()> {
-        let mut command = self.compose_command();
+        let (mut command, compose_name) = self.compose_command()?;
         command.arg("up");
         if detached {
             command.arg("-d");
@@ -159,17 +165,17 @@ impl ComposeProject {
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        run_status(command, "docker compose up").await
+        run_status(command, &format!("{compose_name} up")).await
     }
 
     pub async fn down(&self) -> Result<()> {
-        let mut command = self.compose_command();
+        let (mut command, compose_name) = self.compose_command()?;
         command
             .args(["down", "--remove-orphans"])
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        run_status(command, "docker compose down").await
+        run_status(command, &format!("{compose_name} down")).await
     }
 
     pub async fn stop_services(&self, services: &[String]) -> Result<()> {
@@ -177,13 +183,13 @@ impl ComposeProject {
             return Ok(());
         }
 
-        let mut command = self.compose_command();
+        let (mut command, compose_name) = self.compose_command()?;
         command.arg("stop").args(services);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        run_status(command, "docker compose stop").await
+        run_status(command, &format!("{compose_name} stop")).await
     }
 
     pub async fn remove_services(&self, services: &[String]) -> Result<()> {
@@ -191,29 +197,29 @@ impl ComposeProject {
             return Ok(());
         }
 
-        let mut command = self.compose_command();
+        let (mut command, compose_name) = self.compose_command()?;
         command.arg("rm").arg("-f").args(services);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        run_status(command, "docker compose rm").await
+        run_status(command, &format!("{compose_name} rm")).await
     }
 
     pub async fn logs_output(&self, services: &[String], tail: Option<usize>) -> Result<String> {
-        let mut command = self.compose_command();
+        let (mut command, compose_name) = self.compose_command()?;
         command.arg("logs").arg("--no-color");
         if let Some(tail) = tail {
             command.arg("--tail").arg(tail.to_string());
         }
         command.args(services);
         command.stdin(Stdio::null());
-        let output = run_output(command, "docker compose logs").await?;
-        Ok(String::from_utf8(output.stdout).context("docker compose logs output was not UTF-8")?)
+        let output = run_output(command, &format!("{compose_name} logs")).await?;
+        Ok(String::from_utf8(output.stdout).context("compose logs output was not UTF-8")?)
     }
 
     pub async fn logs_follow(&self, services: &[String], tail: Option<usize>) -> Result<()> {
-        let mut command = self.compose_command();
+        let (mut command, compose_name) = self.compose_command()?;
         command.arg("logs").arg("--no-color").arg("--follow");
         if let Some(tail) = tail {
             command.arg("--tail").arg(tail.to_string());
@@ -223,19 +229,19 @@ impl ComposeProject {
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        run_status(command, "docker compose logs").await
+        run_status(command, &format!("{compose_name} logs")).await
     }
 
     pub async fn inspect_service(&self, service_name: &str) -> Result<Option<ServiceInspect>> {
-        let mut ps_command = self.compose_command();
+        let (mut ps_command, compose_name) = self.compose_command()?;
         ps_command
             .args(["ps", "-aq", service_name])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
             .stdout(Stdio::piped());
-        let output = run_output(ps_command, "docker compose ps").await?;
+        let output = run_output(ps_command, &format!("{compose_name} ps")).await?;
         let container_id = String::from_utf8(output.stdout)
-            .context("docker compose ps output was not UTF-8")?
+            .context("compose ps output was not UTF-8")?
             .lines()
             .map(str::trim)
             .find(|line| !line.is_empty())
@@ -266,15 +272,18 @@ impl ComposeProject {
         }))
     }
 
-    fn compose_command(&self) -> Command {
-        let mut command = Command::new("docker");
+    fn compose_command(&self) -> Result<(Command, &'static str)> {
+        let cli = resolve_compose_cli()?;
+        let mut command = Command::new(cli.program());
+        if matches!(cli, ComposeCli::DockerPlugin) {
+            command.arg("compose");
+        }
         command
-            .arg("compose")
             .arg("-p")
             .arg(&self.project_name)
             .arg("-f")
             .arg(&self.compose_file);
-        command
+        Ok((command, cli.display_name()))
     }
 }
 
@@ -373,8 +382,60 @@ async fn run_output(mut command: Command, description: &str) -> Result<std::proc
 
 fn docker_spawn_error(description: &str) -> String {
     format!(
-        "{description}: failed to spawn 'docker'; ensure Docker CLI with Compose plugin is installed and available in PATH"
+        "{description}: failed to spawn Docker Compose; ensure `docker compose` or `docker-compose` is installed and available in PATH"
     )
+}
+
+fn resolve_compose_cli() -> Result<ComposeCli> {
+    resolve_compose_cli_with(
+        || command_available("docker", &["compose", "version"]),
+        || command_available("docker-compose", &["version"]),
+    )
+}
+
+fn resolve_compose_cli_with<D, L>(docker_plugin_available: D, docker_compose_available: L) -> Result<ComposeCli>
+where
+    D: FnOnce() -> bool,
+    L: FnOnce() -> bool,
+{
+    if docker_plugin_available() {
+        return Ok(ComposeCli::DockerPlugin);
+    }
+
+    if docker_compose_available() {
+        return Ok(ComposeCli::DockerComposeBinary);
+    }
+
+    bail!(
+        "failed to find Docker Compose; ensure `docker compose` or `docker-compose` is installed and available in PATH"
+    )
+}
+
+fn command_available(program: &str, args: &[&str]) -> bool {
+    StdCommand::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+impl ComposeCli {
+    fn program(self) -> &'static str {
+        match self {
+            ComposeCli::DockerPlugin => "docker",
+            ComposeCli::DockerComposeBinary => "docker-compose",
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            ComposeCli::DockerPlugin => "docker compose",
+            ComposeCli::DockerComposeBinary => "docker-compose",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -386,7 +447,8 @@ mod tests {
     use crate::runtime::{PortRange, RuntimeBackend};
 
     use super::{
-        MAIN_SERVICE_NAME, compose_project_name, runner_service_name, write_generated_compose,
+        ComposeCli, MAIN_SERVICE_NAME, compose_project_name, resolve_compose_cli_with,
+        runner_service_name, write_generated_compose,
     };
 
     #[test]
@@ -449,5 +511,26 @@ mod tests {
         assert!(contents.contains("runner-55880"));
         assert!(contents.contains("ghcr.io/cloudvibedev/main:latest"));
         assert!(contents.contains("ghcr.io/cloudvibedev/runner:latest"));
+    }
+
+    #[test]
+    fn prefers_docker_compose_plugin_when_available() {
+        let resolved = resolve_compose_cli_with(|| true, || true).expect("compose cli");
+        assert_eq!(resolved, ComposeCli::DockerPlugin);
+    }
+
+    #[test]
+    fn falls_back_to_docker_compose_binary() {
+        let resolved = resolve_compose_cli_with(|| false, || true).expect("compose cli");
+        assert_eq!(resolved, ComposeCli::DockerComposeBinary);
+    }
+
+    #[test]
+    fn errors_when_no_compose_runtime_is_available() {
+        let err = resolve_compose_cli_with(|| false, || false).expect_err("missing compose");
+        assert!(
+            err.to_string().contains("failed to find Docker Compose"),
+            "unexpected error: {err}"
+        );
     }
 }

@@ -34,6 +34,31 @@ What it means:
 - the context was never started with `--detach`
 - or it has already been stopped
 
+## Docker Compose Is Not Available
+
+Error examples:
+
+```text
+failed to find Docker Compose
+```
+
+or
+
+```text
+docker compose up failed
+```
+
+What it means:
+
+- `previa` could not use Docker Compose on your machine
+- the CLI supports both `docker compose` and `docker-compose`
+
+What to do:
+
+- confirm that either `docker compose version` or `docker-compose version` works in your shell
+- if only `docker-compose` is available, `previa` will use it automatically
+- if neither command works, install Docker Compose and try `previa up` again
+
 ## Runner Selector Did Not Match
 
 Error:
