@@ -15,6 +15,13 @@ Previa is a platform for simulating, executing, and tracing real end-to-end API 
 
 The `previa` CLI is the local entry point for running a Previa stack on your machine. It starts `previa-main`, manages local and attached `previa-runner` instances, opens the IDE in the browser, and helps you bootstrap projects from pipeline files.
 
+## Quick Links
+
+- [Website](https://previa.dev)
+- [Documentation](docs/previa/README.md)
+- [Releases](https://github.com/cloudvibedev/previa/releases)
+- [Security policy](SECURITY.md)
+
 ## What Is Previa?
 
 Previa combines local runtime operations with project-scoped API testing workflows:
@@ -77,11 +84,15 @@ Start a Docker-backed stack:
 previa up -d
 ```
 
+This is the general cross-platform path when Docker is available.
+
 Start a binary-backed stack without Docker:
 
 ```bash
 previa up -d --bin
 ```
+
+This path is aimed at Linux environments and local runtime development.
 
 Inspect the runtime and open the IDE:
 
@@ -112,6 +123,11 @@ Recommended first reads:
 - [MCP integration](docs/previa/mcp.md)
 - [Operations cheatsheet](docs/previa/operations-cheatsheet.md)
 - [Contributing](CONTRIBUTING.md)
+
+## Community
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## License
 

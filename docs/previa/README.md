@@ -44,7 +44,6 @@ This is the main documentation index for Previa as an operator-facing platform a
 - [CLI commands](./cli-commands.md)
 - [Version compatibility](./version-compatibility.md)
 - [Security](./security.md)
-- [Release and install](./release-install.md)
 - [FAQ](./faq.md)
 - [Contributing](../../CONTRIBUTING.md)
 - [CLI specification](../specs/previa-v1.md)
