@@ -2,6 +2,14 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.9] - 2026-03-19
+
+### Other Changes
+- Atualiza versão para 1.0.0-alpha.9 no Cargo.lock e Cargo.toml (c70f6ed)
+- Print manual URL when browser launch fails (babede7)
+
+Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.8...v1.0.0-alpha.9
+
 ## [v1.0.0-alpha.8] - 2026-03-19
 
 ### Other Changes
