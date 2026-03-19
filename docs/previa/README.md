@@ -1,66 +1,45 @@
-# Previa CLI Documentation
+# Previa Documentation
 
-This section documents the `previa` CLI as an operator-facing tool for local
-stack management, runtime inspection, and pipeline import.
+This is the main documentation index for Previa as an operator-facing platform and CLI.
 
-## Concepts
+## Start Here
 
-- `context`: an isolated local runtime managed by `previa`
-- `PREVIA_HOME`: the root directory where `previa` stores runtime state
-- `stack`: the running local Previa runtime for a given context
-- `compose source`: a `previa-compose.yaml|yml|json` file used as input to `up`
-- `pipeline import`: loading `.previa*` pipeline files into a local project
-
-## Guides
-
-- [Architecture at a glance](./architecture.md)
 - [Getting started](./getting-started.md)
 - [Minimal happy path](./minimal-happy-path.md)
+- [Architecture at a glance](./architecture.md)
+
+## Core Concepts
+
 - [Runtime modes](./runtime-modes.md)
+- [Home and contexts](./home-and-contexts.md)
 - [Main and runner authentication](./main-runner-auth.md)
+- [Remote runners](./remote-runners.md)
+
+## Authoring and Testing
+
 - [Pipeline authoring](./pipeline-authoring.md)
 - [Spec-driven testing](./spec-driven-testing.md)
-- [API workflows](./api-workflows.md)
 - [Examples cookbook](./examples-cookbook.md)
-- [Security](./security.md)
-- [Remote runners](./remote-runners.md)
-- [MCP integration](./mcp.md)
 - [E2E queues](./e2e-queues.md)
-- [Release and install](./release-install.md)
-- [Operations cheatsheet](./operations-cheatsheet.md)
 - [Proxy](./proxy.md)
-- [FAQ](./faq.md)
-- [Home and contexts](./home-and-contexts.md)
-- [Compose source](./compose.md)
-- [Up and runtime](./up-and-runtime.md)
-- [Pipeline import](./pipeline-import.md)
+
+## Operations
+
+- [Operations cheatsheet](./operations-cheatsheet.md)
 - [Operations](./operations.md)
+- [Compose source](./compose.md)
+- [Pipeline import](./pipeline-import.md)
 - [Troubleshooting](./troubleshooting.md)
 
-## Command Summary
+## Integrations
 
-```text
-previa --home <path> <COMMAND>
-previa up [OPTIONS] [SOURCE]
-previa pull [main|runner|all] [--version <version>]
-previa down [OPTIONS]
-previa restart [OPTIONS]
-previa status [OPTIONS]
-previa list [OPTIONS]
-previa ps [OPTIONS]
-previa logs [OPTIONS]
-previa open [OPTIONS]
-previa version
-previa --version
-```
+- [MCP integration](./mcp.md)
+- [API workflows](./api-workflows.md)
 
-## Technical Reference
+## Reference
 
+- [Security](./security.md)
+- [Release and install](./release-install.md)
+- [FAQ](./faq.md)
 - [CLI specification](../specs/previa-v1.md)
 - [Repository README](../../README.md)
-
-## See Also
-
-- [Getting started](./getting-started.md)
-- [Architecture at a glance](./architecture.md)
-- [Operations](./operations.md)
