@@ -25,6 +25,7 @@ Previa combines local runtime operations with project-scoped API testing workflo
 
 - [Install](#install)
 - [Quick Start](#quick-start)
+- [MCP Integration](#mcp-integration)
 - [Use Cases](#use-cases)
 - [Previa Compose](#previa-compose)
 - [PREVIA_HOME](#previa_home)
@@ -77,6 +78,72 @@ https://ide.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588
 ```
 
 That URL attaches your local `previa-main` context to the hosted IDE at `https://ide.previa.dev`.
+
+## MCP Integration
+
+Previa can expose an MCP server from `previa-main`, so you can connect the local stack to your favorite AI assistant.
+
+### 1. Enable MCP on `previa-main`
+
+When starting `previa-main` directly, enable it with:
+
+```bash
+MCP_ENABLED=true cargo run -p previa-main
+```
+
+If you are using `previa up`, the cleanest option is to enable it through the main environment in `previa-compose.yaml`:
+
+```yaml
+version: 1
+main:
+  env:
+    MCP_ENABLED: "true"
+    MCP_PATH: /mcp
+runners:
+  local:
+    count: 1
+```
+
+Then start the stack:
+
+```bash
+previa up -d .
+```
+
+By default, the MCP endpoint is exposed at:
+
+```text
+http://localhost:5588/mcp
+```
+
+If you changed the main port or `MCP_PATH`, adjust the URL accordingly.
+
+### 2. Connect your assistant
+
+Any assistant or MCP client that supports remote HTTP MCP can point to the Previa endpoint.
+
+For Codex, the configuration looks like this:
+
+```toml
+[mcp_servers.previa]
+enabled = true
+url = "http://localhost:5588/mcp"
+```
+
+On the same machine, `localhost` is usually the right host even if `previa-main` is bound to `0.0.0.0`.
+
+### 3. What the assistant can do
+
+Once connected, an MCP-enabled assistant can work with the same Previa platform capabilities exposed by `previa-main`, including:
+
+- project and pipeline inspection
+- OpenAPI spec workflows
+- E2E and load execution flows
+- E2E queue operations
+- project import and export
+- live API probing through the proxy
+
+That means you can use your assistant to inspect a project, propose or create pipelines, analyze failures, and operate test workflows against the same local stack you opened with `previa open`.
 
 ## Use Cases
 
