@@ -106,6 +106,7 @@ Recommended first reads:
 - [Release and install](docs/previa/release-install.md)
 - [MCP integration](docs/previa/mcp.md)
 - [Operations cheatsheet](docs/previa/operations-cheatsheet.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## License
 
