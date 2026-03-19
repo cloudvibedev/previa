@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_scope:
-        description: Release scope to publish: Linux full, macOS release, Windows release, or all platforms
+        description: "Release scope to publish: Linux full, macOS release, Windows release, or all platforms"
         required: true
         default: all
         type: choice
@@ -70,6 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_scope: ${{ steps.scope.outputs.release_scope }}
+      build_matrix: ${{ steps.scope.outputs.build_matrix }}
       build_linux: ${{ steps.scope.outputs.build_linux }}
       build_macos: ${{ steps.scope.outputs.build_macos }}
       build_windows: ${{ steps.scope.outputs.build_windows }}
@@ -84,7 +85,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          scope="${{ github.event.inputs.release_scope || 'all' }}"
+          scope="${{ inputs.release_scope }}"
+
+          linux_matrix='[
+            {"name":"linux-amd64","artifact_name":"release-linux-amd64","runs_on":"ubuntu-latest","target":"x86_64-unknown-linux-musl","os_slug":"linux","arch_slug":"amd64","exe_ext":"","use_cross":true,"build_runner":true,"build_main":true,"build_ctl":true},
+            {"name":"linux-arm64","artifact_name":"release-linux-arm64","runs_on":"ubuntu-latest","target":"aarch64-unknown-linux-musl","os_slug":"linux","arch_slug":"arm64","exe_ext":"","use_cross":true,"build_runner":true,"build_main":true,"build_ctl":true}
+          ]'
+          mac_matrix='[
+            {"name":"macos-amd64","artifact_name":"release-macos-amd64","runs_on":"macos-latest","target":"x86_64-apple-darwin","os_slug":"macos","arch_slug":"amd64","exe_ext":"","use_cross":false,"build_runner":false,"build_main":false,"build_ctl":true}
+          ]'
+          windows_matrix='[
+            {"name":"windows-amd64","artifact_name":"release-windows-amd64","runs_on":"windows-latest","target":"x86_64-pc-windows-msvc","os_slug":"windows","arch_slug":"amd64","exe_ext":".exe","use_cross":false,"build_runner":false,"build_main":false,"build_ctl":true}
+          ]'
 
           case "${scope}" in
             linux)
@@ -94,6 +106,7 @@ jobs:
               publish_docker=true
               publish_crates=true
               publish_bucket=true
+              build_matrix="${linux_matrix}"
               ;;
             mac)
               build_linux=false
@@ -102,6 +115,7 @@ jobs:
               publish_docker=false
               publish_crates=false
               publish_bucket=false
+              build_matrix="${mac_matrix}"
               ;;
             windows)
               build_linux=false
@@ -110,6 +124,7 @@ jobs:
               publish_docker=false
               publish_crates=false
               publish_bucket=false
+              build_matrix="${windows_matrix}"
               ;;
             all)
               build_linux=true
@@ -118,6 +133,12 @@ jobs:
               publish_docker=true
               publish_crates=true
               publish_bucket=true
+              build_matrix='[
+                {"name":"linux-amd64","artifact_name":"release-linux-amd64","runs_on":"ubuntu-latest","target":"x86_64-unknown-linux-musl","os_slug":"linux","arch_slug":"amd64","exe_ext":"","use_cross":true,"build_runner":true,"build_main":true,"build_ctl":true},
+                {"name":"linux-arm64","artifact_name":"release-linux-arm64","runs_on":"ubuntu-latest","target":"aarch64-unknown-linux-musl","os_slug":"linux","arch_slug":"arm64","exe_ext":"","use_cross":true,"build_runner":true,"build_main":true,"build_ctl":true},
+                {"name":"macos-amd64","artifact_name":"release-macos-amd64","runs_on":"macos-latest","target":"x86_64-apple-darwin","os_slug":"macos","arch_slug":"amd64","exe_ext":"","use_cross":false,"build_runner":false,"build_main":false,"build_ctl":true},
+                {"name":"windows-amd64","artifact_name":"release-windows-amd64","runs_on":"windows-latest","target":"x86_64-pc-windows-msvc","os_slug":"windows","arch_slug":"amd64","exe_ext":".exe","use_cross":false,"build_runner":false,"build_main":false,"build_ctl":true}
+              ]'
               ;;
             *)
               echo "::error::Unsupported release scope: ${scope}"
@@ -127,6 +148,9 @@ jobs:
 
           {
             echo "release_scope=${scope}"
+            echo "build_matrix<<EOF"
+            echo "${build_matrix}"
+            echo "EOF"
             echo "build_linux=${build_linux}"
             echo "build_macos=${build_macos}"
             echo "build_windows=${build_windows}"
@@ -196,63 +220,11 @@ jobs:
   build_binaries:
     name: Build binaries (${{ matrix.name }})
     needs: [version_check, resolve_scope, prepare_changelog, tag_release]
-    if: >-
-      (matrix.scope_group == 'linux' && needs.resolve_scope.outputs.build_linux == 'true') ||
-      (matrix.scope_group == 'mac' && needs.resolve_scope.outputs.build_macos == 'true') ||
-      (matrix.scope_group == 'windows' && needs.resolve_scope.outputs.build_windows == 'true')
     runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: linux-amd64
-            artifact_name: release-linux-amd64
-            runs_on: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            os_slug: linux
-            arch_slug: amd64
-            exe_ext: ""
-            use_cross: true
-            build_runner: true
-            build_main: true
-            build_ctl: true
-            scope_group: linux
-          - name: linux-arm64
-            artifact_name: release-linux-arm64
-            runs_on: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            os_slug: linux
-            arch_slug: arm64
-            exe_ext: ""
-            use_cross: true
-            build_runner: true
-            build_main: true
-            build_ctl: true
-            scope_group: linux
-          - name: macos-amd64
-            artifact_name: release-macos-amd64
-            runs_on: macos-latest
-            target: x86_64-apple-darwin
-            os_slug: macos
-            arch_slug: amd64
-            exe_ext: ""
-            use_cross: false
-            build_runner: false
-            build_main: false
-            build_ctl: true
-            scope_group: mac
-          - name: windows-amd64
-            artifact_name: release-windows-amd64
-            runs_on: windows-latest
-            target: x86_64-pc-windows-msvc
-            os_slug: windows
-            arch_slug: amd64
-            exe_ext: .exe
-            use_cross: false
-            build_runner: false
-            build_main: false
-            build_ctl: true
-            scope_group: windows
+        include: ${{ fromJSON(needs.resolve_scope.outputs.build_matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
