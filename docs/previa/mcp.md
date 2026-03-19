@@ -1,6 +1,6 @@
 # MCP Integration
 
-Previa can expose an MCP server from `previa-main`, allowing AI assistants to operate against your local stack.
+Previa can expose an MCP server from `previa-main`, allowing AI assistants to inspect projects, author pipelines, operate queues, validate specs, probe live APIs, and run execution workflows against your local stack.
 
 ## Enable MCP
 
@@ -47,28 +47,179 @@ enabled = true
 url = "http://localhost:5588/mcp"
 ```
 
-## What Assistants Can Do
+On the same machine, `localhost` is usually the right host even if `previa-main` is bound to `0.0.0.0`.
 
-Through MCP, assistants can work with capabilities exposed by `previa-main`, including:
+## What the Server Exposes
 
-- project inspection
-- pipeline creation and repair
-- OpenAPI spec workflows
-- E2E and load execution
-- E2E queue operations
-- project import and export
-- HTTP probing through the proxy
+Today, the Previa MCP server exposes:
+
+- tools
+- prompts
+
+It does not currently expose MCP `resources/list`, `resources/read`, or resource templates as a separate capability layer.
+
+## Built-In Prompts
+
+These prompts are available through `prompts/list` and `prompts/get`.
+
+- `default`
+  General operational prompt for pipeline authoring, execution analysis, and safe repair planning.
+
+- `previa_pipeline_author`
+  Detailed authoring prompt for valid Previa pipelines, including schemas, template rules, and examples.
+
+- `project_onboarding_guide`
+  Helps an assistant discover the current project, specs, pipelines, and context before changing anything.
+
+- `pipeline_failure_triage`
+  Focused on investigating failing E2E and load executions and proposing the next safe action.
+
+- `openapi_spec_ingestion_advisor`
+  Helps validate OpenAPI content and turn it into project specs safely.
+
+- `pipeline_repair_planner`
+  Plans evidence-based changes for a failing or outdated pipeline before applying updates.
+
+- `load_test_designer`
+  Helps choose sensible load parameters and explain tradeoffs before running a load test.
+
+- `queue_orchestrator`
+  Helps create, inspect, monitor, and cancel E2E queues for a project.
+
+- `http_probe_assistant`
+  Guides live HTTP inspection through `proxy_request` before making persistent pipeline changes.
+
+- `project_migration_assistant`
+  Supports exporting, reviewing, and importing project bundles between environments.
+
+- `safe_change_reviewer`
+  Reviews risky create, update, delete, and import actions before execution.
+
+- `spec_to_pipeline_bootstrap`
+  Turns project specs into an initial executable pipeline design.
+
+## Prompt Aliases
+
+These legacy names are still accepted by `prompts/get`:
+
+- `pipeline_test_assistant` -> `default`
+- `pipeline_creation_specialist` -> `previa_pipeline_author`
+
+## Available Tools
+
+### System and Discovery
+
+- `health`
+  Returns a simple orchestrator health payload.
+
+- `get_info`
+  Returns runner registration and health information.
+
+- `get_openapi_document`
+  Returns the orchestrator OpenAPI document.
+
+- `get_pipeline_creation_guide`
+  Returns a built-in guide for Previa pipeline structure and supported templates.
+
+### Projects and Transfers
+
+- `list_projects`
+- `get_project`
+- `create_project`
+- `update_project`
+- `delete_project`
+- `export_project`
+- `import_project`
+
+Use these to inspect project state, create or update metadata, and move project bundles between environments.
+
+### Pipelines
+
+- `list_project_pipelines`
+- `get_project_pipeline`
+- `create_project_pipeline`
+- `update_project_pipeline`
+- `delete_project_pipeline`
+
+Use these for stored project pipelines, not just one-off execution payloads.
+
+### Specs and OpenAPI
+
+- `list_project_specs`
+- `get_project_spec`
+- `create_project_spec`
+- `update_project_spec`
+- `delete_project_spec`
+- `validate_openapi`
+
+Use these when the assistant needs to understand or manage the spec layer behind `{{specs.<slug>.url.<name>}}`.
+
+### E2E and Load History
+
+- `list_e2e_history`
+- `get_e2e_test`
+- `delete_e2e_history`
+- `delete_e2e_test`
+- `list_load_history`
+- `get_load_test`
+- `delete_load_history`
+- `delete_load_test`
+
+These are useful for diagnosis, cleanup, and reporting.
+
+### Execution and Queues
+
+- `run_project_e2e_test`
+- `run_project_load_test`
+- `get_execution`
+- `cancel_execution`
+- `create_project_e2e_queue`
+- `get_current_project_e2e_queue`
+- `get_project_e2e_queue`
+- `cancel_project_e2e_queue`
+
+These are the tools that let an assistant actively run and operate test workflows.
+
+### Live HTTP Inspection
+
+- `proxy_request`
+
+Use this to inspect live endpoint behavior, headers, auth, payloads, redirects, or SSE without immediately changing stored project assets.
+
+## What an Assistant Can Do Well
+
+With the current MCP surface, an assistant can:
+
+- inspect project state before acting
+- create or repair pipelines
+- validate or ingest OpenAPI specs
+- run E2E and load workflows
+- operate queue-based regression sequences
+- inspect failures using history and execution data
+- probe live HTTP behavior
+- move projects across environments
 
 ## Suggested First Prompts
 
-After connecting your assistant, try:
+After connecting your assistant, try prompts like:
 
 - inspect this project and summarize its specs and pipelines
-- create a CRUD pipeline from my users spec
-- run an E2E queue for these pipeline IDs
-- analyze why this pipeline step failed
+- use `project_onboarding_guide` and tell me the safest next step
+- use `previa_pipeline_author` to create a CRUD pipeline for my users spec
+- use `pipeline_failure_triage` on the latest failing execution
+- use `queue_orchestrator` to run these pipeline IDs in sequence
+- use `http_probe_assistant` to inspect this endpoint before editing my pipeline
+
+## Practical Advice
+
+- use specs before hardcoding environment URLs when possible
+- prefer `project_onboarding_guide` before risky writes in an unfamiliar project
+- prefer `proxy_request` when you need evidence from the target API first
+- use `safe_change_reviewer` before deletes, imports, or broad updates
 
 ## See Also
 
 - [Architecture at a glance](./architecture.md)
+- [Main and runner authentication](./main-runner-auth.md)
 - [E2E queues](./e2e-queues.md)
+- [Proxy](./proxy.md)
