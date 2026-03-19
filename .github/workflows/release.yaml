@@ -53,9 +53,66 @@ jobs:
 
           echo "version=${workspace_version}" >> "${GITHUB_OUTPUT}"
 
+  prepare_changelog:
+    name: Prepare changelog
+    needs: version_check
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.release_sha.outputs.release_sha }}
+    env:
+      VERSION: ${{ needs.version_check.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+
+      - name: Fetch tags
+        shell: bash
+        run: git fetch --force --tags
+
+      - name: Generate changelog and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/generate_changelog.py \
+            --version "${VERSION}" \
+            --changelog CHANGELOG.md \
+            --release-notes RELEASE_NOTES.md
+
+      - name: Commit changelog update if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add CHANGELOG.md
+          git commit -m "docs(changelog): update for v${VERSION}"
+          git push origin HEAD:main
+
+      - name: Record release sha
+        id: release_sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "release_sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: RELEASE_NOTES.md
+          if-no-files-found: error
+
   build_binaries:
     name: Build binaries (${{ matrix.name }})
-    needs: [version_check, tag_release]
+    needs: [version_check, prepare_changelog, tag_release]
     runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
@@ -84,6 +141,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_changelog.outputs.release_sha }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -162,7 +221,7 @@ jobs:
 
   upload_r2_artifacts:
     name: Upload release artifacts to Cloudflare R2
-    needs: [version_check, build_binaries]
+    needs: [version_check, prepare_changelog, build_binaries]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version_check.outputs.version }}
@@ -175,6 +234,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_changelog.outputs.release_sha }}
 
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
@@ -278,13 +339,16 @@ jobs:
 
   tag_release:
     name: Create git tag
-    needs: version_check
+    needs: [version_check, prepare_changelog]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version_check.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_changelog.outputs.release_sha }}
+          fetch-depth: 0
 
       - name: Create tag if missing
         shell: bash
@@ -312,7 +376,7 @@ jobs:
 
   github_release:
     name: Publish GitHub Release
-    needs: [version_check, tag_release, build_binaries]
+    needs: [version_check, prepare_changelog, tag_release, build_binaries]
     runs-on: ubuntu-latest
     steps:
       - name: Download all release artifacts
@@ -322,12 +386,19 @@ jobs:
           merge-multiple: true
           path: release-assets
 
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: release-meta
+
       - name: Create release and upload binaries
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.version_check.outputs.version }}
           name: Release v${{ needs.version_check.outputs.version }}
           files: release-assets/*
+          body_path: release-meta/RELEASE_NOTES.md
           draft: false
           prerelease: false
         env:
@@ -335,7 +406,7 @@ jobs:
 
   docker_build_arch:
     name: Build and push Docker (${{ matrix.service }}-${{ matrix.arch }})
-    needs: [version_check, build_binaries]
+    needs: [version_check, prepare_changelog, build_binaries]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -356,6 +427,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_changelog.outputs.release_sha }}
 
       - name: Download Linux binaries artifact
         uses: actions/download-artifact@v4
@@ -439,11 +512,13 @@ jobs:
 
   publish_crates:
     name: Publish crates.io packages
-    needs: [version_check, build_binaries]
+    needs: [version_check, prepare_changelog, build_binaries]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_changelog.outputs.release_sha }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

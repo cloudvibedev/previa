@@ -99,6 +99,17 @@ A good pull request should explain:
 If a CLI, API, or runtime workflow changed, include the relevant command,
 request, or expected output in the PR description.
 
+For better automatic changelogs, prefer commit messages that roughly follow
+conventional prefixes such as:
+
+- `feat:`
+- `fix:`
+- `docs:`
+- `refactor:`
+- `perf:`
+- `test:`
+- `chore:`
+
 ## Commit and Push Workflow
 
 Current repository workflow expects contributors to:

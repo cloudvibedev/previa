@@ -3,3 +3,4 @@ target
 .env
 .previa
 .previa*
+RELEASE_NOTES.md
