@@ -107,6 +107,8 @@ previa open
 https://ide.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588
 ```
 
+Se o comando de browser falhar, o CLI mantém a saída em erro, destaca a mensagem em vermelho e ainda imprime a URL final para abrir manualmente.
+
 ## Documentation
 
 Start here for the full documentation hub:

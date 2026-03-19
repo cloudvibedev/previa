@@ -463,9 +463,18 @@ async fn cmd_open(paths: &PreviaPaths, args: OpenArgs) -> Result<()> {
     let stack_paths = paths.stack(&stack_name);
     let state = read_required_state(&stack_paths)?;
     let url = build_open_url(&state.main.address, state.main.port)?;
-    open_browser(&url)?;
-    println!("{url}");
-    Ok(())
+    match open_browser(&url) {
+        Ok(()) => {
+            println!("{url}");
+            Ok(())
+        }
+        Err(error) => {
+            println!("{url}");
+            Err(anyhow!(
+                "\x1b[31mfailed to open the browser automatically: {error:#}\x1b[0m\nopen the URL above manually"
+            ))
+        }
+    }
 }
 
 fn print_dry_run(resolved: &ResolvedUpConfig) {

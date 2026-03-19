@@ -328,6 +328,7 @@ Runtime behavior:
 - builds a URL like `https://ide.previa.dev?add_context=<main-url>`
 - opens the default browser
 - prints the final URL to stdout
+- if the browser launcher fails, exits with error, highlights the failure in red, and still prints the final URL for manual opening
 
 If the main runtime is bound to `0.0.0.0` or `::`, `previa` normalizes it to loopback for the browser URL.
 

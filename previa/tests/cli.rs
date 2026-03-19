@@ -2441,6 +2441,65 @@ fn open_launches_app_with_encoded_main_context_url() {
     assert_eq!(stdout.trim(), expected);
 }
 
+#[test]
+fn open_prints_url_when_browser_launch_fails() {
+    let temp = setup_fake_docker();
+    let stack = "other";
+    let stack_dir = temp.path().join("stacks").join(stack);
+    let run_dir = stack_dir.join("run");
+    fs::create_dir_all(&run_dir).expect("run dir");
+
+    fs::write(
+        run_dir.join("state.json"),
+        format!(
+            r#"{{
+  "name": "{stack}",
+  "mode": "detached",
+  "started_at": "2026-03-11T00:00:00Z",
+  "image_tag": "latest",
+  "compose_file": "{}",
+  "compose_project": "previa_{stack}",
+  "main": {{
+    "service_name": "main",
+    "address": "0.0.0.0",
+    "port": 5588
+  }},
+  "runner_port_range": {{
+    "start": 55880,
+    "end": 55979
+  }},
+  "attached_runners": [],
+  "runners": []
+}}"#,
+            stack_dir
+                .join("run")
+                .join("docker-compose.generated.yaml")
+                .display()
+        ),
+    )
+    .expect("runtime state");
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .env("PREVIA_OPEN_BROWSER", temp.path().join("missing-browser"))
+        .args(["open", "--context", stack])
+        .output()
+        .expect("open output");
+
+    assert!(!output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    let expected = "https://ide.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588";
+
+    assert_eq!(stdout.trim(), expected);
+    assert!(stderr.contains("\u{1b}[31m"));
+    assert!(stderr.contains("failed to open the browser automatically"));
+    assert!(stderr.contains("failed to launch browser command"));
+    assert!(stderr.contains("open the URL above manually"));
+}
+
 fn run_command_with_stdin<const N: usize>(
     previa_home: &Path,
     args: [&str; N],
