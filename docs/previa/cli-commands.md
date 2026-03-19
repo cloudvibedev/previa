@@ -79,7 +79,7 @@ Important options:
 - `--dry-run`: prints the planned runtime without starting it
 - `-d, --detach`: starts the stack in detached mode
 - `--bin`: uses local binaries instead of container images
-- `--version <TAG>`: image tag for compose-backed runtimes, default `latest`
+- `--version <TAG>`: image tag for compose-backed runtimes, default is the current CLI version
 
 Examples:
 
@@ -127,7 +127,7 @@ Targets:
 
 Important options:
 
-- `--version <TAG>`: image tag to pull, default `latest`
+- `--version <TAG>`: image tag to pull, default is the current CLI version
 
 Examples:
 
@@ -135,7 +135,7 @@ Examples:
 previa pull
 previa pull main
 previa pull runner --version 0.0.7
-previa pull all --version latest
+previa pull all
 ```
 
 This command is mainly useful for compose-backed runtimes.

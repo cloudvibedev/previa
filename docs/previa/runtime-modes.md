@@ -30,13 +30,7 @@ This mode:
 - is useful for local development and debugging
 - currently targets Linux for published runtime binaries
 
-If a required runtime binary is missing, `previa` can fetch it from:
-
-```text
-https://downloads.previa.dev/latest.json
-```
-
-and install it under `PREVIA_HOME/bin`.
+If a required runtime binary is missing, `previa` can fetch the exact runtime binary that matches the current CLI version and install it under `PREVIA_HOME/bin`.
 
 ## Which One Should You Use?
 
@@ -55,6 +49,7 @@ Use `--bin` when:
 ## Notes
 
 - `-d` is the short form of `--detach`
+- compose-backed mode uses the current CLI version tag by default unless `--version` is provided explicitly
 - `--version` applies to compose-backed runtimes, not `--bin`
 - `--bin` resolves binaries from `PREVIA_HOME/bin` before workspace targets
 

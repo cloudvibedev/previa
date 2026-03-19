@@ -196,7 +196,7 @@ pub async fn resolve_up_config(
     if args.dry_run && args.detach {
         bail!("--dry-run cannot be combined with --detach");
     }
-    if args.bin && args.version != "latest" {
+    if args.bin && args.version != env!("CARGO_PKG_VERSION") {
         bail!("--version cannot be used with --bin");
     }
     let backend = if args.bin {
@@ -597,11 +597,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
 
+    use axum::Router;
     use axum::extract::State;
     use axum::http::StatusCode;
     use axum::routing::get;
-    use axum::{Json, Router};
-    use serde_json::{Value, json};
     use tempfile::TempDir;
     use tokio::net::TcpListener;
 
@@ -615,29 +614,19 @@ mod tests {
 
     #[derive(Clone)]
     struct TestServerState {
-        manifest: Value,
         binaries: BTreeMap<String, Vec<u8>>,
         requests: Arc<Mutex<Vec<String>>>,
     }
 
-    async fn latest_manifest(State(state): State<TestServerState>) -> Json<Value> {
-        state
-            .requests
-            .lock()
-            .expect("requests lock")
-            .push("/latest.json".to_owned());
-        Json(state.manifest)
-    }
-
     async fn binary_asset(
         State(state): State<TestServerState>,
-        axum::extract::Path(name): axum::extract::Path<String>,
+        axum::extract::Path((version, name)): axum::extract::Path<(String, String)>,
     ) -> (StatusCode, Vec<u8>) {
         state
             .requests
             .lock()
             .expect("requests lock")
-            .push(format!("/files/{name}"));
+            .push(format!("/{version}/files/{name}"));
         match state.binaries.get(&name) {
             Some(bytes) => (StatusCode::OK, bytes.clone()),
             None => (StatusCode::NOT_FOUND, Vec::new()),
@@ -653,26 +642,12 @@ mod tests {
             .expect("bind listener");
         let address = listener.local_addr().expect("local addr");
         let base_url = format!("http://{address}");
-        let links = binaries
-            .keys()
-            .map(|filename| {
-                (
-                    filename.replace('-', "_"),
-                    Value::String(format!("{base_url}/files/{filename}")),
-                )
-            })
-            .collect::<serde_json::Map<String, Value>>();
         let state = TestServerState {
-            manifest: json!({
-                "version": "1.0.0-alpha.0",
-                "links": links,
-            }),
             binaries,
             requests: requests.clone(),
         };
         let app = Router::new()
-            .route("/latest.json", get(latest_manifest))
-            .route("/files/{name}", get(binary_asset))
+            .route("/{version}/files/{name}", get(binary_asset))
             .with_state(state);
         tokio::spawn(async move {
             axum::serve(listener, app).await.expect("serve app");
@@ -706,15 +681,15 @@ mod tests {
             dry_run: false,
             detach: false,
             bin: true,
-            version: "latest".to_owned(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
         }
     }
 
     #[tokio::test]
     async fn resolve_up_config_downloads_missing_main_and_runner_for_bin_runtime() {
-        let _guard = crate::download::MANIFEST_ENV_LOCK
+        let _guard = crate::download::DOWNLOAD_ENV_LOCK
             .lock()
-            .expect("manifest env lock");
+            .expect("download env lock");
         let (_temp, paths) = temp_paths();
         let stack_paths = paths.stack("default");
         let asset_main = b"#!/bin/sh\necho main\n".to_vec();
@@ -725,10 +700,7 @@ mod tests {
         ]);
         let (base_url, requests) = spawn_test_server(binaries).await;
         unsafe {
-            std::env::set_var(
-                "PREVIA_DOWNLOAD_MANIFEST_URL",
-                format!("{base_url}/latest.json"),
-            );
+            std::env::set_var("PREVIA_DOWNLOAD_BASE_URL", base_url.clone());
         }
 
         let resolved = resolve_up_config(&paths, &stack_paths, base_args())
@@ -736,31 +708,30 @@ mod tests {
             .expect("resolved config");
 
         unsafe {
-            std::env::remove_var("PREVIA_DOWNLOAD_MANIFEST_URL");
+            std::env::remove_var("PREVIA_DOWNLOAD_BASE_URL");
         }
 
         assert_eq!(resolved.local_runner_count, 1);
         assert!(paths.main_binary().is_ok());
         assert!(paths.runner_binary().is_ok());
         let requests = requests.lock().expect("requests lock");
-        assert!(requests.iter().any(|value| value == "/latest.json"));
-        assert!(
-            requests
-                .iter()
-                .any(|value| value == "/files/previa-main-linux-amd64")
-        );
-        assert!(
-            requests
-                .iter()
-                .any(|value| value == "/files/previa-runner-linux-amd64")
-        );
+        assert!(requests.iter().any(|value| value
+            == &format!(
+                "/{}/files/previa-main-linux-amd64",
+                env!("CARGO_PKG_VERSION")
+            )));
+        assert!(requests.iter().any(|value| value
+            == &format!(
+                "/{}/files/previa-runner-linux-amd64",
+                env!("CARGO_PKG_VERSION")
+            )));
     }
 
     #[tokio::test]
     async fn resolve_up_config_attached_runner_only_does_not_download_runner_binary() {
-        let _guard = crate::download::MANIFEST_ENV_LOCK
+        let _guard = crate::download::DOWNLOAD_ENV_LOCK
             .lock()
-            .expect("manifest env lock");
+            .expect("download env lock");
         let (_temp, paths) = temp_paths();
         let stack_paths = paths.stack("default");
         stack_paths
@@ -777,10 +748,7 @@ mod tests {
         )]);
         let (base_url, requests) = spawn_test_server(binaries).await;
         unsafe {
-            std::env::set_var(
-                "PREVIA_DOWNLOAD_MANIFEST_URL",
-                format!("{base_url}/latest.json"),
-            );
+            std::env::set_var("PREVIA_DOWNLOAD_BASE_URL", base_url.clone());
         }
 
         let mut args = base_args();
@@ -791,19 +759,18 @@ mod tests {
             .expect("resolved config");
 
         unsafe {
-            std::env::remove_var("PREVIA_DOWNLOAD_MANIFEST_URL");
+            std::env::remove_var("PREVIA_DOWNLOAD_BASE_URL");
         }
 
         assert_eq!(resolved.local_runner_count, 0);
         assert!(paths.main_binary().is_ok());
         assert!(paths.runner_binary().is_err());
         let requests = requests.lock().expect("requests lock");
-        assert!(requests.iter().any(|value| value == "/latest.json"));
-        assert!(
-            requests
-                .iter()
-                .all(|value| value != "/files/previa-runner-linux-amd64")
-        );
+        assert!(requests.iter().all(|value| value
+            != &format!(
+                "/{}/files/previa-runner-linux-amd64",
+                env!("CARGO_PKG_VERSION")
+            )));
     }
 
     #[tokio::test]

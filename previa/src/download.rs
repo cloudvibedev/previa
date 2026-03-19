@@ -1,54 +1,50 @@
-use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use reqwest::Client;
-use serde::Deserialize;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 use crate::paths::PreviaPaths;
 
-const DEFAULT_MANIFEST_URL: &str = "https://downloads.previa.dev/latest.json";
-const MANIFEST_URL_ENV: &str = "PREVIA_DOWNLOAD_MANIFEST_URL";
+const DEFAULT_DOWNLOAD_BASE_URL: &str = "https://downloads.previa.dev";
+const DOWNLOAD_BASE_URL_ENV: &str = "PREVIA_DOWNLOAD_BASE_URL";
+const LEGACY_MANIFEST_URL_ENV: &str = "PREVIA_DOWNLOAD_MANIFEST_URL";
 
 #[cfg(test)]
-pub(crate) static MANIFEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-#[derive(Debug, Deserialize)]
-struct LatestManifest {
-    version: String,
-    #[serde(default)]
-    links: BTreeMap<String, String>,
-}
+pub(crate) static DOWNLOAD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub async fn ensure_runtime_binaries(paths: &PreviaPaths, local_runner_count: usize) -> Result<()> {
-    let mut missing = Vec::new();
-    if paths.main_binary().is_err() {
-        missing.push("previa-main");
+    let mut required = Vec::new();
+    if should_install_binary(paths, "previa-main")? {
+        required.push("previa-main");
     }
-    if local_runner_count > 0 && paths.runner_binary().is_err() {
-        missing.push("previa-runner");
+    if local_runner_count > 0 && should_install_binary(paths, "previa-runner")? {
+        required.push("previa-runner");
     }
 
-    if missing.is_empty() {
+    if required.is_empty() {
         return Ok(());
     }
 
     let client = build_download_client()?;
-    let manifest_url = manifest_url();
-    let manifest = fetch_manifest(&client, &manifest_url).await?;
+    let version = current_release_version();
 
-    for binary_name in missing {
+    for binary_name in required {
         let mut reporter = DownloadReporter::for_stderr();
-        download_binary(&client, paths, binary_name, &manifest, &mut reporter).await?;
+        download_binary(&client, paths, binary_name, version, &mut reporter).await?;
     }
 
     Ok(())
+}
+
+fn current_release_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
 }
 
 fn build_download_client() -> Result<Client> {
@@ -59,47 +55,42 @@ fn build_download_client() -> Result<Client> {
         .context("failed to build binary download HTTP client")
 }
 
-fn manifest_url() -> String {
-    env::var(MANIFEST_URL_ENV)
+fn download_base_url() -> String {
+    if let Some(value) = env::var(DOWNLOAD_BASE_URL_ENV)
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_owned())
+        .filter(|value| !value.is_empty())
+    {
+        return value;
+    }
+
+    if let Some(value) = env::var(LEGACY_MANIFEST_URL_ENV)
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_MANIFEST_URL.to_owned())
-}
+    {
+        return value
+            .trim_end_matches("/latest.json")
+            .trim_end_matches('/')
+            .to_owned();
+    }
 
-async fn fetch_manifest(client: &Client, url: &str) -> Result<LatestManifest> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .with_context(|| format!("failed to fetch manifest '{url}'"))?
-        .error_for_status()
-        .with_context(|| format!("failed to fetch manifest '{url}'"))?;
-
-    response
-        .json::<LatestManifest>()
-        .await
-        .with_context(|| format!("failed to parse manifest '{url}'"))
+    DEFAULT_DOWNLOAD_BASE_URL.to_owned()
 }
 
 async fn download_binary(
     client: &Client,
     paths: &PreviaPaths,
     binary_name: &str,
-    manifest: &LatestManifest,
+    version: &str,
     reporter: &mut impl ProgressReporter,
 ) -> Result<PathBuf> {
     let (os_slug, arch_slug) = normalized_platform()?;
-    let manifest_key = manifest_key(binary_name, &os_slug, &arch_slug)?;
-    let url = manifest.links.get(&manifest_key).ok_or_else(|| {
-        anyhow!(
-            "missing manifest link '{manifest_key}' for binary '{binary_name}' in '{}'",
-            manifest_url()
-        )
-    })?;
-
+    let asset_name = asset_filename(binary_name, &os_slug, &arch_slug)?;
+    let url = binary_download_url(version, &asset_name);
     let target_path = binary_install_path(paths, binary_name);
-    if target_path.exists() {
+
+    if target_path.exists() && binary_matches_version(&target_path, version) {
         return Ok(target_path);
     }
 
@@ -110,14 +101,22 @@ async fn download_binary(
     }
 
     let response = client
-        .get(url)
+        .get(&url)
         .send()
         .await
-        .with_context(|| format!("failed to download binary '{binary_name}' from '{url}'"))?
+        .with_context(|| {
+            format!(
+                "failed to download binary '{binary_name}' for CLI version '{version}' from '{url}'"
+            )
+        })?
         .error_for_status()
-        .with_context(|| format!("failed to download binary '{binary_name}' from '{url}'"))?;
+        .with_context(|| {
+            format!(
+                "failed to download binary '{binary_name}' for CLI version '{version}' from '{url}'"
+            )
+        })?;
 
-    reporter.begin(binary_name, &manifest.version, response.content_length());
+    reporter.begin(binary_name, version, response.content_length());
 
     let temp_path = temporary_download_path(&target_path);
     let result =
@@ -178,6 +177,50 @@ async fn download_binary(
     Ok(target_path)
 }
 
+fn should_install_binary(paths: &PreviaPaths, binary_name: &str) -> Result<bool> {
+    let expected_version = current_release_version();
+    let install_path = binary_install_path(paths, binary_name);
+    if install_path.exists() {
+        return Ok(!binary_matches_version(&install_path, expected_version));
+    }
+
+    match resolved_binary_path(paths, binary_name) {
+        Ok(path) => Ok(!binary_matches_version(&path, expected_version)),
+        Err(_) => Ok(true),
+    }
+}
+
+fn resolved_binary_path(paths: &PreviaPaths, binary_name: &str) -> Result<PathBuf> {
+    match binary_name {
+        "previa-main" => paths.main_binary(),
+        "previa-runner" => paths.runner_binary(),
+        other => bail!("unsupported auto-download binary '{other}'"),
+    }
+}
+
+fn binary_matches_version(path: &Path, expected_version: &str) -> bool {
+    read_binary_version(path).is_some_and(|version| version == expected_version)
+}
+
+fn read_binary_version(path: &Path) -> Option<String> {
+    let output = Command::new(path).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    stdout
+        .split_whitespace()
+        .last()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn binary_download_url(version: &str, asset_name: &str) -> String {
+    format!("{}/{version}/files/{asset_name}", download_base_url())
+}
+
 fn binary_install_path(paths: &PreviaPaths, binary_name: &str) -> PathBuf {
     paths.home.join("bin").join(binary_name)
 }
@@ -205,14 +248,11 @@ fn normalized_platform() -> Result<(String, String)> {
     Ok((os_slug.to_owned(), arch_slug.to_owned()))
 }
 
-fn manifest_key(binary_name: &str, os_slug: &str, arch_slug: &str) -> Result<String> {
-    let prefix = match binary_name {
-        "previa-main" => "previa_main",
-        "previa-runner" => "previa_runner",
+fn asset_filename(binary_name: &str, os_slug: &str, arch_slug: &str) -> Result<String> {
+    match binary_name {
+        "previa-main" | "previa-runner" => Ok(format!("{binary_name}-{os_slug}-{arch_slug}")),
         other => bail!("unsupported auto-download binary '{other}'"),
-    };
-
-    Ok(format!("{prefix}_{os_slug}_{arch_slug}"))
+    }
 }
 
 #[cfg(unix)]
@@ -313,18 +353,21 @@ impl ProgressReporter for DownloadReporter {
 mod tests {
     use std::collections::BTreeMap;
     use std::env;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
 
+    use axum::Router;
     use axum::extract::State;
     use axum::http::StatusCode;
     use axum::routing::get;
-    use axum::{Json, Router};
-    use serde_json::{Value, json};
     use tempfile::TempDir;
     use tokio::net::TcpListener;
 
     use super::{
-        DownloadReporter, LatestManifest, MANIFEST_URL_ENV, binary_install_path, download_binary,
-        fetch_manifest, manifest_key, normalized_platform,
+        DEFAULT_DOWNLOAD_BASE_URL, DOWNLOAD_BASE_URL_ENV, DOWNLOAD_ENV_LOCK, DownloadReporter,
+        LEGACY_MANIFEST_URL_ENV, asset_filename, binary_download_url, binary_install_path,
+        binary_matches_version, current_release_version, download_base_url, download_binary,
+        normalized_platform, read_binary_version, should_install_binary,
     };
     use crate::paths::PreviaPaths;
 
@@ -357,30 +400,20 @@ mod tests {
 
     #[derive(Clone)]
     struct TestServerState {
-        manifest: Value,
         binaries: BTreeMap<String, Vec<u8>>,
         binary_status: BTreeMap<String, StatusCode>,
         requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     }
 
-    async fn latest_manifest(State(state): State<TestServerState>) -> Json<Value> {
-        state
-            .requests
-            .lock()
-            .expect("requests lock")
-            .push("/latest.json".to_owned());
-        Json(state.manifest)
-    }
-
     async fn binary_asset(
         State(state): State<TestServerState>,
-        axum::extract::Path(name): axum::extract::Path<String>,
+        axum::extract::Path((version, name)): axum::extract::Path<(String, String)>,
     ) -> (StatusCode, Vec<u8>) {
         state
             .requests
             .lock()
             .expect("requests lock")
-            .push(format!("/files/{name}"));
+            .push(format!("/{version}/files/{name}"));
         if let Some(status) = state.binary_status.get(&name) {
             return (*status, Vec::new());
         }
@@ -391,20 +424,17 @@ mod tests {
     }
 
     async fn spawn_test_server(
-        manifest: Value,
         binaries: BTreeMap<String, Vec<u8>>,
         binary_status: BTreeMap<String, StatusCode>,
     ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let state = TestServerState {
-            manifest,
             binaries,
             binary_status,
             requests: requests.clone(),
         };
         let app = Router::new()
-            .route("/latest.json", get(latest_manifest))
-            .route("/files/{name}", get(binary_asset))
+            .route("/{version}/files/{name}", get(binary_asset))
             .with_state(state);
 
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -426,21 +456,37 @@ mod tests {
         (temp, paths)
     }
 
+    fn write_version_script(path: &Path, binary_name: &str, version: &str) {
+        let script = r#"#!/bin/sh
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  printf '%s __VERSION__\n' "__BINARY__"
+  exit 0
+fi
+exit 1
+"#
+        .replace("__VERSION__", version)
+        .replace("__BINARY__", binary_name);
+        std::fs::write(path, script).expect("write script");
+        let mut permissions = std::fs::metadata(path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).expect("chmod");
+    }
+
     #[test]
-    fn manifest_key_resolves_expected_binary_names() {
+    fn asset_filename_resolves_expected_binary_names() {
         assert_eq!(
-            manifest_key("previa-main", "linux", "amd64").expect("main key"),
-            "previa_main_linux_amd64"
+            asset_filename("previa-main", "linux", "amd64").expect("main asset"),
+            "previa-main-linux-amd64"
         );
         assert_eq!(
-            manifest_key("previa-runner", "linux", "arm64").expect("runner key"),
-            "previa_runner_linux_arm64"
+            asset_filename("previa-runner", "linux", "arm64").expect("runner asset"),
+            "previa-runner-linux-arm64"
         );
     }
 
     #[test]
-    fn manifest_key_rejects_unsupported_binary_names() {
-        let err = manifest_key("previa", "linux", "amd64").expect_err("invalid binary");
+    fn asset_filename_rejects_unsupported_binary_names() {
+        let err = asset_filename("previa", "linux", "amd64").expect_err("invalid binary");
         assert!(err.to_string().contains("unsupported auto-download binary"));
     }
 
@@ -457,134 +503,94 @@ mod tests {
         assert!(!DownloadReporter::for_terminal(false).is_visible());
     }
 
-    #[tokio::test]
-    async fn fetch_manifest_ignores_unknown_fields() {
-        let (base_url, _) = spawn_test_server(
-            json!({
-                "name": "previa",
-                "version": "1.0.0-alpha.0",
-                "create_at": "2026-03-18T21:23:56Z",
-                "links": {
-                    "previa_main_linux_amd64": "http://example.test/main"
-                }
-            }),
-            BTreeMap::new(),
-            BTreeMap::new(),
-        )
-        .await;
+    #[test]
+    fn reads_binary_version_from_version_output() {
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().join("previa-main");
+        write_version_script(&path, "previa-main", "1.2.3");
 
-        let manifest = fetch_manifest(
-            &super::build_download_client().expect("client"),
-            &format!("{base_url}/latest.json"),
-        )
-        .await
-        .expect("manifest");
-        assert_eq!(manifest.version, "1.0.0-alpha.0");
-        assert_eq!(
-            manifest
-                .links
-                .get("previa_main_linux_amd64")
-                .expect("manifest link"),
-            "http://example.test/main"
-        );
+        assert_eq!(read_binary_version(&path).as_deref(), Some("1.2.3"));
+        assert!(binary_matches_version(&path, "1.2.3"));
+        assert!(!binary_matches_version(&path, "9.9.9"));
     }
 
     #[tokio::test]
-    async fn downloads_missing_binary_from_manifest() {
+    async fn downloads_missing_binary_for_current_cli_version() {
         let (temp, paths) = temp_paths();
         let binary_name = "previa-main";
         let asset_name = "previa-main-linux-amd64";
         let payload = b"#!/bin/sh\necho downloaded\n".to_vec();
         let (base_url, requests) = spawn_test_server(
-            json!({ "version": "1.0.0-alpha.0", "links": {} }),
             BTreeMap::from([(asset_name.to_owned(), payload.clone())]),
             BTreeMap::new(),
         )
         .await;
 
-        let manifest = LatestManifest {
-            version: "1.0.0-alpha.0".to_owned(),
-            links: BTreeMap::from([(
-                "previa_main_linux_amd64".to_owned(),
-                format!("{base_url}/files/{asset_name}"),
-            )]),
-        };
+        let _guard = DOWNLOAD_ENV_LOCK.lock().expect("download env lock");
+        unsafe {
+            env::set_var(DOWNLOAD_BASE_URL_ENV, &base_url);
+        }
+
         let mut reporter = RecordingReporter::default();
         let client = super::build_download_client().expect("client");
 
-        let installed = download_binary(&client, &paths, binary_name, &manifest, &mut reporter)
-            .await
-            .expect("downloaded binary");
+        let installed = download_binary(
+            &client,
+            &paths,
+            binary_name,
+            current_release_version(),
+            &mut reporter,
+        )
+        .await
+        .expect("downloaded binary");
+
+        unsafe {
+            env::remove_var(DOWNLOAD_BASE_URL_ENV);
+        }
 
         assert_eq!(installed, binary_install_path(&paths, binary_name));
         assert_eq!(std::fs::read(&installed).expect("binary bytes"), payload);
         assert!(reporter.started);
         assert!(reporter.finished);
         assert_eq!(reporter.binary_name.as_deref(), Some(binary_name));
-        assert_eq!(reporter.version.as_deref(), Some("1.0.0-alpha.0"));
+        assert_eq!(reporter.version.as_deref(), Some(current_release_version()));
         assert_eq!(reporter.total_bytes, Some(26));
         assert_eq!(reporter.advanced, 26);
         assert_eq!(
             requests.lock().expect("requests lock").as_slice(),
-            &[format!("/files/{asset_name}")]
+            &[format!("/{}/files/{asset_name}", current_release_version())]
         );
         drop(temp);
     }
 
-    #[tokio::test]
-    async fn download_skips_when_local_binary_already_exists() {
+    #[test]
+    fn install_is_skipped_when_existing_workspace_binary_matches_cli_version() {
+        let (_temp, paths) = temp_paths();
+        let workspace = TempDir::new().expect("workspace");
+        let debug_dir = workspace.path().join("target/debug");
+        std::fs::create_dir_all(&debug_dir).expect("debug dir");
+        write_version_script(
+            &debug_dir.join("previa-main"),
+            "previa-main",
+            current_release_version(),
+        );
+
+        let paths = PreviaPaths {
+            home: paths.home.clone(),
+            workspace_root: Some(workspace.path().to_path_buf()),
+        };
+
+        assert!(!should_install_binary(&paths, "previa-main").expect("should install"));
+    }
+
+    #[test]
+    fn install_replaces_existing_home_binary_when_version_differs() {
         let (_temp, paths) = temp_paths();
         let install_path = binary_install_path(&paths, "previa-main");
         std::fs::create_dir_all(install_path.parent().expect("bin dir")).expect("bin dir");
-        std::fs::write(&install_path, b"local").expect("local binary");
+        write_version_script(&install_path, "previa-main", "0.0.7");
 
-        let manifest = LatestManifest {
-            version: "1.0.0-alpha.0".to_owned(),
-            links: BTreeMap::from([(
-                "previa_main_linux_amd64".to_owned(),
-                "http://example.test/files/previa-main-linux-amd64".to_owned(),
-            )]),
-        };
-        let mut reporter = RecordingReporter::default();
-
-        let installed = download_binary(
-            &super::build_download_client().expect("client"),
-            &paths,
-            "previa-main",
-            &manifest,
-            &mut reporter,
-        )
-        .await
-        .expect("local binary");
-
-        assert_eq!(installed, install_path);
-        assert!(!reporter.started);
-        assert!(!reporter.finished);
-        assert_eq!(std::fs::read(&installed).expect("binary bytes"), b"local");
-    }
-
-    #[tokio::test]
-    async fn download_fails_when_manifest_link_is_missing() {
-        let (_temp, paths) = temp_paths();
-        let manifest = LatestManifest {
-            version: "1.0.0-alpha.0".to_owned(),
-            links: BTreeMap::new(),
-        };
-
-        let err = download_binary(
-            &super::build_download_client().expect("client"),
-            &paths,
-            "previa-main",
-            &manifest,
-            &mut RecordingReporter::default(),
-        )
-        .await
-        .expect_err("missing link");
-
-        assert!(
-            err.to_string()
-                .contains("missing manifest link 'previa_main_linux_amd64'")
-        );
+        assert!(should_install_binary(&paths, "previa-main").expect("should install"));
     }
 
     #[tokio::test]
@@ -592,31 +598,29 @@ mod tests {
         let (_temp, paths) = temp_paths();
         let asset_name = "previa-main-linux-amd64";
         let (base_url, _) = spawn_test_server(
-            json!({
-                "version": "1.0.0-alpha.0",
-                "links": {}
-            }),
             BTreeMap::new(),
             BTreeMap::from([(asset_name.to_owned(), StatusCode::INTERNAL_SERVER_ERROR)]),
         )
         .await;
-        let manifest = LatestManifest {
-            version: "1.0.0-alpha.0".to_owned(),
-            links: BTreeMap::from([(
-                "previa_main_linux_amd64".to_owned(),
-                format!("{base_url}/files/{asset_name}"),
-            )]),
-        };
+
+        let _guard = DOWNLOAD_ENV_LOCK.lock().expect("download env lock");
+        unsafe {
+            env::set_var(DOWNLOAD_BASE_URL_ENV, &base_url);
+        }
 
         let err = download_binary(
             &super::build_download_client().expect("client"),
             &paths,
             "previa-main",
-            &manifest,
+            current_release_version(),
             &mut RecordingReporter::default(),
         )
         .await
         .expect_err("download failure");
+
+        unsafe {
+            env::remove_var(DOWNLOAD_BASE_URL_ENV);
+        }
 
         assert!(
             err.to_string()
@@ -624,21 +628,44 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn manifest_url_uses_environment_override() {
-        let _guard = super::MANIFEST_ENV_LOCK.lock().expect("manifest env lock");
-        let (base_url, _) = spawn_test_server(
-            json!({ "version": "1.0.0-alpha.0", "links": {} }),
-            BTreeMap::new(),
-            BTreeMap::new(),
-        )
-        .await;
+    #[test]
+    fn download_base_url_uses_environment_override() {
+        let _guard = DOWNLOAD_ENV_LOCK.lock().expect("download env lock");
         unsafe {
-            env::set_var(MANIFEST_URL_ENV, format!("{base_url}/latest.json"));
+            env::set_var(DOWNLOAD_BASE_URL_ENV, "http://downloads.test");
         }
-        assert_eq!(super::manifest_url(), format!("{base_url}/latest.json"));
+        assert_eq!(download_base_url(), "http://downloads.test");
         unsafe {
-            env::remove_var(MANIFEST_URL_ENV);
+            env::remove_var(DOWNLOAD_BASE_URL_ENV);
         }
+    }
+
+    #[test]
+    fn download_base_url_supports_legacy_manifest_override() {
+        let _guard = DOWNLOAD_ENV_LOCK.lock().expect("download env lock");
+        unsafe {
+            env::set_var(LEGACY_MANIFEST_URL_ENV, "http://downloads.test/latest.json");
+        }
+        assert_eq!(download_base_url(), "http://downloads.test");
+        unsafe {
+            env::remove_var(LEGACY_MANIFEST_URL_ENV);
+        }
+    }
+
+    #[test]
+    fn versioned_url_uses_exact_cli_version() {
+        let _guard = DOWNLOAD_ENV_LOCK.lock().expect("download env lock");
+        unsafe {
+            env::remove_var(DOWNLOAD_BASE_URL_ENV);
+            env::remove_var(LEGACY_MANIFEST_URL_ENV);
+        }
+        assert_eq!(
+            binary_download_url(current_release_version(), "previa-main-linux-amd64"),
+            format!(
+                "{}/{}/files/previa-main-linux-amd64",
+                DEFAULT_DOWNLOAD_BASE_URL,
+                current_release_version()
+            )
+        );
     }
 }

@@ -61,7 +61,7 @@ pub enum PullTarget {
 pub struct PullArgs {
     #[arg(value_enum, default_value_t = PullTarget::All)]
     pub target: PullTarget,
-    #[arg(long, default_value = "latest")]
+    #[arg(long, default_value = env!("CARGO_PKG_VERSION"))]
     pub version: String,
 }
 
@@ -100,7 +100,7 @@ pub struct UpArgs {
     pub detach: bool,
     #[arg(long = "bin")]
     pub bin: bool,
-    #[arg(long, default_value = "latest")]
+    #[arg(long, default_value = env!("CARGO_PKG_VERSION"))]
     pub version: String,
 }
 

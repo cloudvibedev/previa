@@ -35,6 +35,8 @@ Those are installed under:
 $PREVIA_HOME/bin
 ```
 
+When `previa up --bin` downloads those runtime binaries, it targets the exact same release version as the running `previa` CLI.
+
 ## Uninstall
 
 To remove a default installation, delete `~/.previa` and remove the installer block from your shell rc files.

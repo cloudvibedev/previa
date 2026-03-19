@@ -12,6 +12,8 @@ use assert_cmd::prelude::*;
 use tempfile::TempDir;
 use uuid::Uuid;
 
+const TEST_BINARY_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn python3_available() -> bool {
     Command::new("python3").arg("--version").output().is_ok()
 }
@@ -30,7 +32,7 @@ printf '%s' "$1" > "$PREVIA_OPEN_CAPTURE"
 fn write_fake_binary(path: &Path, label: &str) {
     let script = r#"#!/bin/sh
 if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
-  printf '%s 0.0.7\n' "__LABEL__"
+  printf '%s __VERSION__\n' "__LABEL__"
   exit 0
 fi
 exec python3 -u - <<'PY'
@@ -161,7 +163,8 @@ signal.signal(signal.SIGINT, stop)
 httpd.serve_forever()
 PY
 "#
-    .replace("__LABEL__", label);
+    .replace("__LABEL__", label)
+    .replace("__VERSION__", TEST_BINARY_VERSION);
 
     fs::write(path, script).expect("write fake binary");
     let mut permissions = fs::metadata(path).expect("metadata").permissions();
@@ -172,7 +175,7 @@ PY
 fn write_fake_auth_runner_binary(path: &Path) {
     let script = r#"#!/bin/sh
 if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
-  printf '%s 0.0.7\n' "previa-runner"
+  printf '%s __VERSION__\n' "previa-runner"
   exit 0
 fi
 exec python3 -u - <<'PY'
@@ -230,7 +233,8 @@ signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 httpd.serve_forever()
 PY
-"#;
+"#
+    .replace("__VERSION__", TEST_BINARY_VERSION);
 
     fs::write(path, script).expect("write fake auth runner");
     let mut permissions = fs::metadata(path).expect("metadata").permissions();
@@ -834,7 +838,7 @@ fn up_bin_rejects_version_override() {
 }
 
 #[test]
-fn up_bin_reports_manifest_fetch_failures_when_auto_download_cannot_start() {
+fn up_bin_reports_download_failures_when_exact_runtime_binary_is_unavailable() {
     let temp = setup_fake_docker();
     let unavailable_port = find_free_port();
 
@@ -852,11 +856,11 @@ fn up_bin_reports_manifest_fetch_failures_when_auto_download_cannot_start() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
-    assert!(stderr.contains("failed to fetch manifest"));
+    assert!(stderr.contains("failed to download binary 'previa-main'"));
 }
 
 #[test]
-fn pull_defaults_to_all_latest_without_local_binaries() {
+fn pull_defaults_to_all_current_cli_version_without_local_binaries() {
     let temp = setup_fake_docker();
     let docker_log = temp.path().join("docker.log");
 
@@ -869,8 +873,14 @@ fn pull_defaults_to_all_latest_without_local_binaries() {
         .success();
 
     let output = fs::read_to_string(&docker_log).expect("docker log");
-    assert!(output.contains("pull ghcr.io/cloudvibedev/main:latest"));
-    assert!(output.contains("pull ghcr.io/cloudvibedev/runner:latest"));
+    assert!(output.contains(&format!(
+        "pull ghcr.io/cloudvibedev/main:{}",
+        env!("CARGO_PKG_VERSION")
+    )));
+    assert!(output.contains(&format!(
+        "pull ghcr.io/cloudvibedev/runner:{}",
+        env!("CARGO_PKG_VERSION")
+    )));
 }
 
 #[test]
