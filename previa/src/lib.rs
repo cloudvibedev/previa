@@ -326,6 +326,9 @@ async fn cmd_status(paths: &PreviaPaths, http: &Client, args: StatusArgs) -> Res
         &stack_paths,
         state.as_ref(),
         http,
+        state
+            .as_ref()
+            .and_then(|state| state.runner_auth_key.as_deref()),
         selector.as_ref(),
         args.main,
     )
@@ -708,6 +711,7 @@ fn detached_state_from_spawn(
         image_tag: String::new(),
         compose_file: String::new(),
         compose_project: String::new(),
+        runner_auth_key: resolved.runner_auth_key.clone(),
         main: MainRuntime {
             service_name: String::new(),
             pid: child_id(&spawned.main)?,
@@ -744,6 +748,7 @@ async fn build_status_json(
     stack_paths: &StackPaths,
     state: Option<&DetachedRuntimeState>,
     http: &Client,
+    runner_auth_key: Option<&str>,
     runner_selector: Option<&RunnerSelector>,
     main_only: bool,
 ) -> Result<StatusJson> {
@@ -792,9 +797,12 @@ async fn build_status_json(
     let runners = match state.backend {
         RuntimeBackend::Compose => {
             let compose = compose_project_from_state(state);
-            collect_status_runner_json_compose(&compose, &selected_runners, http).await?
+            collect_status_runner_json_compose(&compose, &selected_runners, runner_auth_key, http)
+                .await?
         }
-        RuntimeBackend::Bin => collect_status_runner_json_bin(&selected_runners, http).await?,
+        RuntimeBackend::Bin => {
+            collect_status_runner_json_bin(&selected_runners, runner_auth_key, http).await?
+        }
     };
     let runner_states = runners
         .iter()
@@ -830,13 +838,24 @@ async fn process_rows(
             let compose = compose_project_from_state(state);
             let mut rows = Vec::new();
             rows.push(process_json_from_main_compose(&compose, &state.main, http).await?);
-            rows.extend(collect_runner_json_compose(&compose, &state.runners, http).await?);
+            rows.extend(
+                collect_runner_json_compose(
+                    &compose,
+                    &state.runners,
+                    state.runner_auth_key.as_deref(),
+                    http,
+                )
+                .await?,
+            );
             Ok(rows)
         }
         RuntimeBackend::Bin => {
             let mut rows = Vec::new();
             rows.push(process_json_from_main_bin(&state.main, http).await?);
-            rows.extend(collect_runner_json_bin(&state.runners, http).await?);
+            rows.extend(
+                collect_runner_json_bin(&state.runners, state.runner_auth_key.as_deref(), http)
+                    .await?,
+            );
             Ok(rows)
         }
     }
@@ -849,7 +868,7 @@ async fn process_json_from_main_compose(
 ) -> Result<ProcessJson> {
     let health_url = format!("http://{}:{}/health", main.address, main.port);
     let inspect = compose.inspect_service(&main.service_name).await?;
-    let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, http).await;
+    let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, None, http).await;
     Ok(ProcessJson {
         role: "main".to_owned(),
         state: state.as_str().to_owned(),
@@ -865,7 +884,7 @@ async fn process_json_from_main_bin(main: &MainRuntime, http: &Client) -> Result
     let health_url = format!("http://{}:{}/health", main.address, main.port);
     let state = state_from_pid_and_health(
         if pid_exists(main.pid) { main.pid } else { 0 },
-        probe_health(http, &health_url).await,
+        probe_health(http, &health_url, None).await,
     );
     Ok(ProcessJson {
         role: "main".to_owned(),
@@ -885,7 +904,7 @@ async fn status_process_json_from_main_compose(
 ) -> Result<StatusProcessJson> {
     let health_url = format!("http://{}:{}/health", main.address, main.port);
     let inspect = compose.inspect_service(&main.service_name).await?;
-    let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, http).await;
+    let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, None, http).await;
     Ok(StatusProcessJson {
         state: state.as_str().to_owned(),
         pid,
@@ -902,7 +921,7 @@ async fn status_process_json_from_main_bin(
 ) -> Result<StatusProcessJson> {
     let health_url = format!("http://{}:{}/health", main.address, main.port);
     let pid = if pid_exists(main.pid) { main.pid } else { 0 };
-    let state = state_from_pid_and_health(pid, probe_health(http, &health_url).await);
+    let state = state_from_pid_and_health(pid, probe_health(http, &health_url, None).await);
     Ok(StatusProcessJson {
         state: state.as_str().to_owned(),
         pid,
@@ -916,13 +935,15 @@ async fn status_process_json_from_main_bin(
 async fn collect_runner_json_compose(
     compose: &ComposeProject,
     runners: &[LocalRunnerRuntime],
+    runner_auth_key: Option<&str>,
     http: &Client,
 ) -> Result<Vec<ProcessJson>> {
     let mut out = Vec::with_capacity(runners.len());
     for runner in runners {
         let health_url = format!("http://{}:{}/health", runner.address, runner.port);
         let inspect = compose.inspect_service(&runner.service_name).await?;
-        let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, http).await;
+        let (state, pid, log_path) =
+            runtime_state_from_inspect(inspect, &health_url, runner_auth_key, http).await;
         out.push(ProcessJson {
             role: "runner".to_owned(),
             state: state.as_str().to_owned(),
@@ -938,6 +959,7 @@ async fn collect_runner_json_compose(
 
 async fn collect_runner_json_bin(
     runners: &[LocalRunnerRuntime],
+    runner_auth_key: Option<&str>,
     http: &Client,
 ) -> Result<Vec<ProcessJson>> {
     let mut out = Vec::with_capacity(runners.len());
@@ -948,7 +970,8 @@ async fn collect_runner_json_bin(
         } else {
             0
         };
-        let state = state_from_pid_and_health(pid, probe_health(http, &health_url).await);
+        let state =
+            state_from_pid_and_health(pid, probe_health(http, &health_url, runner_auth_key).await);
         out.push(ProcessJson {
             role: "runner".to_owned(),
             state: state.as_str().to_owned(),
@@ -965,13 +988,15 @@ async fn collect_runner_json_bin(
 async fn collect_status_runner_json_compose(
     compose: &ComposeProject,
     runners: &[LocalRunnerRuntime],
+    runner_auth_key: Option<&str>,
     http: &Client,
 ) -> Result<Vec<StatusProcessJson>> {
     let mut out = Vec::with_capacity(runners.len());
     for runner in runners {
         let health_url = format!("http://{}:{}/health", runner.address, runner.port);
         let inspect = compose.inspect_service(&runner.service_name).await?;
-        let (state, pid, log_path) = runtime_state_from_inspect(inspect, &health_url, http).await;
+        let (state, pid, log_path) =
+            runtime_state_from_inspect(inspect, &health_url, runner_auth_key, http).await;
         out.push(StatusProcessJson {
             state: state.as_str().to_owned(),
             pid,
@@ -986,6 +1011,7 @@ async fn collect_status_runner_json_compose(
 
 async fn collect_status_runner_json_bin(
     runners: &[LocalRunnerRuntime],
+    runner_auth_key: Option<&str>,
     http: &Client,
 ) -> Result<Vec<StatusProcessJson>> {
     let mut out = Vec::with_capacity(runners.len());
@@ -996,7 +1022,8 @@ async fn collect_status_runner_json_bin(
         } else {
             0
         };
-        let state = state_from_pid_and_health(pid, probe_health(http, &health_url).await);
+        let state =
+            state_from_pid_and_health(pid, probe_health(http, &health_url, runner_auth_key).await);
         out.push(StatusProcessJson {
             state: state.as_str().to_owned(),
             pid,
@@ -1021,7 +1048,13 @@ async fn overall_stack_state(
         RuntimeBackend::Compose => {
             let compose = compose_project_from_state(state);
             let main = process_json_from_main_compose(&compose, &state.main, http).await?;
-            let runners = collect_runner_json_compose(&compose, &state.runners, http).await?;
+            let runners = collect_runner_json_compose(
+                &compose,
+                &state.runners,
+                state.runner_auth_key.as_deref(),
+                http,
+            )
+            .await?;
             let runner_states = runners
                 .iter()
                 .map(|runner| runner.state.clone())
@@ -1035,7 +1068,9 @@ async fn overall_stack_state(
         }
         RuntimeBackend::Bin => {
             let main = process_json_from_main_bin(&state.main, http).await?;
-            let runners = collect_runner_json_bin(&state.runners, http).await?;
+            let runners =
+                collect_runner_json_bin(&state.runners, state.runner_auth_key.as_deref(), http)
+                    .await?;
             let runner_states = runners
                 .iter()
                 .map(|runner| runner.state.clone())
@@ -1120,13 +1155,14 @@ fn read_required_state(stack_paths: &StackPaths) -> Result<DetachedRuntimeState>
 async fn runtime_state_from_inspect(
     inspect: Option<ServiceInspect>,
     health_url: &str,
+    authorization: Option<&str>,
     http: &Client,
 ) -> (DerivedState, u32, String) {
     let Some(inspect) = inspect else {
         return (DerivedState::Stopped, 0, String::new());
     };
     let healthy = if inspect.running {
-        probe_health(http, health_url).await
+        probe_health(http, health_url, authorization).await
     } else {
         false
     };
@@ -1153,6 +1189,7 @@ async fn wait_for_detached_startup(
             && probe_health(
                 http,
                 &format!("http://{}:{}/health", state.main.address, state.main.port),
+                None,
             )
             .await;
 
@@ -1166,6 +1203,7 @@ async fn wait_for_detached_startup(
                 || !probe_health(
                     http,
                     &format!("http://{}:{}/health", runner.address, runner.port),
+                    state.runner_auth_key.as_deref(),
                 )
                 .await
             {

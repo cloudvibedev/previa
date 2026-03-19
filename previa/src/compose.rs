@@ -121,6 +121,7 @@ pub fn desired_state_from_resolved(
         image_tag: resolved.image_tag.clone(),
         compose_file: resolved.stack_paths.compose_file.display().to_string(),
         compose_project: compose_project_name(&resolved.stack_paths.name),
+        runner_auth_key: resolved.runner_auth_key.clone(),
         main: MainRuntime {
             service_name: MAIN_SERVICE_NAME.to_owned(),
             pid: 0,
@@ -435,6 +436,7 @@ mod tests {
             }],
             local_runner_ports: vec![("127.0.0.1".to_owned(), 55880)],
             attached_runners: vec!["http://10.0.0.10:55880".to_owned()],
+            runner_auth_key: None,
             generated_runner_auth_key: None,
             dry_run: false,
             detach: true,

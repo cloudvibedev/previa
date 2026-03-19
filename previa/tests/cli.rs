@@ -169,6 +169,75 @@ PY
     fs::set_permissions(path, permissions).expect("chmod");
 }
 
+fn write_fake_auth_runner_binary(path: &Path) {
+    let script = r#"#!/bin/sh
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  printf '%s 0.0.7\n' "previa-runner"
+  exit 0
+fi
+exec python3 -u - <<'PY'
+import json
+import os
+import signal
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+address = os.environ.get("ADDRESS", "127.0.0.1")
+port = int(os.environ.get("PORT", "0"))
+auth_key = os.environ.get("RUNNER_AUTH_KEY", "").strip()
+
+class Handler(BaseHTTPRequestHandler):
+    def authorized(self):
+        if not auth_key:
+            return True
+        return self.headers.get("Authorization", "").strip() == auth_key
+
+    def do_GET(self):
+        if self.path in ("/health", "/info"):
+            if not self.authorized():
+                self.send_response(401)
+                self.end_headers()
+                return
+            if self.path == "/health":
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "pid": 1,
+                "memoryBytes": 0,
+                "virtualMemoryBytes": 0,
+                "cpuUsagePercent": 0.0,
+            }).encode("utf-8"))
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, fmt, *args):
+        return
+
+httpd = HTTPServer((address, port), Handler)
+print(f"fake protected runner listening on {address}:{port} pid={os.getpid()}", flush=True)
+
+def stop(_signum, _frame):
+    httpd.shutdown()
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+httpd.serve_forever()
+PY
+"#;
+
+    fs::write(path, script).expect("write fake auth runner");
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("chmod");
+}
+
 fn write_fake_docker(path: &Path) {
     let script = r#"#!/bin/sh
 exec python3 -u - "$@" <<'PY'
@@ -630,6 +699,13 @@ fn setup_fake_binaries(temp: &TempDir) {
     write_fake_binary(&bin_dir.join("previa-runner"), "previa-runner");
 }
 
+fn setup_fake_binaries_with_protected_runner(temp: &TempDir) {
+    let bin_dir = temp.path().join("bin");
+    fs::create_dir_all(&bin_dir).expect("bin dir");
+    write_fake_binary(&bin_dir.join("previa-main"), "previa-main");
+    write_fake_auth_runner_binary(&bin_dir.join("previa-runner"));
+}
+
 fn docker_env(temp: &TempDir, command: &mut Command) {
     command
         .env("PREVIA_HOME", temp.path())
@@ -715,7 +791,10 @@ fn read_env_var(path: &Path, key: &str) -> Option<String> {
     fs::read_to_string(path)
         .expect("read env file")
         .lines()
-        .find_map(|line| line.strip_prefix(&format!("{key}=")).map(|value| value.to_owned()))
+        .find_map(|line| {
+            line.strip_prefix(&format!("{key}="))
+                .map(|value| value.to_owned())
+        })
 }
 
 #[test]
@@ -1180,6 +1259,65 @@ fn up_auto_generates_runner_auth_key_for_local_runners() {
 
     assert_eq!(main_env_key, main_key);
     assert_eq!(runner_env_key, main_key);
+}
+
+#[test]
+fn up_bin_uses_generated_runner_auth_key_for_protected_runner_health_checks() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = TempDir::new().expect("tempdir");
+    setup_fake_binaries_with_protected_runner(&temp);
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    up.env("PREVIA_HOME", temp.path())
+        .args([
+            "up",
+            "--bin",
+            "--detach",
+            "--main-address",
+            "127.0.0.1",
+            "-p",
+            &main_port.to_string(),
+            "--runner-address",
+            "127.0.0.1",
+            "-P",
+            &format!("{runner_port}:{runner_port}"),
+            "--runners",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(temp.path().join("stacks/default/run/state.json")).expect("runtime state"),
+    )
+    .expect("runtime json");
+    let runner_auth_key = state["runner_auth_key"]
+        .as_str()
+        .expect("runner auth key in state");
+    assert!(Uuid::parse_str(runner_auth_key).is_ok());
+
+    let mut status = cargo_bin();
+    let output = status
+        .env("PREVIA_HOME", temp.path())
+        .args(["status", "--json"])
+        .output()
+        .expect("status output");
+    assert!(output.status.success());
+    let status_json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("status json");
+    assert_eq!(status_json["state"], "running");
+    assert_eq!(status_json["runners"][0]["state"], "running");
+
+    let mut down = cargo_bin();
+    down.env("PREVIA_HOME", temp.path())
+        .args(["down"])
+        .assert()
+        .success();
 }
 
 #[test]

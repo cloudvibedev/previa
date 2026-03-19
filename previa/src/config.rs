@@ -31,6 +31,7 @@ pub struct ResolvedUpConfig {
     pub local_runners: Vec<RunnerLaunch>,
     pub local_runner_ports: Vec<(String, u16)>,
     pub attached_runners: Vec<String>,
+    pub runner_auth_key: Option<String>,
     pub generated_runner_auth_key: Option<String>,
     pub dry_run: bool,
     pub detach: bool,
@@ -76,6 +77,9 @@ impl ResolvedUpConfig {
                 let mut env = runner_env.clone();
                 env.insert("ADDRESS".to_owned(), runner.address.clone());
                 env.insert("PORT".to_owned(), runner.port.to_string());
+                if let Some(runner_auth_key) = state.runner_auth_key.as_ref() {
+                    env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key.clone());
+                }
                 RunnerLaunch {
                     address: runner.address.clone(),
                     port: runner.port,
@@ -92,6 +96,9 @@ impl ResolvedUpConfig {
         main_env.insert("ADDRESS".to_owned(), state.main.address.clone());
         main_env.insert("PORT".to_owned(), state.main.port.to_string());
         main_env.insert("PREVIA_CONTEXT".to_owned(), stack_paths.name.clone());
+        if let Some(runner_auth_key) = state.runner_auth_key.as_ref() {
+            main_env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key.clone());
+        }
         main_env.insert(
             "RUNNER_ENDPOINTS".to_owned(),
             state
@@ -126,6 +133,7 @@ impl ResolvedUpConfig {
                 .map(|runner| (runner.address.clone(), runner.port))
                 .collect(),
             attached_runners: state.attached_runners.clone(),
+            runner_auth_key: state.runner_auth_key.clone(),
             generated_runner_auth_key: None,
             dry_run: false,
             detach: true,
@@ -415,6 +423,7 @@ pub async fn resolve_up_config(
         local_runners,
         local_runner_ports,
         attached_runners,
+        runner_auth_key: effective_runner_auth_key,
         generated_runner_auth_key,
         dry_run: args.dry_run,
         detach: args.detach,
@@ -599,6 +608,9 @@ mod tests {
     use super::{configured_runner_auth_key, resolve_runner_auth_key, resolve_up_config};
     use crate::cli::UpArgs;
     use crate::paths::PreviaPaths;
+    use crate::runtime::{
+        DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, PortRange, RuntimeBackend,
+    };
     use uuid::Uuid;
 
     #[derive(Clone)]
@@ -865,16 +877,74 @@ mod tests {
             configured_runner_auth_key(&resolved.local_runners[0].env),
             Some(generated.as_str())
         );
+        assert_eq!(
+            resolved.runner_auth_key.as_deref(),
+            Some(generated.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn from_runtime_restores_runner_auth_key_into_main_and_runner_envs() {
+        let (_temp, paths) = temp_paths();
+        let stack_paths = paths.stack("default");
+        stack_paths
+            .ensure_parent_dirs()
+            .expect("ensure stack parent dirs");
+
+        let state = DetachedRuntimeState {
+            name: "default".to_owned(),
+            mode: "detached".to_owned(),
+            started_at: "2026-03-19T00:00:00Z".to_owned(),
+            source: None,
+            backend: RuntimeBackend::Compose,
+            image_tag: "latest".to_owned(),
+            compose_file: stack_paths.compose_file.display().to_string(),
+            compose_project: "previa_default".to_owned(),
+            runner_auth_key: Some("state-secret".to_owned()),
+            main: MainRuntime {
+                service_name: "main".to_owned(),
+                pid: 0,
+                address: "127.0.0.1".to_owned(),
+                port: 5588,
+                log_path: String::new(),
+            },
+            runner_port_range: PortRange {
+                start: 55880,
+                end: 55880,
+            },
+            attached_runners: Vec::new(),
+            runners: vec![LocalRunnerRuntime {
+                service_name: "runner-55880".to_owned(),
+                pid: 0,
+                address: "127.0.0.1".to_owned(),
+                port: 55880,
+                log_path: String::new(),
+            }],
+        };
+
+        let resolved = super::ResolvedUpConfig::from_runtime(&paths, &stack_paths, &state, None)
+            .await
+            .expect("resolved from runtime");
+
+        assert_eq!(resolved.runner_auth_key.as_deref(), Some("state-secret"));
+        assert_eq!(
+            configured_runner_auth_key(&resolved.main_env),
+            Some("state-secret")
+        );
+        assert_eq!(
+            configured_runner_auth_key(&resolved.local_runners[0].env),
+            Some("state-secret")
+        );
     }
 
     #[test]
     fn resolve_runner_auth_key_prefers_process_then_compose_then_env_files() {
-        let compose_main = BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "compose-main".to_owned())]);
+        let compose_main =
+            BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "compose-main".to_owned())]);
         let compose_runner =
             BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "compose-runner".to_owned())]);
         let main_env = BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "main-env".to_owned())]);
-        let runner_env =
-            BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "runner-env".to_owned())]);
+        let runner_env = BTreeMap::from([("RUNNER_AUTH_KEY".to_owned(), "runner-env".to_owned())]);
 
         assert_eq!(
             resolve_runner_auth_key(
@@ -887,7 +957,13 @@ mod tests {
             Some("process".to_owned())
         );
         assert_eq!(
-            resolve_runner_auth_key(None, Some(&compose_main), &compose_runner, &main_env, &runner_env),
+            resolve_runner_auth_key(
+                None,
+                Some(&compose_main),
+                &compose_runner,
+                &main_env,
+                &runner_env
+            ),
             Some("compose-main".to_owned())
         );
         assert_eq!(

@@ -99,7 +99,14 @@ pub async fn spawn_detached_stack(
                 return Err(err);
             }
         };
-        match wait_for_startup(child, &launch.health_url(), http).await {
+        match wait_for_startup(
+            child,
+            &launch.health_url(),
+            launch.env.get("RUNNER_AUTH_KEY").map(String::as_str),
+            http,
+        )
+        .await
+        {
             Ok(child) => runners.push(child),
             Err(err) => {
                 cleanup_started_children(&mut runners).await?;
@@ -119,7 +126,7 @@ pub async fn spawn_detached_stack(
             return Err(err);
         }
     };
-    let main = match wait_for_startup(main, &config.main_health_url(), http).await {
+    let main = match wait_for_startup(main, &config.main_health_url(), None, http).await {
         Ok(child) => child,
         Err(err) => {
             cleanup_started_children(&mut runners).await?;
@@ -155,7 +162,14 @@ pub async fn spawn_foreground_stack(
             }
         };
         tasks.append(&mut child_tasks);
-        match wait_for_startup(child, &launch.health_url(), http).await {
+        match wait_for_startup(
+            child,
+            &launch.health_url(),
+            launch.env.get("RUNNER_AUTH_KEY").map(String::as_str),
+            http,
+        )
+        .await
+        {
             Ok(child) => runners.push(child),
             Err(err) => {
                 cleanup_started_children(&mut runners).await?;
@@ -173,7 +187,7 @@ pub async fn spawn_foreground_stack(
             }
         };
     tasks.append(&mut child_tasks);
-    let main = match wait_for_startup(main, &config.main_health_url(), http).await {
+    let main = match wait_for_startup(main, &config.main_health_url(), None, http).await {
         Ok(child) => child,
         Err(err) => {
             cleanup_started_children(&mut runners).await?;
@@ -327,6 +341,7 @@ fn spawn_foreground_process(
 async fn wait_for_startup(
     mut child: Child,
     health_url: &str,
+    authorization: Option<&str>,
     http: &reqwest::Client,
 ) -> Result<Child> {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -337,7 +352,7 @@ async fn wait_for_startup(
         {
             bail!("process exited during startup with status {status}");
         }
-        if probe_health(http, health_url).await {
+        if probe_health(http, health_url, authorization).await {
             return Ok(child);
         }
         if Instant::now() >= deadline {

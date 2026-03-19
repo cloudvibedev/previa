@@ -58,6 +58,8 @@ pub struct DetachedRuntimeState {
     pub compose_file: String,
     #[serde(default)]
     pub compose_project: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_auth_key: Option<String>,
     pub main: MainRuntime,
     pub runner_port_range: PortRange,
     pub attached_runners: Vec<String>,
@@ -203,6 +205,7 @@ mod tests {
             image_tag: String::new(),
             compose_file: String::new(),
             compose_project: String::new(),
+            runner_auth_key: None,
             main: MainRuntime {
                 service_name: String::new(),
                 pid: 10,
@@ -241,6 +244,7 @@ mod tests {
             image_tag: "latest".to_owned(),
             compose_file: String::new(),
             compose_project: String::new(),
+            runner_auth_key: Some("secret".to_owned()),
             main: MainRuntime {
                 service_name: String::new(),
                 pid: 0,
