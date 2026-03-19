@@ -118,7 +118,7 @@ previa open --context other
 It opens:
 
 ```text
-https://app.previa.dev?add_context=<main-url>
+https://ide.previa.dev?add_context=<main-url>
 ```
 
 If the recorded main address is `0.0.0.0` or `::`, `previa` normalizes it to

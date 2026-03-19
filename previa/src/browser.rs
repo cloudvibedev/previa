@@ -5,7 +5,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use urlencoding::encode;
 
-const APP_URL: &str = "https://app.previa.dev";
+const APP_URL: &str = "https://ide.previa.dev";
 
 pub fn build_open_url(address: &str, port: u16) -> Result<String> {
     let main_url = main_url(address, port);
@@ -70,7 +70,7 @@ mod tests {
     fn open_url_normalizes_unspecified_ipv4_bind_address() {
         assert_eq!(
             build_open_url("0.0.0.0", 5588).expect("open url"),
-            "https://app.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588"
+            "https://ide.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588"
         );
     }
 
@@ -78,7 +78,7 @@ mod tests {
     fn open_url_preserves_non_wildcard_hostnames() {
         assert_eq!(
             build_open_url("previ-main.internal", 9000).expect("open url"),
-            "https://app.previa.dev?add_context=http%3A%2F%2Fprevi-main.internal%3A9000"
+            "https://ide.previa.dev?add_context=http%3A%2F%2Fprevi-main.internal%3A9000"
         );
     }
 }

@@ -2215,7 +2215,7 @@ fn open_launches_app_with_encoded_main_context_url() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
     let opened = fs::read_to_string(&capture).expect("captured URL");
-    let expected = "https://app.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588";
+    let expected = "https://ide.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588";
     assert_eq!(opened, expected);
     assert_eq!(stdout.trim(), expected);
 }

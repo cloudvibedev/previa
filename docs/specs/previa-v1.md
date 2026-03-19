@@ -389,15 +389,15 @@ No additional v1 commands are required beyond the surface listed above.
 - Accepts `--context <context-name>` and defaults to `default` when omitted.
 - Reads the runtime file for the selected context name.
 - Uses the recorded detached `main.address` and `main.port` to construct the
-  `add_context` query parameter for `https://app.previa.dev`.
+  `add_context` query parameter for `https://ide.previa.dev`.
 - The opened URL must be:
-  `https://app.previa.dev?add_context=<url-encoded-main-url>`.
+  `https://ide.previa.dev?add_context=<url-encoded-main-url>`.
 - The `main` URL must use the `http` scheme.
 - When the recorded `main.address` is an unspecified bind address such as
   `0.0.0.0` or `::`, `open` must normalize it to the local loopback address
   before encoding it into `add_context`.
 - Example:
-  `https://app.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588`
+  `https://ide.previa.dev?add_context=http%3A%2F%2F127.0.0.1%3A5588`
 - Fails clearly when no detached runtime file exists for the selected context
   name.
 - Prints the opened UI URL to stdout after the browser launch succeeds.
@@ -1012,7 +1012,7 @@ The implementation is complete only when these scenarios are covered:
 55. `logs --main --runner 55880` fails clearly because the filters are mutually
     exclusive.
 56. `open --context api` opens
-    `https://app.previa.dev?add_context=<url-encoded-main-url>` for the
+    `https://ide.previa.dev?add_context=<url-encoded-main-url>` for the
     recorded detached `previa-main`.
 57. `down --context api` reads `PREVIA_HOME/stacks/api/run/state.json`, terminates the
     recorded local processes, waits for shutdown, and removes the runtime file.
