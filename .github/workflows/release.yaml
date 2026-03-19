@@ -425,6 +425,9 @@ jobs:
           echo "Uploading install.sh to s3://${R2_BUCKET}/install.sh"
           aws s3 cp install.sh "s3://${R2_BUCKET}/install.sh" --endpoint-url "${endpoint}" --no-progress
 
+          echo "Uploading install.ps1 to s3://${R2_BUCKET}/install.ps1"
+          aws s3 cp install.ps1 "s3://${R2_BUCKET}/install.ps1" --endpoint-url "${endpoint}" --no-progress
+
   tag_release:
     name: Create git tag
     needs: [version_check, prepare_changelog]

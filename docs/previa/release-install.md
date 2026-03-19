@@ -10,14 +10,20 @@ The public installer is:
 curl -fsSL https://downloads.previa.dev/install.sh | sh
 ```
 
+For Windows PowerShell:
+
+```powershell
+irm https://downloads.previa.dev/install.ps1 | iex
+```
+
 It currently:
 
 - downloads `latest.json` from `https://downloads.previa.dev/latest.json`
 - resolves the latest published version and links
-- detects Linux or macOS before choosing the `previa` control binary to install
-- installs the `previa` CLI under `~/.previa/bin`
-- sets `PREVIA_HOME="$HOME/.previa"`
-- updates `~/.zshrc` and `~/.bashrc` when they exist
+- detects Linux, macOS, or Windows before choosing the `previa` control binary to install
+- installs the `previa` CLI under the default user-scoped Previa home
+- sets `PREVIA_HOME`
+- updates shell startup files on Unix-like systems or the user PATH on Windows
 
 ## What Gets Installed
 
@@ -26,6 +32,8 @@ The installer installs the `previa` control binary.
 Published Linux binaries are built against `musl` so they stay portable across a wider range of Linux distributions and do not depend on a very recent host `glibc`.
 
 On macOS, the installer resolves the `previa` control binary for macOS. When the manifest does not yet expose a direct macOS download link, the installer falls back to the matching GitHub Release asset for the resolved version.
+
+On Windows, the PowerShell installer resolves the `previa.exe` control binary for Windows. When the manifest does not yet expose a direct Windows download link, the installer falls back to the matching GitHub Release asset for the resolved version.
 
 At runtime, `previa up --bin` can also fetch missing runtime binaries such as:
 
@@ -85,6 +93,8 @@ The installer may write that block to:
 - `~/.bashrc`
 
 After removing the block, open a new shell or reload your rc file so `PATH` no longer includes `PREVIA_HOME/bin`.
+
+On Windows, remove the user-scoped `PREVIA_HOME` environment variable and remove `%USERPROFILE%\.previa\bin` from the user PATH if you want to fully uninstall the CLI.
 
 ## `latest.json`
 

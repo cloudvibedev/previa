@@ -20,8 +20,14 @@ On Linux or macOS:
 curl -fsSL https://downloads.previa.dev/install.sh | sh
 ```
 
-The installer detects the local OS, places `previa` under `~/.previa/bin`, and configures
-`PREVIA_HOME="$HOME/.previa"`.
+On Windows:
+
+```powershell
+irm https://downloads.previa.dev/install.ps1 | iex
+```
+
+The installer detects the local OS, places `previa` under the default Previa home, and configures
+`PREVIA_HOME`.
 
 ## First Local Stack
 

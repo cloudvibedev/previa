@@ -66,7 +66,13 @@ Install the CLI with:
 curl -fsSL https://downloads.previa.dev/install.sh | sh
 ```
 
-The installer detects Linux and macOS, installs the matching `previa` control binary under `~/.previa/bin`, and also sets `PREVIA_HOME="$HOME/.previa"`.
+On Windows, use:
+
+```powershell
+irm https://downloads.previa.dev/install.ps1 | iex
+```
+
+The installers detect Linux, macOS, or Windows, install the matching `previa` control binary under the default user home, and configure `PREVIA_HOME`.
 
 ## Quick Start
 
