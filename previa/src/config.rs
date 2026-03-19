@@ -343,6 +343,9 @@ pub async fn resolve_up_config(
     if let Some(runner_auth_key) = process_runner_auth_key() {
         main_env.insert("RUNNER_AUTH_KEY".to_owned(), runner_auth_key);
     }
+    if !attached_runners.is_empty() && configured_runner_auth_key(&main_env).is_none() {
+        bail!("RUNNER_AUTH_KEY is required when using --attach-runner");
+    }
 
     let mut local_runners = Vec::with_capacity(local_runner_count);
     let mut local_runner_ports = Vec::with_capacity(local_runner_count);
@@ -400,6 +403,12 @@ fn process_runner_auth_key() -> Option<String> {
     env::var("RUNNER_AUTH_KEY")
         .ok()
         .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn configured_runner_auth_key(env: &BTreeMap<String, String>) -> Option<&str> {
+    env.get("RUNNER_AUTH_KEY")
+        .map(|value| value.trim())
         .filter(|value| !value.is_empty())
 }
 
@@ -548,7 +557,7 @@ mod tests {
     use tempfile::TempDir;
     use tokio::net::TcpListener;
 
-    use super::resolve_up_config;
+    use super::{configured_runner_auth_key, resolve_up_config};
     use crate::cli::UpArgs;
     use crate::paths::PreviaPaths;
 
@@ -702,6 +711,14 @@ mod tests {
             .expect("manifest env lock");
         let (_temp, paths) = temp_paths();
         let stack_paths = paths.stack("default");
+        stack_paths
+            .ensure_parent_dirs()
+            .expect("ensure stack parent dirs");
+        std::fs::write(
+            &stack_paths.main_env,
+            "RUNNER_AUTH_KEY=attached-secret\nRUST_LOG=info\n",
+        )
+        .expect("write main.env");
         let binaries = BTreeMap::from([(
             "previa-main-linux-amd64".to_owned(),
             b"#!/bin/sh\necho main\n".to_vec(),
@@ -735,5 +752,52 @@ mod tests {
                 .iter()
                 .all(|value| value != "/files/previa-runner-linux-amd64")
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_up_config_requires_runner_auth_key_for_attached_runners() {
+        let (_temp, paths) = temp_paths();
+        let stack_paths = paths.stack("default");
+        let mut args = base_args();
+        args.bin = false;
+        args.attach_runners = vec!["55880".to_owned()];
+
+        let error = resolve_up_config(&paths, &stack_paths, args)
+            .await
+            .expect_err("missing attached runner auth must fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("RUNNER_AUTH_KEY is required when using --attach-runner")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_up_config_allows_attached_runners_when_main_env_has_runner_auth_key() {
+        let (_temp, paths) = temp_paths();
+        let stack_paths = paths.stack("default");
+        stack_paths
+            .ensure_parent_dirs()
+            .expect("ensure stack parent dirs");
+        std::fs::write(
+            &stack_paths.main_env,
+            "RUNNER_AUTH_KEY=attached-secret\nRUST_LOG=info\n",
+        )
+        .expect("write main.env");
+
+        let mut args = base_args();
+        args.bin = false;
+        args.attach_runners = vec!["55880".to_owned()];
+
+        let resolved = resolve_up_config(&paths, &stack_paths, args)
+            .await
+            .expect("attached runner auth from main.env");
+
+        assert_eq!(
+            configured_runner_auth_key(&resolved.main_env),
+            Some("attached-secret")
+        );
+        assert_eq!(resolved.attached_runners, vec!["http://127.0.0.1:55880"]);
     }
 }

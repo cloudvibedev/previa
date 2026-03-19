@@ -115,6 +115,10 @@ RUNNER_AUTH_KEY=local-dev-secret previa up --detach
 
 The same shared key is used for all runners in one local context.
 
+When `--attach-runner` is used, `RUNNER_AUTH_KEY` becomes required. `previa`
+must know the shared key up front so `previa-main` can authenticate against the
+attached runner endpoints.
+
 ## `--version`
 
 For compose-backed runtimes, `--version` selects the container image tag:

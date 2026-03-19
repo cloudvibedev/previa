@@ -1126,6 +1126,22 @@ runners:
 }
 
 #[test]
+fn up_attach_runner_requires_runner_auth_key() {
+    let temp = setup_fake_docker();
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args(["up", "--detach", "--attach-runner", "55880"])
+        .output()
+        .expect("up output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("RUNNER_AUTH_KEY is required when using --attach-runner"));
+}
+
+#[test]
 fn up_import_requires_stack_name() {
     let temp = setup_fake_docker();
     let pipeline = temp.path().join("single.previa.json");
