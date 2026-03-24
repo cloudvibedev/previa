@@ -8,6 +8,7 @@ All notable changes to Previa are documented in this file.
 - Add pipeline export CLI (a8b1fad)
 
 ### Documentation
+- Changelog: update for v1.0.0-alpha.10 (15fb964)
 - Add project repository workflow guide (f37d8ac)
 - Changelog: update for v1.0.0-alpha.9 (6cf1d95)
 
