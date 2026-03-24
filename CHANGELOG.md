@@ -2,6 +2,20 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.11] - 2026-03-24
+
+### Documentation
+- Changelog: update for v1.0.0-alpha.10 (4f4f875)
+
+### Maintenance
+- Update version to 1.0.0-alpha.11 in Cargo files (13acf77)
+
+### Other Changes
+- Add MCP guide for local pipeline workflows (8a8c96e)
+- Fix Windows process handle check (70e1d86)
+
+Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.10...v1.0.0-alpha.11
+
 ## [v1.0.0-alpha.10] - 2026-03-24
 
 ### Features
