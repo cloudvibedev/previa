@@ -96,5 +96,6 @@ Use absolute URLs when:
 
 ## See Also
 
+- [Project repository workflow](./project-repository-workflow.md)
 - [Pipeline authoring](./pipeline-authoring.md)
 - [API workflows](./api-workflows.md)

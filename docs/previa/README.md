@@ -21,6 +21,7 @@ This is the main documentation index for Previa as an operator-facing platform a
 ## Authoring and Testing
 
 - [Pipeline authoring](./pipeline-authoring.md)
+- [Project repository workflow](./project-repository-workflow.md)
 - [Spec-driven testing](./spec-driven-testing.md)
 - [Examples cookbook](./examples-cookbook.md)
 - [E2E queues](./e2e-queues.md)

@@ -112,4 +112,5 @@ previa --home ./.previa open
 
 - [Getting started](./getting-started.md)
 - [Up and runtime](./up-and-runtime.md)
+- [Project repository workflow](./project-repository-workflow.md)
 - [Troubleshooting](./troubleshooting.md)
