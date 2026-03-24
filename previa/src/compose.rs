@@ -59,7 +59,10 @@ impl Serialize for ComposePort {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&format!("{}:{}:{}", self.host_ip, self.published, self.target))
+        serializer.serialize_str(&format!(
+            "{}:{}:{}",
+            self.host_ip, self.published, self.target
+        ))
     }
 }
 
@@ -399,7 +402,10 @@ fn resolve_compose_cli() -> Result<ComposeCli> {
     )
 }
 
-fn resolve_compose_cli_with<D, L>(docker_plugin_available: D, docker_compose_available: L) -> Result<ComposeCli>
+fn resolve_compose_cli_with<D, L>(
+    docker_plugin_available: D,
+    docker_compose_available: L,
+) -> Result<ComposeCli>
 where
     D: FnOnce() -> bool,
     L: FnOnce() -> bool,

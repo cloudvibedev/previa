@@ -25,6 +25,7 @@ Current commands:
 - `ps`
 - `logs`
 - `open`
+- `export`
 - `version`
 - `help`
 
@@ -332,6 +333,45 @@ Runtime behavior:
 - if the browser launcher fails, exits with error, highlights the failure in red, and still prints the final URL for manual opening
 
 If the main runtime is bound to `0.0.0.0` or `::`, `previa` normalizes it to loopback for the browser URL.
+
+## `previa export pipelines`
+
+Exports stored pipelines from one detached context into local files.
+
+```text
+previa export pipelines [OPTIONS]
+```
+
+Important options:
+
+- `--context <CONTEXT>`: context to inspect, default `default`
+- `--project <ID_OR_NAME>`: required project selector
+- `--output-dir <PATH>`: required destination directory
+- `--pipeline <ID_OR_NAME>`: export only selected pipelines; may be repeated
+- `--format <yaml|json>`: output format, default `yaml`
+- `--overwrite`: replace existing files instead of failing
+
+Examples:
+
+```bash
+previa export pipelines --project my_app_smoke --output-dir ./tests/e2e
+previa export pipelines --context other --project project-users --output-dir ./tests/e2e --format json
+previa export pipelines --project my_app_smoke --output-dir ./tests/e2e --pipeline smoke --pipeline login
+previa export pipelines --project my_app_smoke --output-dir ./tests/e2e --overwrite
+```
+
+Notes:
+
+- export requires an existing detached context
+- exported files are direct pipeline objects, not project bundles
+- project selection accepts project ID first, then exact name matching
+- if more than one project matches the provided exact name, the command fails and asks for a project ID
+- if any target file already exists, the command fails unless `--overwrite` is set
+
+See also:
+
+- [Pipeline export](./pipeline-export.md)
+- [Project repository workflow](./project-repository-workflow.md)
 
 ## `previa version`
 

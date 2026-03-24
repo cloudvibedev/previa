@@ -4,6 +4,7 @@ mod compose;
 mod config;
 mod download;
 mod envfile;
+mod export;
 mod health;
 mod logs;
 mod output;
@@ -26,7 +27,8 @@ use tokio::time::sleep;
 
 use crate::browser::{build_open_url, open_browser};
 use crate::cli::{
-    Cli, Commands, DownArgs, LogsArgs, OpenArgs, PsArgs, PullArgs, RestartArgs, StatusArgs, UpArgs,
+    Cli, Commands, DownArgs, ExportArgs, ExportTarget, LogsArgs, OpenArgs, PsArgs, PullArgs,
+    RestartArgs, StatusArgs, UpArgs,
 };
 use crate::compose::{
     ComposeProject, MAIN_SERVICE_NAME, ServiceInspect, compose_project_from_state,
@@ -34,6 +36,7 @@ use crate::compose::{
 };
 use crate::config::{ResolvedUpConfig, resolve_up_config};
 use crate::envfile::{read_env_file, write_env_file};
+use crate::export::export_pipelines;
 use crate::health::{
     DerivedState, probe_health, state_from_pid_and_health, state_from_running_and_health,
 };
@@ -74,6 +77,7 @@ pub async fn run() -> Result<()> {
         Commands::Ps(args) => cmd_ps(&paths, &http, args).await,
         Commands::Logs(args) => cmd_logs(&paths, args).await,
         Commands::Open(args) => cmd_open(&paths, args).await,
+        Commands::Export(args) => cmd_export(&paths, &http, args).await,
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -473,6 +477,31 @@ async fn cmd_open(paths: &PreviaPaths, args: OpenArgs) -> Result<()> {
             Err(anyhow!(
                 "\x1b[31mfailed to open the browser automatically: {error:#}\x1b[0m\nopen the URL above manually"
             ))
+        }
+    }
+}
+
+async fn cmd_export(paths: &PreviaPaths, http: &Client, args: ExportArgs) -> Result<()> {
+    match args.target {
+        ExportTarget::Pipelines(args) => {
+            let stack_name = parse_stack_name(&args.context)?;
+            let stack_paths = paths.stack(&stack_name);
+            let state = read_required_state(&stack_paths)?;
+            let outcome =
+                export_pipelines(http, &state.main.address, state.main.port, &args).await?;
+
+            println!(
+                "exported {} pipeline(s) from project '{}' ({}) to '{}' as {}",
+                outcome.files.len(),
+                outcome.project_name,
+                outcome.project_id,
+                outcome.output_dir.display(),
+                outcome.format
+            );
+            for path in outcome.files {
+                println!("{}", path.display());
+            }
+            Ok(())
         }
     }
 }

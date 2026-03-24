@@ -257,6 +257,37 @@ With this convention:
 - the first sync creates missing pipelines
 - the next sync updates the matching stored pipeline instead of duplicating it
 
+## Export Stored Pipelines Back Into the Repo
+
+If you already have stored pipelines in the local project and want to write them back into the repository:
+
+```bash
+previa --home ./.previa export pipelines \
+  --project my_app_smoke \
+  --output-dir ./tests/e2e
+```
+
+Useful variants:
+
+```bash
+previa --home ./.previa export pipelines \
+  --project my_app_smoke \
+  --output-dir ./tests/e2e \
+  --overwrite
+
+previa --home ./.previa export pipelines \
+  --project my_app_smoke \
+  --output-dir ./tests/e2e \
+  --format json
+```
+
+Important behavior:
+
+- exported files are direct pipeline objects, not full project bundles
+- YAML is the default output format
+- spec-driven pipelines still depend on matching project specs when reimported or executed later
+- export fails on existing files unless `--overwrite` is set
+
 ## Run the Smoke Pipeline
 
 If the pipeline uses a spec URL name like `hml`, pass the matching `selectedBaseUrlKey`:
@@ -377,6 +408,7 @@ You can adapt the project lookup and creation logic if you want the script to re
 ## See Also
 
 - [Getting started](./getting-started.md)
+- [Pipeline export](./pipeline-export.md)
 - [Pipeline import](./pipeline-import.md)
 - [Spec-driven testing](./spec-driven-testing.md)
 - [API workflows](./api-workflows.md)

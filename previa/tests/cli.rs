@@ -42,6 +42,8 @@ import pathlib
 import signal
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse
 
 address = os.environ.get("ADDRESS", "127.0.0.1")
 port = int(os.environ.get("PORT", "0"))
@@ -69,9 +71,48 @@ def save_import_state(state):
     import_state_path.parent.mkdir(parents=True, exist_ok=True)
     import_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
+def catalog_from_state(state):
+    catalog = state.get("catalog")
+    if isinstance(catalog, list):
+        items = []
+        for item in catalog:
+            if not isinstance(item, dict):
+                continue
+            project_id = str(item.get("id", "")).strip()
+            name = str(item.get("name", "")).strip()
+            pipelines = item.get("pipelines")
+            if not project_id or not name or not isinstance(pipelines, list):
+                continue
+            items.append({
+                "id": project_id,
+                "name": name,
+                "pipelines": pipelines,
+            })
+        return items
+
+    projects = state.get("projects", {})
+    if not isinstance(projects, dict):
+        return []
+
+    items = []
+    for stack_name, payload in projects.items():
+        if not isinstance(payload, dict):
+            continue
+        pipelines = payload.get("pipelines")
+        if not isinstance(pipelines, list):
+            continue
+        items.append({
+            "id": str(payload.get("projectId", f"project-{stack_name}")),
+            "name": str(payload.get("projectName", payload.get("stackName", stack_name))),
+            "pipelines": pipelines,
+        })
+    return items
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/health":
             status = health_status
             if health_status_file and os.path.exists(health_status_file):
                 with open(health_status_file, "r", encoding="utf-8") as fh:
@@ -79,11 +120,60 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(status)
             self.end_headers()
             self.wfile.write(b"ok")
-        elif self.path == "/info":
+        elif path == "/info":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"pid":1,"memoryBytes":0,"virtualMemoryBytes":0,"cpuUsagePercent":0.0}')
+        elif path == "/api/v1/projects":
+            query = parse_qs(parsed.query or "")
+            limit = int((query.get("limit") or ["100"])[0] or "100")
+            offset = int((query.get("offset") or ["0"])[0] or "0")
+            projects = catalog_from_state(load_import_state())
+            page = projects[offset:offset + limit]
+            self.respond_json(200, [
+                {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "description": None,
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-01T00:00:00Z",
+                }
+                for item in page
+            ])
+        elif path.startswith("/api/v1/projects/"):
+            projects = catalog_from_state(load_import_state())
+            suffix = path[len("/api/v1/projects/"):]
+            parts = [part for part in suffix.split("/") if part]
+            if len(parts) == 1:
+                project_id = parts[0]
+                project = next((item for item in projects if item["id"] == project_id), None)
+                if project is None:
+                    self.respond_json(404, {
+                        "error": "not_found",
+                        "message": "project not found",
+                    })
+                    return
+                self.respond_json(200, {
+                    "id": project["id"],
+                    "name": project["name"],
+                    "description": None,
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-01T00:00:00Z",
+                })
+            elif len(parts) == 2 and parts[1] == "pipelines":
+                project_id = parts[0]
+                project = next((item for item in projects if item["id"] == project_id), None)
+                if project is None:
+                    self.respond_json(404, {
+                        "error": "not_found",
+                        "message": "project not found",
+                    })
+                    return
+                self.respond_json(200, project["pipelines"])
+            else:
+                self.send_response(404)
+                self.end_headers()
         else:
             self.send_response(404)
             self.end_headers()
@@ -135,10 +225,15 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
-        state["projects"][stack_name] = payload
+        project_id = f"project-{stack_name}"
+        state["projects"][stack_name] = {
+            **payload,
+            "projectId": project_id,
+            "projectName": stack_name,
+        }
         save_import_state(state)
         self.respond_json(201, {
-            "projectId": f"project-{stack_name}",
+            "projectId": project_id,
             "stackName": stack_name,
             "pipelinesImported": len(pipelines),
         })
@@ -184,6 +279,7 @@ import os
 import signal
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 address = os.environ.get("ADDRESS", "127.0.0.1")
 port = int(os.environ.get("PORT", "0"))
@@ -260,6 +356,7 @@ import pathlib
 import signal
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 address = os.environ.get("ADDRESS", "127.0.0.1")
 port = int(os.environ.get("PORT", "0"))
@@ -287,9 +384,48 @@ def save_import_state(state):
     import_state_path.parent.mkdir(parents=True, exist_ok=True)
     import_state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
+def catalog_from_state(state):
+    catalog = state.get("catalog")
+    if isinstance(catalog, list):
+        items = []
+        for item in catalog:
+            if not isinstance(item, dict):
+                continue
+            project_id = str(item.get("id", "")).strip()
+            name = str(item.get("name", "")).strip()
+            pipelines = item.get("pipelines")
+            if not project_id or not name or not isinstance(pipelines, list):
+                continue
+            items.append({
+                "id": project_id,
+                "name": name,
+                "pipelines": pipelines,
+            })
+        return items
+
+    projects = state.get("projects", {})
+    if not isinstance(projects, dict):
+        return []
+
+    items = []
+    for stack_name, payload in projects.items():
+        if not isinstance(payload, dict):
+            continue
+        pipelines = payload.get("pipelines")
+        if not isinstance(pipelines, list):
+            continue
+        items.append({
+            "id": str(payload.get("projectId", f"project-{stack_name}")),
+            "name": str(payload.get("projectName", payload.get("stackName", stack_name))),
+            "pipelines": pipelines,
+        })
+    return items
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/health":
             status = health_status
             if health_status_file and os.path.exists(health_status_file):
                 with open(health_status_file, "r", encoding="utf-8") as fh:
@@ -297,11 +433,60 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(status)
             self.end_headers()
             self.wfile.write(b"ok")
-        elif self.path == "/info":
+        elif path == "/info":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"pid":1,"memoryBytes":0,"virtualMemoryBytes":0,"cpuUsagePercent":0.0}')
+        elif path == "/api/v1/projects":
+            query = parse_qs(parsed.query or "")
+            limit = int((query.get("limit") or ["100"])[0] or "100")
+            offset = int((query.get("offset") or ["0"])[0] or "0")
+            projects = catalog_from_state(load_import_state())
+            page = projects[offset:offset + limit]
+            self.respond_json(200, [
+                {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "description": None,
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-01T00:00:00Z",
+                }
+                for item in page
+            ])
+        elif path.startswith("/api/v1/projects/"):
+            projects = catalog_from_state(load_import_state())
+            suffix = path[len("/api/v1/projects/"):]
+            parts = [part for part in suffix.split("/") if part]
+            if len(parts) == 1:
+                project_id = parts[0]
+                project = next((item for item in projects if item["id"] == project_id), None)
+                if project is None:
+                    self.respond_json(404, {
+                        "error": "not_found",
+                        "message": "project not found",
+                    })
+                    return
+                self.respond_json(200, {
+                    "id": project["id"],
+                    "name": project["name"],
+                    "description": None,
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-01T00:00:00Z",
+                })
+            elif len(parts) == 2 and parts[1] == "pipelines":
+                project_id = parts[0]
+                project = next((item for item in projects if item["id"] == project_id), None)
+                if project is None:
+                    self.respond_json(404, {
+                        "error": "not_found",
+                        "message": "project not found",
+                    })
+                    return
+                self.respond_json(200, project["pipelines"])
+            else:
+                self.send_response(404)
+                self.end_headers()
         else:
             self.send_response(404)
             self.end_headers()
@@ -353,10 +538,15 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
-        state["projects"][stack_name] = payload
+        project_id = f"project-{stack_name}"
+        state["projects"][stack_name] = {
+            **payload,
+            "projectId": project_id,
+            "projectName": stack_name,
+        }
         save_import_state(state)
         self.respond_json(201, {
-            "projectId": f"project-{stack_name}",
+            "projectId": project_id,
             "stackName": stack_name,
             "pipelinesImported": len(pipelines),
         })
@@ -454,8 +644,15 @@ def spawn_service(project, service_name, service):
     bind_address = "127.0.0.1"
     bind_port = 0
     if ports:
-        bind_address = str(ports[0].get("host_ip", "127.0.0.1"))
-        bind_port = int(ports[0].get("published", 0))
+        first_port = ports[0]
+        if isinstance(first_port, dict):
+            bind_address = str(first_port.get("host_ip", "127.0.0.1"))
+            bind_port = int(first_port.get("published", 0))
+        elif isinstance(first_port, str):
+            parts = first_port.split(":")
+            if len(parts) == 3:
+                bind_address = parts[0] or "127.0.0.1"
+                bind_port = int(parts[1] or "0")
 
     env["ADDRESS"] = bind_address
     env["PORT"] = str(bind_port)
@@ -534,6 +731,9 @@ if argv[0] == "inspect":
                         }
                     )
     print(json.dumps(records))
+    sys.exit(0)
+
+if argv[0] == "compose" and len(argv) > 1 and argv[1] == "version":
     sys.exit(0)
 
 if argv[0] != "compose":
@@ -775,6 +975,68 @@ fn read_fake_import_state(previa_home: &Path) -> serde_json::Value {
         &fs::read(previa_home.join("fake-imports.json")).expect("read fake import state"),
     )
     .expect("fake import state json")
+}
+
+fn write_fake_api_state(previa_home: &Path, state: serde_json::Value) {
+    fs::write(
+        previa_home.join("fake-imports.json"),
+        serde_json::to_vec_pretty(&state).expect("serialize fake api state"),
+    )
+    .expect("write fake api state");
+}
+
+fn fake_pipeline_value(name: &str, pipeline_id: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "id": pipeline_id,
+        "name": name,
+        "description": "Generated by CLI test",
+        "steps": [{
+            "id": "step-1",
+            "name": "Request",
+            "method": "GET",
+            "url": "https://example.com",
+            "headers": {},
+            "asserts": []
+        }]
+    })
+}
+
+fn read_exported_yaml(path: &Path) -> serde_json::Value {
+    serde_yaml::from_slice(&fs::read(path).expect("read exported yaml"))
+        .expect("parse exported yaml")
+}
+
+fn read_exported_json(path: &Path) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(path).expect("read exported json"))
+        .expect("parse exported json")
+}
+
+fn start_detached_bin_context(temp: &TempDir, stack: &str) {
+    setup_fake_binaries(temp);
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+
+    let mut up = cargo_bin();
+    docker_env(temp, &mut up);
+    up.args([
+        "up",
+        "--bin",
+        "--context",
+        stack,
+        "--detach",
+        "--main-address",
+        "127.0.0.1",
+        "-p",
+        &main_port.to_string(),
+        "--runner-address",
+        "127.0.0.1",
+        "-P",
+        &format!("{runner_port}:{runner_port}"),
+        "--runners",
+        "1",
+    ])
+    .assert()
+    .success();
 }
 
 fn read_generated_compose(previa_home: &Path, context: &str) -> serde_json::Value {
@@ -1709,6 +1971,473 @@ fn detached_up_import_stack_conflict_keeps_runtime_running() {
 }
 
 #[test]
+fn export_pipelines_writes_default_yaml_files_using_project_name() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-yaml";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [{
+                "id": "project-users",
+                "name": "Users API",
+                "pipelines": [
+                    fake_pipeline_value("Alpha Smoke", Some("pipe-alpha")),
+                    fake_pipeline_value("Beta Smoke", None)
+                ]
+            }]
+        }),
+    );
+
+    let output_dir = temp.path().join("exports");
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "Users API",
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+        ])
+        .output()
+        .expect("export output");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("exported 2 pipeline(s) from project 'Users API' (project-users)"));
+    assert!(stdout.contains("as yaml"));
+
+    let alpha_path = output_dir.join("pipe-alpha.previa.yaml");
+    let beta_path = output_dir.join("beta-smoke.previa.yaml");
+    assert!(alpha_path.exists());
+    assert!(beta_path.exists());
+    assert_eq!(read_exported_yaml(&alpha_path)["name"], "Alpha Smoke");
+    assert_eq!(read_exported_yaml(&beta_path)["name"], "Beta Smoke");
+}
+
+#[test]
+fn export_pipelines_supports_json_format_and_project_id_lookup() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-json";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [{
+                "id": "project-users",
+                "name": "Users API",
+                "pipelines": [fake_pipeline_value("Alpha Smoke", Some("pipe-alpha"))]
+            }]
+        }),
+    );
+
+    let output_dir = temp.path().join("json-exports");
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "project-users",
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success();
+
+    let path = output_dir.join("pipe-alpha.previa.json");
+    assert!(path.exists());
+    assert_eq!(read_exported_json(&path)["id"], "pipe-alpha");
+}
+
+#[test]
+fn export_pipelines_filters_selection_and_preserves_stored_order() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-filtered";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [{
+                "id": "project-users",
+                "name": "Users API",
+                "pipelines": [
+                    fake_pipeline_value("Alpha Smoke", Some("pipe-alpha")),
+                    fake_pipeline_value("Beta Smoke", Some("pipe-beta")),
+                    fake_pipeline_value("Gamma Smoke", Some("pipe-gamma"))
+                ]
+            }]
+        }),
+    );
+
+    let output_dir = temp.path().join("filtered");
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "project-users",
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+            "--pipeline",
+            "pipe-gamma",
+            "--pipeline",
+            "pipe-alpha",
+        ])
+        .output()
+        .expect("export output");
+
+    assert!(output.status.success());
+    assert!(output_dir.join("pipe-alpha.previa.yaml").exists());
+    assert!(output_dir.join("pipe-gamma.previa.yaml").exists());
+    assert!(!output_dir.join("pipe-beta.previa.yaml").exists());
+
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let written = stdout.lines().skip(1).collect::<Vec<_>>();
+    assert_eq!(written.len(), 2);
+    assert!(written[0].ends_with("pipe-alpha.previa.yaml"));
+    assert!(written[1].ends_with("pipe-gamma.previa.yaml"));
+}
+
+#[test]
+fn export_pipelines_fails_for_ambiguous_project_name() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-project-ambiguous";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [
+                {"id": "project-a", "name": "Users API", "pipelines": [fake_pipeline_value("Alpha", Some("pipe-a"))]},
+                {"id": "project-b", "name": "Users API", "pipelines": [fake_pipeline_value("Beta", Some("pipe-b"))]}
+            ]
+        }),
+    );
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "Users API",
+            "--output-dir",
+            temp.path().join("exports").to_str().expect("output dir"),
+        ])
+        .output()
+        .expect("export output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("project name 'Users API' is ambiguous"));
+    assert!(stderr.contains("project-a"));
+    assert!(stderr.contains("project-b"));
+}
+
+#[test]
+fn export_pipelines_fails_for_missing_pipeline_selector() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-pipeline-missing";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [{
+                "id": "project-users",
+                "name": "Users API",
+                "pipelines": [fake_pipeline_value("Alpha Smoke", Some("pipe-alpha"))]
+            }]
+        }),
+    );
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "project-users",
+            "--output-dir",
+            temp.path().join("exports").to_str().expect("output dir"),
+            "--pipeline",
+            "missing-pipeline",
+        ])
+        .output()
+        .expect("export output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("pipeline 'missing-pipeline' not found"));
+}
+
+#[test]
+fn export_pipelines_fails_for_ambiguous_pipeline_name() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-pipeline-ambiguous";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [{
+                "id": "project-users",
+                "name": "Users API",
+                "pipelines": [
+                    fake_pipeline_value("Smoke", Some("pipe-alpha")),
+                    fake_pipeline_value("Smoke", Some("pipe-beta"))
+                ]
+            }]
+        }),
+    );
+
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "project-users",
+            "--output-dir",
+            temp.path().join("exports").to_str().expect("output dir"),
+            "--pipeline",
+            "Smoke",
+        ])
+        .output()
+        .expect("export output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("pipeline name 'Smoke' is ambiguous"));
+    assert!(stderr.contains("pipe-alpha"));
+    assert!(stderr.contains("pipe-beta"));
+}
+
+#[test]
+fn export_pipelines_respects_overwrite_policy() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-overwrite";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [{
+                "id": "project-users",
+                "name": "Users API",
+                "pipelines": [fake_pipeline_value("Alpha Smoke", Some("pipe-alpha"))]
+            }]
+        }),
+    );
+
+    let output_dir = temp.path().join("exports");
+    fs::create_dir_all(&output_dir).expect("export dir");
+    let existing = output_dir.join("pipe-alpha.previa.yaml");
+    fs::write(&existing, "old: true\n").expect("existing export");
+
+    let mut without_overwrite = cargo_bin();
+    docker_env(&temp, &mut without_overwrite);
+    let output = without_overwrite
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "project-users",
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+        ])
+        .output()
+        .expect("export output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("already exists"));
+    assert_eq!(
+        fs::read_to_string(&existing).expect("existing contents"),
+        "old: true\n"
+    );
+
+    let mut with_overwrite = cargo_bin();
+    docker_env(&temp, &mut with_overwrite);
+    with_overwrite
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "project-users",
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+            "--overwrite",
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(read_exported_yaml(&existing)["name"], "Alpha Smoke");
+}
+
+#[test]
+fn export_pipelines_detects_duplicate_target_filenames_before_writing() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-duplicate-path";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [{
+                "id": "project-users",
+                "name": "Users API",
+                "pipelines": [
+                    fake_pipeline_value("Alpha", Some("dup")),
+                    fake_pipeline_value("Beta", Some("dup"))
+                ]
+            }]
+        }),
+    );
+
+    let output_dir = temp.path().join("exports");
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "project-users",
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+        ])
+        .output()
+        .expect("export output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("same output file"));
+    assert!(!output_dir.join("dup.previa.yaml").exists());
+}
+
+#[test]
+fn export_pipelines_creates_output_directory_when_missing() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "export-create-dir";
+    start_detached_bin_context(&temp, stack);
+    write_fake_api_state(
+        temp.path(),
+        serde_json::json!({
+            "catalog": [{
+                "id": "project-users",
+                "name": "Users API",
+                "pipelines": [fake_pipeline_value("Alpha Smoke", Some("pipe-alpha"))]
+            }]
+        }),
+    );
+
+    let output_dir = temp.path().join("nested/exports");
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            stack,
+            "--project",
+            "project-users",
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+        ])
+        .assert()
+        .success();
+
+    assert!(output_dir.exists());
+    assert!(output_dir.join("pipe-alpha.previa.yaml").exists());
+}
+
+#[test]
+fn export_pipelines_requires_detached_context() {
+    let temp = setup_fake_docker();
+    let mut command = cargo_bin();
+    docker_env(&temp, &mut command);
+    let output = command
+        .args([
+            "export",
+            "pipelines",
+            "--context",
+            "missing-context",
+            "--project",
+            "project-users",
+            "--output-dir",
+            temp.path().join("exports").to_str().expect("output dir"),
+        ])
+        .output()
+        .expect("export output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("no detached runtime exists for context 'missing-context'"));
+}
+
+#[test]
 fn detached_binary_lifecycle_supports_status_ps_logs_restart_and_down() {
     if !python3_available() {
         return;
@@ -1742,7 +2471,21 @@ fn detached_binary_lifecycle_supports_status_ps_logs_restart_and_down() {
     .assert()
     .success();
 
-    thread::sleep(Duration::from_millis(500));
+    let mut status_json = serde_json::Value::Null;
+    for _ in 0..10 {
+        let mut status = cargo_bin();
+        docker_env(&temp, &mut status);
+        let status_output = status
+            .args(["status", "--context", stack, "--json"])
+            .output()
+            .expect("status output");
+        assert!(status_output.status.success());
+        status_json = serde_json::from_slice(&status_output.stdout).expect("status json");
+        if status_json["state"] == "running" {
+            break;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
 
     let state: serde_json::Value = serde_json::from_slice(
         &fs::read(
@@ -1756,16 +2499,6 @@ fn detached_binary_lifecycle_supports_status_ps_logs_restart_and_down() {
     .expect("runtime json");
     assert_eq!(state["backend"], "bin");
     assert!(state["main"]["pid"].as_u64().unwrap_or_default() > 0);
-
-    let mut status = cargo_bin();
-    docker_env(&temp, &mut status);
-    let status_output = status
-        .args(["status", "--context", stack, "--json"])
-        .output()
-        .expect("status output");
-    assert!(status_output.status.success());
-    let status_json: serde_json::Value =
-        serde_json::from_slice(&status_output.stdout).expect("status json");
     assert_eq!(status_json["state"], "running");
     assert_eq!(status_json["main"]["address"], "127.0.0.1");
 

@@ -45,8 +45,51 @@ pub enum Commands {
     Logs(LogsArgs),
     #[command(about = "Open the Previa IDE with the current context")]
     Open(OpenArgs),
+    #[command(about = "Export stored resources from a detached context")]
+    Export(ExportArgs),
     #[command(about = "Print the CLI version")]
     Version,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Export stored resources from a detached context")]
+pub struct ExportArgs {
+    #[command(subcommand)]
+    pub target: ExportTarget,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ExportTarget {
+    #[command(about = "Export stored project pipelines into local files")]
+    Pipelines(PipelineExportArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PipelineExportFormat {
+    Yaml,
+    Json,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Export stored project pipelines into local files")]
+pub struct PipelineExportArgs {
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
+    pub context: String,
+    #[arg(long = "project", value_name = "ID_OR_NAME")]
+    pub project: String,
+    #[arg(long = "output-dir", value_name = "PATH")]
+    pub output_dir: PathBuf,
+    #[arg(long = "pipeline", value_name = "ID_OR_NAME")]
+    pub pipelines: Vec<String>,
+    #[arg(long = "format", value_enum, default_value_t = PipelineExportFormat::Yaml)]
+    pub format: PipelineExportFormat,
+    #[arg(long = "overwrite")]
+    pub overwrite: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
