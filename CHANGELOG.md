@@ -2,6 +2,27 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.10] - 2026-03-24
+
+### Features
+- Add pipeline export CLI (a8b1fad)
+
+### Documentation
+- Add project repository workflow guide (f37d8ac)
+- Changelog: update for v1.0.0-alpha.9 (6cf1d95)
+
+### Maintenance
+- Update version to 1.0.0-alpha.10 in Cargo files (097da27)
+
+### Other Changes
+- Add Windows PowerShell installer (2e7776b)
+- Support macOS detection in installer (99d3663)
+- Fix release workflow YAML schema issues (c925953)
+- Add release scope selector to release workflow (808ac5d)
+- Hide --bin outside Linux (4ee7dd2)
+
+Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.9...v1.0.0-alpha.10
+
 ## [v1.0.0-alpha.9] - 2026-03-19
 
 ### Documentation
