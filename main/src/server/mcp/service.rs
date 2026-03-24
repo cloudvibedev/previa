@@ -1666,6 +1666,15 @@ fn prompt_definitions() -> Vec<PromptDefinition> {
             arguments: Vec::new(),
         },
         PromptDefinition {
+            name: "local_pipeline_guide".to_owned(),
+            title: Some("Local Pipeline Guide".to_owned()),
+            description: Some(
+                "Explains how to create local pipeline files, import them into a detached Previa context, run them through Previa, and export project pipelines back to local files."
+                    .to_owned(),
+            ),
+            arguments: Vec::new(),
+        },
+        PromptDefinition {
             name: "project_onboarding_guide".to_owned(),
             title: Some("Project Onboarding Guide".to_owned()),
             description: Some(
@@ -1767,6 +1776,10 @@ fn prompt_result(name: &str) -> Option<PromptGetResult> {
         "previa_pipeline_author" | "pipeline_creation_specialist" => Some(prompt_text_result(
             "Detailed prompt for authoring Previa pipelines through MCP.",
             previa_pipeline_author_prompt(),
+        )),
+        "local_pipeline_guide" => Some(prompt_text_result(
+            "Prompt for working with local pipeline files and detached Previa contexts.",
+            local_pipeline_guide_prompt(),
         )),
         "project_onboarding_guide" => Some(prompt_text_result(
             "Guided prompt for safely discovering project context before acting.",
@@ -2497,6 +2510,49 @@ Output requirements:\n\
     )
 }
 
+fn local_pipeline_guide_prompt() -> String {
+    [
+        "You are guiding a user through Previa local pipeline workflows.",
+        "Your job is to explain how local pipeline files are created, imported into a detached local context, executed through Previa, and exported back out of a project when needed.",
+        "Use only workflows that exist in this repository.",
+        "Core local workflow:",
+        "1. Create one or more local pipeline files using the same pipeline schema accepted by create_project_pipeline.",
+        "2. Save them with one of the supported import extensions: .previa, .previa.json, .previa.yaml, or .previa.yml.",
+        "3. Start a detached local context and import those files at startup with previa up --context <context> --detach --import <path> --stack <stack-name>.",
+        "4. Use --recursive when <path> is a directory containing multiple pipeline files.",
+        "5. After the detached context is running, open Previa with previa open --context <context> or operate it through MCP tools such as list_projects, list_project_pipelines, run_project_e2e_test, and run_project_load_test.",
+        "Important local runtime rules:",
+        "- --import requires --detach.",
+        "- --stack is required when using --import.",
+        "- --recursive only works when --import points to a directory.",
+        "- Importing local pipelines creates a new project named after the provided stack name.",
+        "- If a project with that stack name already exists, import will fail until the conflict is resolved.",
+        "Recommended command examples:",
+        "- Single file import: previa up --context default --detach --import ./pipelines/user-smoke.previa.yaml --stack local-smoke",
+        "- Directory import: previa up --context default --detach --import ./pipelines --recursive --stack local-smoke",
+        "- Open the IDE for that context: previa open --context default",
+        "- Check the detached context status: previa status --context default",
+        "How to export a project into local pipelines:",
+        "1. Start or reuse the detached context that can reach the target project.",
+        "2. Run previa export pipelines --context <context> --project <project-id-or-name> --output-dir <dir>.",
+        "3. Use --pipeline <id-or-name> to export only selected pipelines.",
+        "4. Use --format yaml or --format json to choose the local file format.",
+        "5. Use --overwrite when the output directory already contains files you intentionally want to replace.",
+        "Export examples:",
+        "- Export all pipelines: previa export pipelines --context default --project project_123 --output-dir ./pipelines",
+        "- Export selected pipeline as JSON: previa export pipelines --context default --project Billing --pipeline smoke-login --format json --output-dir ./pipelines-json",
+        "Execution guidance after import:",
+        "- Treat imported local files as saved project pipelines inside the running context.",
+        "- To execute them programmatically, first discover the imported project with list_projects or get_project, then inspect pipelines with list_project_pipelines, and finally call run_project_e2e_test or run_project_load_test.",
+        "- If the user asks to change the local pipeline definition itself, update the local file and re-import it into a fresh project or export the current saved project state back to local files for editing.",
+        "Output requirements:",
+        "- Prefer concrete commands over abstract descriptions.",
+        "- Distinguish clearly between local files on disk, the detached Previa context, and the saved project created during import.",
+        "- If the user seems to confuse context and stack, explain that context selects the local runtime while --stack names the imported project created from the local pipeline files.",
+    ]
+    .join("\n")
+}
+
 fn project_onboarding_guide_prompt() -> String {
     [
         "You are onboarding yourself to a Previa project through MCP before making any change.",
@@ -2682,7 +2738,7 @@ mod tests {
     use tokio::sync::RwLock;
 
     use super::{
-        execute_tool, parse_tool_arguments, pipeline_creation_guide,
+        execute_tool, local_pipeline_guide_prompt, parse_tool_arguments, pipeline_creation_guide,
         pipeline_test_assistant_prompt, previa_pipeline_author_prompt, prompt_definitions,
         prompt_result, tool_definitions, validate_pipeline_input,
     };
@@ -2940,6 +2996,31 @@ mod tests {
     }
 
     #[test]
+    fn local_pipeline_guide_prompt_is_available() {
+        let prompt = prompt_definitions()
+            .into_iter()
+            .find(|prompt| prompt.name == "local_pipeline_guide")
+            .expect("local pipeline guide prompt definition");
+
+        assert_eq!(prompt.arguments.len(), 0);
+    }
+
+    #[test]
+    fn local_pipeline_guide_mentions_import_export_and_execution_commands() {
+        let text = local_pipeline_guide_prompt();
+
+        assert!(text.contains(
+            "previa up --context <context> --detach --import <path> --stack <stack-name>"
+        ));
+        assert!(text.contains(
+            "previa export pipelines --context <context> --project <project-id-or-name> --output-dir <dir>"
+        ));
+        assert!(text.contains("run_project_e2e_test"));
+        assert!(text.contains("run_project_load_test"));
+        assert!(text.contains(".previa.yaml"));
+    }
+
+    #[test]
     fn legacy_pipeline_creation_prompt_alias_is_still_available() {
         let prompt = prompt_result("pipeline_creation_specialist")
             .expect("legacy pipeline creation prompt result");
@@ -2961,6 +3042,7 @@ mod tests {
             "pipeline_failure_triage",
             "openapi_spec_ingestion_advisor",
             "pipeline_repair_planner",
+            "local_pipeline_guide",
             "load_test_designer",
             "queue_orchestrator",
             "http_probe_assistant",
@@ -2982,6 +3064,7 @@ mod tests {
             ("pipeline_failure_triage", "get_e2e_test"),
             ("openapi_spec_ingestion_advisor", "validate_openapi"),
             ("pipeline_repair_planner", "get_project_pipeline"),
+            ("local_pipeline_guide", "previa export pipelines"),
             ("load_test_designer", "run_project_load_test"),
             ("queue_orchestrator", "create_project_e2e_queue"),
             ("http_probe_assistant", "proxy_request"),
