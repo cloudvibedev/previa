@@ -128,7 +128,9 @@ Notes:
 - detached mode writes runtime state and unlocks `status`, `logs`, `ps`, `restart`, and `down`
 - `--dry-run` cannot be combined with `--detach`
 - `--version` is not used with `--bin`
-- when `--bin` cannot find local runtime binaries, `previa` can bootstrap them into `PREVIA_HOME/bin`
+- with `--bin`, runtime binary resolution prefers `<workspace>/target/debug`, then `<workspace>/target/release`, and only then `PREVIA_HOME/bin`
+- when `--bin` cannot find a compatible local runtime binary in any of those locations, `previa` can bootstrap one into `PREVIA_HOME/bin`
+- if a workspace build exists, an older copy in `PREVIA_HOME/bin` is ignored in favor of the workspace binary
 - when only local runners are used and `RUNNER_AUTH_KEY` is missing, `previa up` generates one automatically
 - when `--attach-runner` is used, `RUNNER_AUTH_KEY` is required
 - on macOS and Windows, the control binary is supported but `previa up` does not expose `--bin`
