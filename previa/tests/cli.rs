@@ -912,12 +912,14 @@ fn setup_fake_binaries_with_protected_runner(temp: &TempDir) {
 
 fn docker_env(temp: &TempDir, command: &mut Command) {
     command
+        .current_dir(temp.path())
         .env("PREVIA_HOME", temp.path())
         .env("PATH", prepend_path(&temp.path().join("docker-bin")));
 }
 
 fn docker_env_with_previa_home(preview_home: &Path, docker_root: &TempDir, command: &mut Command) {
     command
+        .current_dir(docker_root.path())
         .env("PREVIA_HOME", preview_home)
         .env("PATH", prepend_path(&docker_root.path().join("docker-bin")));
 }

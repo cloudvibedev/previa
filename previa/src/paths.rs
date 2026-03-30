@@ -155,7 +155,7 @@ fn binary_candidates(
     workspace_root: Option<&Path>,
     binary_name: &str,
 ) -> Result<Vec<PathBuf>> {
-    let mut candidates = vec![home.join("bin").join(binary_name)];
+    let mut candidates = Vec::new();
 
     let discovered_workspace_root = match workspace_root {
         Some(path) => Some(path.to_path_buf()),
@@ -166,6 +166,8 @@ fn binary_candidates(
         candidates.push(workspace_root.join("target/debug").join(binary_name));
         candidates.push(workspace_root.join("target/release").join(binary_name));
     }
+
+    candidates.push(home.join("bin").join(binary_name));
 
     candidates.dedup();
     Ok(candidates)
@@ -203,23 +205,23 @@ mod tests {
     }
 
     #[test]
-    fn binary_candidates_prioritize_previa_home_before_targets() {
+    fn binary_candidates_prioritize_workspace_targets_before_previa_home() {
         let home = PathBuf::from("/tmp/previa-home");
         let workspace_root = PathBuf::from("/tmp/workspace");
         let candidates =
             binary_candidates(&home, Some(&workspace_root), "previa-main").expect("candidates");
         assert_eq!(
             candidates[0],
-            PathBuf::from("/tmp/previa-home/bin/previa-main")
+            PathBuf::from("/tmp/workspace/target/debug/previa-main")
         );
         if candidates.len() >= 3 {
             assert_eq!(
                 candidates[1],
-                PathBuf::from("/tmp/workspace/target/debug/previa-main")
+                PathBuf::from("/tmp/workspace/target/release/previa-main")
             );
             assert_eq!(
                 candidates[2],
-                PathBuf::from("/tmp/workspace/target/release/previa-main")
+                PathBuf::from("/tmp/previa-home/bin/previa-main")
             );
         }
     }
