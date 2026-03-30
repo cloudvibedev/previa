@@ -36,13 +36,14 @@ use crate::server::mcp::models::{
     ListProjectsToolArgs, McpPeerInfo, McpRequest, McpResponse, McpSession, ProjectByIdArgs,
     ProjectHistoryToolArgs, ProjectPipelineByIdArgs, ProjectQueueByIdArgs, ProjectSpecByIdArgs,
     ProjectTestByIdArgs, PromptDefinition, PromptGetParams, PromptGetResult, PromptMessage,
-    PromptTextContent, PromptsListParams, ProxyToolArgs, RunProjectE2eTestArgs,
-    RunProjectLoadTestArgs, SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult,
-    ToolDefinition, ToolTextContent, ToolsListParams, UpdateProjectArgs, UpdateProjectPipelineArgs,
-    UpdateProjectSpecArgs, ValidateOpenApiToolArgs,
+    PromptTextContent, PromptsListParams, ProxyToolArgs, ResourceContents, ResourceDefinition,
+    ResourceReadParams, ResourcesListParams, RunProjectE2eTestArgs, RunProjectLoadTestArgs,
+    SUPPORTED_PROTOCOL_VERSIONS, ToolCallParams, ToolCallResult, ToolDefinition, ToolTextContent,
+    ToolsListParams, UpdateProjectArgs, UpdateProjectPipelineArgs, UpdateProjectSpecArgs,
+    ValidateOpenApiToolArgs,
 };
 use crate::server::models::{
-    E2eTestRequest, HistoryQuery, LoadTestRequest, OrchestratorInfoResponse,
+    E2eTestRequest, HistoryOrder, HistoryQuery, LoadTestRequest, OrchestratorInfoResponse,
     ProjectE2eQueueRequest, ProjectExportEnvelope, ProjectListQuery, ProxyRequest,
 };
 use crate::server::services::pipeline_runtime::build_project_pipeline_record;
@@ -181,6 +182,94 @@ pub async fn process_request(
                 ),
                 session_id: session_id.map(str::to_owned),
                 protocol_version: Some(session.protocol_version),
+            }
+        }
+        "resources/list" => {
+            let session = match require_session(state, session_id, protocol_version_header).await {
+                Ok(session) => session,
+                Err(response) => {
+                    return McpHttpOutcome::Response {
+                        response,
+                        session_id: None,
+                        protocol_version: None,
+                    };
+                }
+            };
+            let params = match parse_optional_params::<ResourcesListParams>(request.params) {
+                Ok(params) => params,
+                Err(response) => {
+                    return McpHttpOutcome::Response {
+                        response: McpResponse::error(Some(request_id), INVALID_PARAMS, response),
+                        session_id: session_id.map(str::to_owned),
+                        protocol_version: Some(session.protocol_version),
+                    };
+                }
+            };
+            let _ = params.meta.as_ref();
+            if params.cursor.is_some() {
+                return McpHttpOutcome::Response {
+                    response: McpResponse::error(
+                        Some(request_id),
+                        INVALID_PARAMS,
+                        "cursor pagination is not supported",
+                    ),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                };
+            }
+
+            match list_resources(state).await {
+                Ok(resources) => McpHttpOutcome::Response {
+                    response: McpResponse::success(request_id, json!({ "resources": resources })),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                },
+                Err(message) => McpHttpOutcome::Response {
+                    response: McpResponse::error(Some(request_id), INTERNAL_ERROR, message),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                },
+            }
+        }
+        "resources/read" => {
+            let session = match require_session(state, session_id, protocol_version_header).await {
+                Ok(session) => session,
+                Err(response) => {
+                    return McpHttpOutcome::Response {
+                        response,
+                        session_id: None,
+                        protocol_version: None,
+                    };
+                }
+            };
+            let params = match parse_params::<ResourceReadParams>(request.params) {
+                Ok(params) => params,
+                Err(message) => {
+                    return McpHttpOutcome::Response {
+                        response: McpResponse::error(Some(request_id), INVALID_PARAMS, message),
+                        session_id: session_id.map(str::to_owned),
+                        protocol_version: Some(session.protocol_version),
+                    };
+                }
+            };
+            let _ = params.meta.as_ref();
+
+            match read_resource(state, &params.uri).await {
+                Ok(contents) => McpHttpOutcome::Response {
+                    response: McpResponse::success(request_id, json!({ "contents": [contents] })),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                },
+                Err(ResourceReadError::NotFound(message)) => McpHttpOutcome::Response {
+                    response: McpResponse::error(Some(request_id), INVALID_PARAMS, message),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                },
+                Err(ResourceReadError::Internal(message)) => McpHttpOutcome::Response {
+                    response: McpResponse::error(Some(request_id), INTERNAL_ERROR, message),
+                    session_id: session_id.map(str::to_owned),
+                    protocol_version: Some(session.protocol_version),
+                },
             }
         }
         "prompts/get" => {
@@ -348,6 +437,10 @@ async fn handle_initialize(
                     "prompts": {
                         "listChanged": false
                     },
+                    "resources": {
+                        "listChanged": false,
+                        "subscribe": false
+                    },
                     "tools": {
                         "listChanged": false
                     }
@@ -363,6 +456,283 @@ async fn handle_initialize(
         session_id: Some(session_id),
         protocol_version: Some(params.protocol_version),
     }
+}
+
+#[derive(Debug)]
+enum ResourceReadError {
+    NotFound(String),
+    Internal(String),
+}
+
+async fn list_resources(state: &AppState) -> Result<Vec<ResourceDefinition>, String> {
+    let projects = list_project_records(
+        &state.db,
+        ProjectListQuery {
+            limit: Some(500),
+            offset: Some(0),
+            order: Some(HistoryOrder::Desc),
+        },
+    )
+    .await
+    .map_err(|err| format!("failed to list projects for resources: {err}"))?;
+
+    let mut resources = vec![ResourceDefinition {
+        uri: "previa://openapi".to_owned(),
+        name: "openapi".to_owned(),
+        title: Some("OpenAPI Document".to_owned()),
+        description: Some("Current orchestrator OpenAPI document.".to_owned()),
+        mime_type: Some("application/json".to_owned()),
+    }];
+
+    for project in projects {
+        resources.push(ResourceDefinition {
+            uri: project_resource_uri(&project.id),
+            name: format!("project-{}", project.id),
+            title: Some(project.name.clone()),
+            description: Some("Project metadata record.".to_owned()),
+            mime_type: Some("application/json".to_owned()),
+        });
+        resources.push(ResourceDefinition {
+            uri: project_pipelines_resource_uri(&project.id),
+            name: format!("project-{}-pipelines", project.id),
+            title: Some(format!("{} Pipelines", project.name)),
+            description: Some("Saved pipelines for the project.".to_owned()),
+            mime_type: Some("application/json".to_owned()),
+        });
+        resources.push(ResourceDefinition {
+            uri: project_specs_resource_uri(&project.id),
+            name: format!("project-{}-specs", project.id),
+            title: Some(format!("{} Specs", project.name)),
+            description: Some("Saved OpenAPI specs for the project.".to_owned()),
+            mime_type: Some("application/json".to_owned()),
+        });
+
+        let pipelines = load_pipelines_for_project(&state.db, &project.id)
+            .await
+            .map_err(|err| format!("failed to list project pipelines for resources: {err}"))?;
+        for (index, pipeline) in pipelines.iter().enumerate() {
+            let segment = pipeline_resource_segment(pipeline, index);
+            resources.push(ResourceDefinition {
+                uri: format!(
+                    "{}/{}",
+                    project_pipelines_resource_uri(&project.id),
+                    segment
+                ),
+                name: format!("project-{}-pipeline-{}", project.id, segment),
+                title: Some(pipeline.name.clone()),
+                description: Some("Saved pipeline definition.".to_owned()),
+                mime_type: Some("application/json".to_owned()),
+            });
+        }
+
+        let specs = list_project_spec_records(&state.db, &project.id)
+            .await
+            .map_err(|err| format!("failed to list project specs for resources: {err}"))?;
+        for spec in specs {
+            resources.push(ResourceDefinition {
+                uri: format!("{}/{}", project_specs_resource_uri(&project.id), spec.id),
+                name: format!("project-{}-spec-{}", project.id, spec.id),
+                title: spec
+                    .slug
+                    .clone()
+                    .or_else(|| spec.url.clone())
+                    .or_else(|| Some(spec.id.clone())),
+                description: Some("Saved project spec record.".to_owned()),
+                mime_type: Some("application/json".to_owned()),
+            });
+        }
+    }
+
+    Ok(resources)
+}
+
+async fn read_resource(state: &AppState, uri: &str) -> Result<ResourceContents, ResourceReadError> {
+    if uri == "previa://openapi" {
+        let document = build_openapi_document();
+        return json_resource(uri, &document).map_err(|err| {
+            ResourceReadError::Internal(format!("failed to encode resource: {err}"))
+        });
+    }
+
+    let path = uri
+        .strip_prefix("previa://")
+        .ok_or_else(|| ResourceReadError::NotFound(format!("resource '{uri}' is not available")))?;
+    let segments = path.split('/').collect::<Vec<_>>();
+
+    match segments.as_slice() {
+        ["projects", project_id] => {
+            let project = load_project_record(&state.db, project_id)
+                .await
+                .map_err(|err| {
+                    ResourceReadError::Internal(format!("failed to load project resource: {err}"))
+                })?
+                .ok_or_else(|| {
+                    ResourceReadError::NotFound(format!("project resource '{uri}' was not found"))
+                })?;
+            json_resource(uri, &project).map_err(|err| {
+                ResourceReadError::Internal(format!("failed to encode resource: {err}"))
+            })
+        }
+        ["projects", project_id, "pipelines"] => {
+            if !project_exists(&state.db, project_id).await.map_err(|err| {
+                ResourceReadError::Internal(format!("failed to verify project resource: {err}"))
+            })? {
+                return Err(ResourceReadError::NotFound(format!(
+                    "project resource '{uri}' was not found"
+                )));
+            }
+            let pipelines = load_pipelines_for_project(&state.db, project_id)
+                .await
+                .map_err(|err| {
+                    ResourceReadError::Internal(format!("failed to load pipeline resources: {err}"))
+                })?;
+            json_resource(uri, &pipelines).map_err(|err| {
+                ResourceReadError::Internal(format!("failed to encode resource: {err}"))
+            })
+        }
+        ["projects", project_id, "pipelines", pipeline_ref] => {
+            if !project_exists(&state.db, project_id).await.map_err(|err| {
+                ResourceReadError::Internal(format!("failed to verify project resource: {err}"))
+            })? {
+                return Err(ResourceReadError::NotFound(format!(
+                    "project pipeline resource '{uri}' was not found"
+                )));
+            }
+            let pipeline = load_pipeline_resource(state, project_id, pipeline_ref).await?;
+            json_resource(uri, &pipeline).map_err(|err| {
+                ResourceReadError::Internal(format!("failed to encode resource: {err}"))
+            })
+        }
+        ["projects", project_id, "specs"] => {
+            if !project_exists(&state.db, project_id).await.map_err(|err| {
+                ResourceReadError::Internal(format!("failed to verify project resource: {err}"))
+            })? {
+                return Err(ResourceReadError::NotFound(format!(
+                    "project resource '{uri}' was not found"
+                )));
+            }
+            let specs = list_project_spec_records(&state.db, project_id)
+                .await
+                .map_err(|err| {
+                    ResourceReadError::Internal(format!("failed to load spec resources: {err}"))
+                })?;
+            json_resource(uri, &specs).map_err(|err| {
+                ResourceReadError::Internal(format!("failed to encode resource: {err}"))
+            })
+        }
+        ["projects", project_id, "specs", spec_id] => {
+            let spec = load_project_spec_record_by_id(&state.db, project_id, spec_id)
+                .await
+                .map_err(|err| {
+                    ResourceReadError::Internal(format!("failed to load spec resource: {err}"))
+                })?
+                .ok_or_else(|| {
+                    ResourceReadError::NotFound(format!(
+                        "project spec resource '{uri}' was not found"
+                    ))
+                })?;
+            json_resource(uri, &spec).map_err(|err| {
+                ResourceReadError::Internal(format!("failed to encode resource: {err}"))
+            })
+        }
+        _ => Err(ResourceReadError::NotFound(format!(
+            "resource '{uri}' is not available"
+        ))),
+    }
+}
+
+async fn load_pipeline_resource(
+    state: &AppState,
+    project_id: &str,
+    pipeline_ref: &str,
+) -> Result<Pipeline, ResourceReadError> {
+    if let Some(id) = pipeline_ref.strip_prefix("id:") {
+        return load_project_pipeline_record(&state.db, project_id, id)
+            .await
+            .map_err(|err| {
+                ResourceReadError::Internal(format!("failed to load pipeline resource: {err}"))
+            })?
+            .ok_or_else(|| {
+                ResourceReadError::NotFound(format!(
+                    "project pipeline resource '{}' was not found",
+                    format!(
+                        "{}/{}",
+                        project_pipelines_resource_uri(project_id),
+                        pipeline_ref
+                    )
+                ))
+            });
+    }
+
+    if let Some(index) = pipeline_ref.strip_prefix("index:") {
+        let index = index.parse::<usize>().map_err(|_| {
+            ResourceReadError::NotFound(format!(
+                "project pipeline resource '{}' was not found",
+                format!(
+                    "{}/{}",
+                    project_pipelines_resource_uri(project_id),
+                    pipeline_ref
+                )
+            ))
+        })?;
+        let pipelines = load_pipelines_for_project(&state.db, project_id)
+            .await
+            .map_err(|err| {
+                ResourceReadError::Internal(format!("failed to load pipeline resources: {err}"))
+            })?;
+        return pipelines.get(index).cloned().ok_or_else(|| {
+            ResourceReadError::NotFound(format!(
+                "project pipeline resource '{}' was not found",
+                format!(
+                    "{}/{}",
+                    project_pipelines_resource_uri(project_id),
+                    pipeline_ref
+                )
+            ))
+        });
+    }
+
+    Err(ResourceReadError::NotFound(format!(
+        "project pipeline resource '{}' was not found",
+        format!(
+            "{}/{}",
+            project_pipelines_resource_uri(project_id),
+            pipeline_ref
+        )
+    )))
+}
+
+fn json_resource(
+    uri: &str,
+    value: &impl serde::Serialize,
+) -> Result<ResourceContents, serde_json::Error> {
+    Ok(ResourceContents {
+        uri: uri.to_owned(),
+        mime_type: Some("application/json".to_owned()),
+        text: serde_json::to_string_pretty(value)?,
+    })
+}
+
+fn project_resource_uri(project_id: &str) -> String {
+    format!("previa://projects/{project_id}")
+}
+
+fn project_pipelines_resource_uri(project_id: &str) -> String {
+    format!("{}/pipelines", project_resource_uri(project_id))
+}
+
+fn project_specs_resource_uri(project_id: &str) -> String {
+    format!("{}/specs", project_resource_uri(project_id))
+}
+
+fn pipeline_resource_segment(pipeline: &Pipeline, index: usize) -> String {
+    pipeline
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| format!("id:{id}"))
+        .unwrap_or_else(|| format!("index:{index}"))
 }
 
 async fn require_session(

@@ -155,14 +155,21 @@ mod tests {
 
     use axum::body::{Body, to_bytes};
     use axum::http::{HeaderValue, Method, Request, StatusCode};
+    use previa_runner::{Pipeline, PipelineStep};
     use reqwest::Client;
     use serde_json::Value;
     use sqlx::sqlite::SqlitePoolOptions;
     use tokio::sync::RwLock;
     use tower::ServiceExt;
 
+    use crate::server::db::{
+        insert_project_pipeline, insert_project_spec_record, upsert_project_metadata,
+    };
     use crate::server::execution::ExecutionScheduler;
     use crate::server::mcp::models::McpConfig;
+    use crate::server::models::{
+        ProjectMetadataUpsertRequest, ProjectSpecUpsertRequest, SpecUrlEntry,
+    };
     use crate::server::state::AppState;
 
     use super::build_app;
@@ -173,6 +180,10 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("sqlite memory db");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations");
         let state = AppState {
             client: Client::new(),
             db,
@@ -193,6 +204,49 @@ mod tests {
                 path: "/mcp".to_owned(),
             },
         )
+    }
+
+    async fn initialize_mcp_session(app: &axum::Router) -> String {
+        let initialize = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"codex-test","version":"1.0"}}}"#,
+                    ))
+                    .expect("initialize request"),
+            )
+            .await
+            .expect("initialize response");
+
+        assert_eq!(initialize.status(), StatusCode::OK);
+        let session_id = initialize
+            .headers()
+            .get("mcp-session-id")
+            .expect("session header")
+            .to_str()
+            .expect("session header utf8")
+            .to_owned();
+        let body = to_bytes(initialize.into_body(), usize::MAX)
+            .await
+            .expect("read initialize body");
+        let payload: Value = serde_json::from_slice(&body).expect("parse initialize body");
+        assert_eq!(
+            payload["result"]["capabilities"]["resources"]["listChanged"],
+            Value::Bool(false)
+        );
+
+        payload["result"]
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .expect("protocol version");
+
+        payload.get("id").expect("response id");
+
+        session_id
     }
 
     #[tokio::test]
@@ -271,29 +325,7 @@ mod tests {
     async fn mcp_initialize_then_tools_list_returns_ok() {
         let app = test_app(true).await;
 
-        let initialize = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/mcp")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"codex-test","version":"1.0"}}}"#,
-                    ))
-                    .expect("initialize request"),
-            )
-            .await
-            .expect("initialize response");
-
-        assert_eq!(initialize.status(), StatusCode::OK);
-        let session_id = initialize
-            .headers()
-            .get("mcp-session-id")
-            .expect("session header")
-            .to_str()
-            .expect("session header utf8")
-            .to_owned();
+        let session_id = initialize_mcp_session(&app).await;
 
         let response = app
             .oneshot(
@@ -316,10 +348,234 @@ mod tests {
             .await
             .expect("read tools/list body");
         let payload: Value = serde_json::from_slice(&body).expect("parse tools/list body");
-        assert!(payload
-            .get("result")
-            .and_then(|result| result.get("tools"))
-            .and_then(Value::as_array)
-            .is_some());
+        assert!(
+            payload
+                .get("result")
+                .and_then(|result| result.get("tools"))
+                .and_then(Value::as_array)
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_resources_list_and_read_return_project_pipeline_and_spec_json() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("sqlite memory db");
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .expect("migrations");
+
+        upsert_project_metadata(
+            &db,
+            "project-1".to_owned(),
+            ProjectMetadataUpsertRequest {
+                name: "Users API".to_owned(),
+                description: Some("Project resource test".to_owned()),
+            },
+        )
+        .await
+        .expect("project upsert");
+        insert_project_pipeline(
+            &db,
+            "project-1",
+            Pipeline {
+                id: Some("pipe-1".to_owned()),
+                name: "Smoke".to_owned(),
+                description: Some("Smoke pipeline".to_owned()),
+                steps: vec![PipelineStep {
+                    id: "step-1".to_owned(),
+                    name: "Request".to_owned(),
+                    description: None,
+                    method: "GET".to_owned(),
+                    url: "https://example.com/health".to_owned(),
+                    headers: Default::default(),
+                    body: None,
+                    operation_id: None,
+                    delay: None,
+                    retry: None,
+                    asserts: Vec::new(),
+                }],
+            },
+        )
+        .await
+        .expect("pipeline insert");
+        let spec = insert_project_spec_record(
+            &db,
+            "project-1",
+            ProjectSpecUpsertRequest {
+                spec: serde_json::json!({
+                    "openapi": "3.1.0",
+                    "info": { "title": "Users API", "version": "1.0.0" },
+                    "paths": {}
+                }),
+                url: None,
+                slug: Some("users".to_owned()),
+                urls: vec![SpecUrlEntry {
+                    name: "dev".to_owned(),
+                    url: "https://dev.example.com".to_owned(),
+                    description: None,
+                }],
+                servers: Default::default(),
+                sync: false,
+                live: false,
+            },
+        )
+        .await
+        .expect("spec insert");
+
+        let app = build_app(
+            AppState {
+                client: Client::new(),
+                db,
+                context_name: "default".to_owned(),
+                runner_endpoints: Vec::new(),
+                runner_auth_key: None,
+                rps_per_node: 1000,
+                scheduler: ExecutionScheduler::new(Default::default()),
+                executions: Arc::new(RwLock::new(HashMap::new())),
+                e2e_queues: Arc::new(RwLock::new(HashMap::new())),
+                mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+            },
+            &McpConfig {
+                enabled: true,
+                path: "/mcp".to_owned(),
+            },
+        );
+
+        let session_id = initialize_mcp_session(&app).await;
+
+        let list_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .header("mcp-session-id", &session_id)
+                    .header("mcp-protocol-version", "2025-06-18")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}"#,
+                    ))
+                    .expect("resources/list request"),
+            )
+            .await
+            .expect("resources/list response");
+
+        assert_eq!(list_response.status(), StatusCode::OK);
+        let list_body = to_bytes(list_response.into_body(), usize::MAX)
+            .await
+            .expect("read resources/list body");
+        let list_payload: Value = serde_json::from_slice(&list_body).expect("parse resources/list");
+        let resources = list_payload["result"]["resources"]
+            .as_array()
+            .expect("resources array");
+        assert!(
+            resources
+                .iter()
+                .any(|resource| { resource["uri"] == "previa://openapi" })
+        );
+        assert!(
+            resources
+                .iter()
+                .any(|resource| { resource["uri"] == "previa://projects/project-1" })
+        );
+        assert!(resources.iter().any(|resource| {
+            resource["uri"] == "previa://projects/project-1/pipelines/id:pipe-1"
+        }));
+        assert!(resources.iter().any(|resource| {
+            resource["uri"] == format!("previa://projects/project-1/specs/{}", spec.id)
+        }));
+
+        let project_read = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .header("mcp-session-id", &session_id)
+                    .header("mcp-protocol-version", "2025-06-18")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"previa://projects/project-1"}}"#,
+                    ))
+                    .expect("project read request"),
+            )
+            .await
+            .expect("project read response");
+        assert_eq!(project_read.status(), StatusCode::OK);
+        let project_body = to_bytes(project_read.into_body(), usize::MAX)
+            .await
+            .expect("read project resource body");
+        let project_payload: Value =
+            serde_json::from_slice(&project_body).expect("parse project resource");
+        let project_text = project_payload["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("project resource text");
+        let project_json: Value =
+            serde_json::from_str(project_text).expect("parse embedded project json");
+        assert_eq!(project_json["id"], "project-1");
+        assert_eq!(project_json["name"], "Users API");
+
+        let pipeline_read = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .header("mcp-session-id", &session_id)
+                    .header("mcp-protocol-version", "2025-06-18")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"previa://projects/project-1/pipelines/id:pipe-1"}}"#,
+                    ))
+                    .expect("pipeline read request"),
+            )
+            .await
+            .expect("pipeline read response");
+        assert_eq!(pipeline_read.status(), StatusCode::OK);
+        let pipeline_body = to_bytes(pipeline_read.into_body(), usize::MAX)
+            .await
+            .expect("read pipeline resource body");
+        let pipeline_payload: Value =
+            serde_json::from_slice(&pipeline_body).expect("parse pipeline resource");
+        let pipeline_text = pipeline_payload["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("pipeline resource text");
+        let pipeline_json: Value =
+            serde_json::from_str(pipeline_text).expect("parse embedded pipeline json");
+        assert_eq!(pipeline_json["id"], "pipe-1");
+        assert_eq!(pipeline_json["name"], "Smoke");
+
+        let spec_uri = format!("previa://projects/project-1/specs/{}", spec.id);
+        let spec_read = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .header("mcp-session-id", &session_id)
+                    .header("mcp-protocol-version", "2025-06-18")
+                    .body(Body::from(format!(
+                        r#"{{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{{"uri":"{spec_uri}"}}}}"#
+                    )))
+                    .expect("spec read request"),
+            )
+            .await
+            .expect("spec read response");
+        assert_eq!(spec_read.status(), StatusCode::OK);
+        let spec_body = to_bytes(spec_read.into_body(), usize::MAX)
+            .await
+            .expect("read spec resource body");
+        let spec_payload: Value = serde_json::from_slice(&spec_body).expect("parse spec resource");
+        let spec_text = spec_payload["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("spec resource text");
+        let spec_json: Value = serde_json::from_str(spec_text).expect("parse embedded spec json");
+        assert_eq!(spec_json["id"], spec.id);
+        assert_eq!(spec_json["slug"], "users");
     }
 }

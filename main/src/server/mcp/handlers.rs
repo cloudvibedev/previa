@@ -108,9 +108,7 @@ fn response_status(response: &crate::server::mcp::models::McpResponse) -> Status
         return StatusCode::BAD_REQUEST;
     }
 
-    if error.code == INVALID_REQUEST
-        && error.message.starts_with("MCP-Protocol-Version header")
-    {
+    if error.code == INVALID_REQUEST && error.message.starts_with("MCP-Protocol-Version header") {
         return StatusCode::BAD_REQUEST;
     }
 

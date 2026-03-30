@@ -55,8 +55,23 @@ Today, the Previa MCP server exposes:
 
 - tools
 - prompts
+- resources via `resources/list` and `resources/read`
 
-It does not currently expose MCP `resources/list`, `resources/read`, or resource templates as a separate capability layer.
+It does not currently expose MCP resource templates as a separate capability layer.
+
+### Available Resources
+
+Today, `resources/list` includes:
+
+- `previa://openapi`
+- `previa://projects/<project-id>`
+- `previa://projects/<project-id>/pipelines`
+- `previa://projects/<project-id>/pipelines/id:<pipeline-id>`
+- `previa://projects/<project-id>/pipelines/index:<index>`
+- `previa://projects/<project-id>/specs`
+- `previa://projects/<project-id>/specs/<spec-id>`
+
+`resources/read` returns JSON content for these URIs, which makes project metadata, saved pipelines, specs, and the live OpenAPI document directly readable by MCP-aware clients such as Codex.
 
 ## Built-In Prompts
 
