@@ -51,8 +51,8 @@ Use `--bin` when:
 - `-d` is the short form of `--detach`
 - compose-backed mode uses the current CLI version tag by default unless `--version` is provided explicitly
 - `--version` applies to compose-backed runtimes, not `--bin`
-- `--bin` resolves binaries from `PREVIA_HOME/bin` before workspace targets
-- if a binary in `PREVIA_HOME/bin` does not match the current CLI version, `previa` replaces it automatically
+- `--bin` resolves binaries from workspace `target/debug`, then workspace `target/release`, and only then `PREVIA_HOME/bin`
+- if no compatible local binary exists in any of those locations, `previa` downloads one into `PREVIA_HOME/bin`
 
 ## See Also
 

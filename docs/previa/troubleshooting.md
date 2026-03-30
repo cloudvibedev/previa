@@ -91,16 +91,16 @@ This is a common source of confusion when using `--bin` inside the workspace.
 
 `previa` resolves local binaries from:
 
-1. `PREVIA_HOME/bin`
-2. workspace `target/debug`
-3. workspace `target/release`
+1. workspace `target/debug`
+2. workspace `target/release`
+3. `PREVIA_HOME/bin`
 
 By default, `previa up --bin` tries to keep `previa-main` and `previa-runner`
 aligned with the current CLI version. That means:
 
-- matching binaries under `PREVIA_HOME/bin` are reused
-- mismatched binaries under `PREVIA_HOME/bin` are replaced automatically
-- workspace binaries are still useful during active local development when they already match the current CLI version
+- matching workspace binaries are preferred when present
+- if no compatible workspace binary exists, a matching binary under `PREVIA_HOME/bin` is reused
+- if no compatible local binary exists anywhere, `previa` downloads one into `PREVIA_HOME/bin`
 
 Typical workaround:
 

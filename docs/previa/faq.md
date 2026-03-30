@@ -9,6 +9,10 @@ On macOS and Windows, the control binary is supported, but `--bin` is not expose
 
 Yes. If required runtime binaries are missing, `previa` downloads the exact `previa-main` and `previa-runner` version that matches the current CLI version and installs them under `PREVIA_HOME/bin`.
 
+When you run `previa up --bin` inside the workspace, it first looks for
+compatible binaries in `target/debug`, then `target/release`, and only then in
+`PREVIA_HOME/bin`.
+
 ## Why does `--attach-runner` require `RUNNER_AUTH_KEY`?
 
 Because `previa-main` must know the shared key in advance to authenticate against attached runner endpoints. Without that key, attached runners are not considered safe or usable.

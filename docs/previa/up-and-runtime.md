@@ -85,10 +85,20 @@ You need at least one runner source:
 `--bin` starts the locally resolved `previa-main` and `previa-runner` binaries
 instead of the published container images.
 
-This is Linux-only and useful for local development, but remember that `previa` resolves
-binaries from `PREVIA_HOME/bin` before falling back to workspace targets.
-When installed runtime binaries do not match the current CLI version, `previa`
-replaces them with matching binaries automatically.
+This is Linux-only and useful for local development.
+
+When you run `previa up --bin` inside the workspace, runtime binary resolution
+now prefers:
+
+1. workspace `target/debug`
+2. workspace `target/release`
+3. `PREVIA_HOME/bin`
+
+This means a fresh local build in the workspace takes precedence over an older
+copy already installed under `PREVIA_HOME/bin`.
+
+When no compatible local binary exists in any of those locations, `previa`
+downloads a matching runtime into `PREVIA_HOME/bin`.
 
 ## `RUNNER_AUTH_KEY`
 
