@@ -3,6 +3,7 @@ main:
   address: 0.0.0.0
   port: 5588
   env:
+    MCP_ENABLED: "true"
     RUST_LOG: info
 runners:
   local:
