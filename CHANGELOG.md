@@ -2,6 +2,27 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.12] - 2026-03-30
+
+### Features
+- Add MCP resource support (bd81d5c)
+- Update MCP handlers and add response status logic chore: bump version to 1.0.0-alpha.12 (0e1640a)
+- Add previa init command (572390b)
+
+### Bug Fixes
+- Prefer workspace binaries for --bin (700db44)
+- Support codex MCP protocol version (cafd78e)
+- Prefer local matching runtime binaries (673fc73)
+
+### Documentation
+- Clarify --bin binary resolution order (82c4007)
+- Document bin runtime resolution order (aa92be6)
+
+### Other Changes
+- Enable MCP in default local compose config (85e03a5)
+
+Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.11...v1.0.0-alpha.12
+
 ## [v1.0.0-alpha.11] - 2026-03-24
 
 ### Documentation
