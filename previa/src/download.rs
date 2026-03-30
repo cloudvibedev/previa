@@ -179,23 +179,11 @@ async fn download_binary(
 
 fn should_install_binary(paths: &PreviaPaths, binary_name: &str) -> Result<bool> {
     let expected_version = current_release_version();
-    let install_path = binary_install_path(paths, binary_name);
-    if install_path.exists() {
-        return Ok(!binary_matches_version(&install_path, expected_version));
-    }
-
-    match resolved_binary_path(paths, binary_name) {
-        Ok(path) => Ok(!binary_matches_version(&path, expected_version)),
-        Err(_) => Ok(true),
-    }
-}
-
-fn resolved_binary_path(paths: &PreviaPaths, binary_name: &str) -> Result<PathBuf> {
-    match binary_name {
-        "previa-main" => paths.main_binary(),
-        "previa-runner" => paths.runner_binary(),
-        other => bail!("unsupported auto-download binary '{other}'"),
-    }
+    let candidates = paths.binary_candidates(binary_name)?;
+    Ok(!candidates
+        .iter()
+        .filter(|path| path.exists())
+        .any(|path| binary_matches_version(path, expected_version)))
 }
 
 fn binary_matches_version(path: &Path, expected_version: &str) -> bool {
@@ -585,12 +573,41 @@ exit 1
 
     #[test]
     fn install_replaces_existing_home_binary_when_version_differs() {
+        let (temp, paths) = temp_paths();
+        let install_path = binary_install_path(&paths, "previa-main");
+        std::fs::create_dir_all(install_path.parent().expect("bin dir")).expect("bin dir");
+        write_version_script(&install_path, "previa-main", "0.0.7");
+
+        let paths = PreviaPaths {
+            home: paths.home.clone(),
+            workspace_root: Some(temp.path().join("isolated-workspace")),
+        };
+
+        assert!(should_install_binary(&paths, "previa-main").expect("should install"));
+    }
+
+    #[test]
+    fn install_is_skipped_when_workspace_binary_matches_even_if_home_binary_is_stale() {
         let (_temp, paths) = temp_paths();
         let install_path = binary_install_path(&paths, "previa-main");
         std::fs::create_dir_all(install_path.parent().expect("bin dir")).expect("bin dir");
         write_version_script(&install_path, "previa-main", "0.0.7");
 
-        assert!(should_install_binary(&paths, "previa-main").expect("should install"));
+        let workspace = TempDir::new().expect("workspace");
+        let debug_dir = workspace.path().join("target/debug");
+        std::fs::create_dir_all(&debug_dir).expect("debug dir");
+        write_version_script(
+            &debug_dir.join("previa-main"),
+            "previa-main",
+            current_release_version(),
+        );
+
+        let paths = PreviaPaths {
+            home: paths.home.clone(),
+            workspace_root: Some(workspace.path().to_path_buf()),
+        };
+
+        assert!(!should_install_binary(&paths, "previa-main").expect("should install"));
     }
 
     #[tokio::test]

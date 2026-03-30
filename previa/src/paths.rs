@@ -53,6 +53,10 @@ impl PreviaPaths {
         resolve_binary(&self.home, self.workspace_root.as_deref(), "previa-runner")
     }
 
+    pub(crate) fn binary_candidates(&self, binary_name: &str) -> Result<Vec<PathBuf>> {
+        binary_candidates(&self.home, self.workspace_root.as_deref(), binary_name)
+    }
+
     pub fn stack(&self, name: &str) -> StackPaths {
         let root = self.home.join("stacks").join(name);
         let config_dir = root.join("config");
