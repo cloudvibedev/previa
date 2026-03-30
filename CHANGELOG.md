@@ -15,6 +15,7 @@ All notable changes to Previa are documented in this file.
 - Prefer local matching runtime binaries (673fc73)
 
 ### Documentation
+- Changelog: update for v1.0.0-alpha.12 (d81de15)
 - Clarify --bin binary resolution order (82c4007)
 - Document bin runtime resolution order (aa92be6)
 
