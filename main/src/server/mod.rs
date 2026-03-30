@@ -32,7 +32,7 @@ use crate::server::handlers::tests_e2e_queue::{
 };
 use crate::server::handlers::tests_load::run_load_test_for_project;
 use crate::server::handlers::transfers::{export_project, import_pipelines, import_project};
-use crate::server::mcp::handlers::{delete_http_session, handle_http, preflight};
+use crate::server::mcp::handlers::{delete_http_session, get_http, handle_http, preflight};
 use crate::server::mcp::models::McpConfig;
 use crate::server::middleware::transaction::propagate_transaction_header;
 use crate::server::state::AppState;
@@ -128,7 +128,8 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
     if mcp_config.enabled {
         app = app.route(
             &mcp_config.path,
-            post(handle_http)
+            get(get_http)
+                .post(handle_http)
                 .delete(delete_http_session)
                 .options(preflight),
         );
@@ -152,9 +153,10 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    use axum::body::Body;
-    use axum::http::{HeaderValue, Method, Request};
+    use axum::body::{Body, to_bytes};
+    use axum::http::{HeaderValue, Method, Request, StatusCode};
     use reqwest::Client;
+    use serde_json::Value;
     use sqlx::sqlite::SqlitePoolOptions;
     use tokio::sync::RwLock;
     use tower::ServiceExt;
@@ -165,8 +167,7 @@ mod tests {
 
     use super::build_app;
 
-    #[tokio::test]
-    async fn proxy_preflight_allows_private_network_requests() {
+    async fn test_app(mcp_enabled: bool) -> axum::Router {
         let db = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -184,13 +185,19 @@ mod tests {
             e2e_queues: Arc::new(RwLock::new(HashMap::new())),
             mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
         };
-        let app = build_app(
+
+        build_app(
             state,
             &McpConfig {
-                enabled: false,
+                enabled: mcp_enabled,
                 path: "/mcp".to_owned(),
             },
-        );
+        )
+    }
+
+    #[tokio::test]
+    async fn proxy_preflight_allows_private_network_requests() {
+        let app = test_app(false).await;
 
         let response = app
             .oneshot(
@@ -219,5 +226,100 @@ mod tests {
                 .headers()
                 .contains_key("access-control-allow-origin")
         );
+    }
+
+    #[tokio::test]
+    async fn mcp_get_returns_method_not_allowed() {
+        let app = test_app(true).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/mcp")
+                    .body(Body::empty())
+                    .expect("mcp get request"),
+            )
+            .await
+            .expect("mcp get response");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_list_requires_session_header_with_http_400() {
+        let app = test_app(true).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#,
+                    ))
+                    .expect("mcp tools/list request"),
+            )
+            .await
+            .expect("mcp tools/list response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn mcp_initialize_then_tools_list_returns_ok() {
+        let app = test_app(true).await;
+
+        let initialize = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"codex-test","version":"1.0"}}}"#,
+                    ))
+                    .expect("initialize request"),
+            )
+            .await
+            .expect("initialize response");
+
+        assert_eq!(initialize.status(), StatusCode::OK);
+        let session_id = initialize
+            .headers()
+            .get("mcp-session-id")
+            .expect("session header")
+            .to_str()
+            .expect("session header utf8")
+            .to_owned();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .header("mcp-session-id", &session_id)
+                    .header("mcp-protocol-version", "2025-11-25")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+                    ))
+                    .expect("tools/list request"),
+            )
+            .await
+            .expect("tools/list response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read tools/list body");
+        let payload: Value = serde_json::from_slice(&body).expect("parse tools/list body");
+        assert!(payload
+            .get("result")
+            .and_then(|result| result.get("tools"))
+            .and_then(Value::as_array)
+            .is_some());
     }
 }

@@ -52,11 +52,11 @@ use crate::server::validation::openapi::validate_openapi_source;
 use crate::server::validation::pipelines::{KNOWN_TEMPLATE_HELPERS, validate_pipeline_templates};
 use crate::server::validation::specs::{normalize_spec_slug, normalize_spec_urls_with_legacy};
 
-const INVALID_REQUEST: i32 = -32600;
+pub(crate) const INVALID_REQUEST: i32 = -32600;
 const METHOD_NOT_FOUND: i32 = -32601;
 const INVALID_PARAMS: i32 = -32602;
 const INTERNAL_ERROR: i32 = -32603;
-const INVALID_SESSION: i32 = -32001;
+pub(crate) const INVALID_SESSION: i32 = -32001;
 
 pub enum McpHttpOutcome {
     Response {

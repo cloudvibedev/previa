@@ -5,7 +5,9 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use crate::server::mcp::models::McpRequest;
-use crate::server::mcp::service::{McpHttpOutcome, delete_session, process_request};
+use crate::server::mcp::service::{
+    INVALID_REQUEST, INVALID_SESSION, McpHttpOutcome, delete_session, process_request,
+};
 use crate::server::state::AppState;
 
 const MCP_SESSION_HEADER: &str = "mcp-session-id";
@@ -13,6 +15,10 @@ const MCP_PROTOCOL_HEADER: &str = "mcp-protocol-version";
 
 pub async fn preflight() -> StatusCode {
     StatusCode::NO_CONTENT
+}
+
+pub async fn get_http() -> StatusCode {
+    StatusCode::METHOD_NOT_ALLOWED
 }
 
 pub async fn handle_http(
@@ -47,7 +53,7 @@ pub async fn handle_http(
             session_id,
             protocol_version,
         } => with_headers(
-            StatusCode::OK,
+            response_status(&response),
             Json(response).into_response(),
             session_id.as_deref(),
             protocol_version.as_deref(),
@@ -88,4 +94,25 @@ fn with_headers(
             .insert(MCP_PROTOCOL_HEADER, protocol_version);
     }
     response
+}
+
+fn response_status(response: &crate::server::mcp::models::McpResponse) -> StatusCode {
+    let Some(error) = response.error.as_ref() else {
+        return StatusCode::OK;
+    };
+
+    if error.code == INVALID_SESSION {
+        if error.message == "unknown MCP session" {
+            return StatusCode::NOT_FOUND;
+        }
+        return StatusCode::BAD_REQUEST;
+    }
+
+    if error.code == INVALID_REQUEST
+        && error.message.starts_with("MCP-Protocol-Version header")
+    {
+        return StatusCode::BAD_REQUEST;
+    }
+
+    StatusCode::OK
 }
