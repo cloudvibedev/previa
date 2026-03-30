@@ -16,6 +16,7 @@ previa help up
 
 Current commands:
 
+- `init`
 - `up`
 - `pull`
 - `down`
@@ -49,6 +50,32 @@ Example:
 previa --home ./.previa up -d
 previa --home ./.previa status
 ```
+
+## `previa init`
+
+Creates a starter `previa-compose.yaml` in the current directory.
+
+```text
+previa init [OPTIONS]
+```
+
+Important options:
+
+- `--force`: overwrite an existing `previa-compose.yaml`
+
+Examples:
+
+```bash
+previa init
+previa init --force
+previa up -d .
+```
+
+Notes:
+
+- the command always writes `previa-compose.yaml` in the current working directory
+- by default it fails if the file already exists
+- the generated file is a valid compose source for `previa up`
 
 ## `previa up`
 

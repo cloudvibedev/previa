@@ -33,6 +33,7 @@ This is the main documentation index for Previa as an operator-facing platform a
 - [Operations cheatsheet](./operations-cheatsheet.md)
 - [Operations](./operations.md)
 - [Compose source](./compose.md)
+- [CLI commands](./cli-commands.md)
 - [Pipeline import](./pipeline-import.md)
 - [Troubleshooting](./troubleshooting.md)
 
@@ -42,8 +43,6 @@ This is the main documentation index for Previa as an operator-facing platform a
 - [API workflows](./api-workflows.md)
 
 ## Reference
-
-- [CLI commands](./cli-commands.md)
 - [Version compatibility](./version-compatibility.md)
 - [Security](./security.md)
 - [FAQ](./faq.md)

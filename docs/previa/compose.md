@@ -8,6 +8,12 @@ This guide documents the `previa-compose` input format used by `previa up`.
 - `previa-compose.yml`
 - `previa-compose.json`
 
+To create a starter YAML file in the current directory:
+
+```bash
+previa init
+```
+
 ## Using a Compose Source
 
 Examples:

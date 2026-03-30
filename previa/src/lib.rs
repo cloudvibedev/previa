@@ -6,6 +6,7 @@ mod download;
 mod envfile;
 mod export;
 mod health;
+mod init;
 mod logs;
 mod output;
 mod paths;
@@ -27,8 +28,8 @@ use tokio::time::sleep;
 
 use crate::browser::{build_open_url, open_browser};
 use crate::cli::{
-    Cli, Commands, DownArgs, ExportArgs, ExportTarget, LogsArgs, OpenArgs, PsArgs, PullArgs,
-    RestartArgs, StatusArgs, UpArgs,
+    Cli, Commands, DownArgs, ExportArgs, ExportTarget, InitArgs, LogsArgs, OpenArgs, PsArgs,
+    PullArgs, RestartArgs, StatusArgs, UpArgs,
 };
 use crate::compose::{
     ComposeProject, MAIN_SERVICE_NAME, ServiceInspect, compose_project_from_state,
@@ -40,6 +41,7 @@ use crate::export::export_pipelines;
 use crate::health::{
     DerivedState, probe_health, state_from_pid_and_health, state_from_running_and_health,
 };
+use crate::init::init_compose;
 use crate::logs::{follow_logs, print_logs};
 use crate::output::{
     ListEntryJson, ProcessJson, StatusJson, StatusProcessJson, print_list_human,
@@ -68,6 +70,7 @@ pub async fn run() -> Result<()> {
         .context("failed to build HTTP client")?;
 
     match cli.command {
+        Commands::Init(args) => cmd_init(args),
         Commands::Up(args) => cmd_up(&paths, &http, args).await,
         Commands::Pull(args) => cmd_pull(args).await,
         Commands::Down(args) => cmd_down(&paths, args).await,
@@ -83,6 +86,12 @@ pub async fn run() -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn cmd_init(args: InitArgs) -> Result<()> {
+    let path = init_compose(args.force)?;
+    println!("created '{}'", path.display());
+    Ok(())
 }
 
 async fn cmd_pull(args: PullArgs) -> Result<()> {

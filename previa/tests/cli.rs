@@ -1083,6 +1083,98 @@ fn version_accepts_global_home_override() {
 }
 
 #[test]
+fn init_creates_default_previa_compose_yaml() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut command = cargo_bin();
+    command.current_dir(temp.path());
+    command.args(["init"]);
+    command.assert().success();
+
+    let compose = temp.path().join("previa-compose.yaml");
+    assert!(compose.exists());
+    assert_eq!(
+        fs::read_to_string(&compose).expect("compose contents"),
+        r#"version: 1
+main:
+  address: 0.0.0.0
+  port: 5588
+runners:
+  local:
+    address: 127.0.0.1
+    count: 1
+    port_range:
+      start: 55880
+      end: 55889
+"#
+    );
+}
+
+#[test]
+fn init_refuses_to_overwrite_existing_previa_compose_yaml() {
+    let temp = TempDir::new().expect("tempdir");
+    let compose = temp.path().join("previa-compose.yaml");
+    fs::write(&compose, "version: 1\n").expect("seed compose");
+
+    let mut command = cargo_bin();
+    let output = command
+        .current_dir(temp.path())
+        .args(["init"])
+        .output()
+        .expect("init output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("already exists"));
+    assert_eq!(
+        fs::read_to_string(&compose).expect("compose contents"),
+        "version: 1\n"
+    );
+}
+
+#[test]
+fn init_force_overwrites_existing_previa_compose_yaml() {
+    let temp = TempDir::new().expect("tempdir");
+    let compose = temp.path().join("previa-compose.yaml");
+    fs::write(&compose, "old: true\n").expect("seed compose");
+
+    let mut command = cargo_bin();
+    command.current_dir(temp.path());
+    command.args(["init", "--force"]);
+    command.assert().success();
+
+    let contents = fs::read_to_string(&compose).expect("compose contents");
+    assert!(contents.contains("version: 1"));
+    assert!(contents.contains("count: 1"));
+    assert!(!contents.contains("old: true"));
+}
+
+#[test]
+fn init_generated_compose_is_usable_by_up_dry_run() {
+    let temp = setup_fake_docker();
+    let main_port = find_free_port();
+    let runner_port = find_free_port();
+    let mut init = cargo_bin();
+    init.current_dir(temp.path());
+    init.args(["init"]);
+    init.assert().success();
+
+    let mut up = cargo_bin();
+    docker_env(&temp, &mut up);
+    up.current_dir(temp.path())
+        .args([
+            "up",
+            "--dry-run",
+            "--main-port",
+            &main_port.to_string(),
+            "--runner-port-range",
+            &format!("{runner_port}:{runner_port}"),
+            ".",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
 fn up_bin_rejects_version_override() {
     let temp = setup_fake_docker();
     setup_fake_binaries(&temp);

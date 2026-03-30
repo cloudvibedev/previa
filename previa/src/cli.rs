@@ -27,6 +27,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    #[command(about = "Create a starter previa-compose.yaml in the current directory")]
+    Init(InitArgs),
     #[command(about = "Start a Previa context")]
     Up(UpArgs),
     #[command(about = "Pull published runtime images")]
@@ -49,6 +51,13 @@ pub enum Commands {
     Export(ExportArgs),
     #[command(about = "Print the CLI version")]
     Version,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Create a starter previa-compose.yaml in the current directory")]
+pub struct InitArgs {
+    #[arg(long = "force")]
+    pub force: bool,
 }
 
 #[derive(Debug, Args)]
