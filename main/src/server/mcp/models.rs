@@ -8,7 +8,7 @@ use crate::server::models::{
 };
 
 pub const JSON_RPC_VERSION: &str = "2.0";
-pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-03-26"];
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
 
 #[derive(Debug, Clone)]
 pub struct McpConfig {

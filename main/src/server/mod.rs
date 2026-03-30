@@ -279,7 +279,7 @@ mod tests {
                     .uri("/mcp")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"codex-test","version":"1.0"}}}"#,
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"codex-test","version":"1.0"}}}"#,
                     ))
                     .expect("initialize request"),
             )
@@ -302,7 +302,7 @@ mod tests {
                     .uri("/mcp")
                     .header("content-type", "application/json")
                     .header("mcp-session-id", &session_id)
-                    .header("mcp-protocol-version", "2025-11-25")
+                    .header("mcp-protocol-version", "2025-06-18")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
                     ))
