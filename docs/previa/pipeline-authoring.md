@@ -56,6 +56,118 @@ Previa supports these template roots:
 
 Do not invent unsupported roots such as `{{env.*}}`, `{{project.*}}`, or `{{run.*}}`.
 
+## Helpers and Template Variables
+
+Template expressions are resolved inside string values across the pipeline, including:
+
+- `url`
+- `headers`
+- `body`
+- assertion `expected`
+
+Use each root for a different job:
+
+- `{{specs.<slug>.url.<name>}}` for reusable base URLs
+- `{{steps.<step_id>.<field>}}` for values returned by earlier steps
+- `{{helpers.*}}` for generated inline test data
+
+### Use Specs for Base URLs
+
+Use spec URLs when the same pipeline should run in more than one environment.
+
+Example spec:
+
+```json
+{
+  "slug": "users",
+  "urls": [
+    { "name": "local", "url": "http://127.0.0.1:3000" },
+    { "name": "hml", "url": "https://hml.example.com" }
+  ]
+}
+```
+
+Example pipeline usage:
+
+```yaml
+steps:
+  - id: list_users
+    name: List users
+    method: GET
+    url: "{{specs.users.url.hml}}/users"
+    headers: {}
+    asserts:
+      - field: status
+        operator: equals
+        expected: "200"
+```
+
+Prefer `{{specs.<slug>.url.<name>}}` over repeating full URLs in every step.
+Legacy `{{url.<slug>.<name>}}` expressions are normalized internally, but new pipelines should use `specs.*`.
+
+### Use Step Outputs as Variables
+
+`steps.*` references values from the response body of a previous step. This is the main way to carry runtime data forward through a pipeline.
+
+```yaml
+steps:
+  - id: create_user
+    name: Create user
+    method: POST
+    url: "{{specs.users.url.hml}}/users"
+    headers:
+      content-type: application/json
+    body:
+      name: "{{helpers.name}}"
+      email: "{{helpers.email}}"
+    asserts:
+      - field: status
+        operator: equals
+        expected: "201"
+
+  - id: get_user
+    name: Get created user
+    method: GET
+    url: "{{specs.users.url.hml}}/users/{{steps.create_user.id}}"
+    headers: {}
+    asserts:
+      - field: body.email
+        operator: equals
+        expected: "{{steps.create_user.email}}"
+```
+
+If a value must appear again later, prefer reading it from `steps.*` instead of calling the same helper twice.
+
+### Use Helpers for Inline Test Data
+
+Helpers generate values at render time:
+
+- `{{helpers.uuid}}`
+- `{{helpers.email}}`
+- `{{helpers.name}}`
+- `{{helpers.username}}`
+- `{{helpers.number 10 99}}`
+- `{{helpers.date}}`
+- `{{helpers.boolean}}`
+- `{{helpers.cpf}}`
+
+Common usage:
+
+```yaml
+headers:
+  x-request-id: "{{helpers.uuid}}"
+body:
+  name: "{{helpers.name}}"
+  email: "{{helpers.email}}"
+```
+
+Important notes:
+
+- helpers generate inline values, not named variables
+- each helper expression is resolved independently
+- if the same generated value is needed later, capture it through a step response and reference it with `steps.*`
+- helper substitutions are string-based, so write assertions and payloads with that behavior in mind
+
 ## Chaining Steps
 
 Use outputs from earlier steps to build later requests:
