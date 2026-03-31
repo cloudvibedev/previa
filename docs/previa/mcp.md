@@ -39,6 +39,42 @@ http://localhost:5588/mcp
 
 If you override the main port or `MCP_PATH`, update the URL accordingly.
 
+## `previa mcp`
+
+The CLI can help wire the Previa MCP endpoint into supported clients:
+
+```bash
+previa mcp install codex --context default
+previa mcp status codex
+previa mcp print claude-code --context default
+previa mcp uninstall cursor --scope project
+```
+
+Current target matrix for the Linux-first release:
+
+- `codex`
+  Global: `~/.codex/config.toml`
+  Project: `.codex/config.toml`
+
+- `cursor`
+  Global: `~/.cursor/mcp.json`
+  Project: `.cursor/mcp.json`
+
+- `copilot-vscode`
+  Global: `~/.config/Code/User/mcp.json`
+  Project: `.vscode/mcp.json`
+
+- `claude-code`
+  Managed through the external `claude mcp ...` CLI with global and project scope support.
+
+- `warp`
+  Global only in this version.
+  Previa writes an Oz-compatible JSON file under `PREVIA_HOME/clients/warp/`.
+
+- `claude-desktop`
+  Manual-only in this version.
+  Use `previa mcp print claude-desktop` for the URL and guidance.
+
 ## Codex Example
 
 ```toml

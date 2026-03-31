@@ -8,6 +8,7 @@ mod export;
 mod health;
 mod init;
 mod logs;
+mod mcp_cli;
 mod output;
 mod paths;
 mod pipeline_import;
@@ -28,8 +29,8 @@ use tokio::time::sleep;
 
 use crate::browser::{build_open_url, open_browser};
 use crate::cli::{
-    Cli, Commands, DownArgs, ExportArgs, ExportTarget, InitArgs, LogsArgs, OpenArgs, PsArgs,
-    PullArgs, RestartArgs, StatusArgs, UpArgs,
+    Cli, Commands, DownArgs, ExportArgs, ExportTarget, InitArgs, LogsArgs, McpArgs, OpenArgs,
+    PsArgs, PullArgs, RestartArgs, StatusArgs, UpArgs,
 };
 use crate::compose::{
     ComposeProject, MAIN_SERVICE_NAME, ServiceInspect, compose_project_from_state,
@@ -43,6 +44,7 @@ use crate::health::{
 };
 use crate::init::init_compose;
 use crate::logs::{follow_logs, print_logs};
+use crate::mcp_cli::run_mcp;
 use crate::output::{
     ListEntryJson, ProcessJson, StatusJson, StatusProcessJson, print_list_human,
     print_process_rows, print_status_human,
@@ -72,6 +74,7 @@ pub async fn run() -> Result<()> {
     match cli.command {
         Commands::Init(args) => cmd_init(args),
         Commands::Up(args) => cmd_up(&paths, &http, args).await,
+        Commands::Mcp(args) => cmd_mcp(&paths, &http, args).await,
         Commands::Pull(args) => cmd_pull(args).await,
         Commands::Down(args) => cmd_down(&paths, args).await,
         Commands::Restart(args) => cmd_restart(&paths, &http, args).await,
@@ -92,6 +95,10 @@ fn cmd_init(args: InitArgs) -> Result<()> {
     let path = init_compose(args.force)?;
     println!("created '{}'", path.display());
     Ok(())
+}
+
+async fn cmd_mcp(paths: &PreviaPaths, http: &Client, args: McpArgs) -> Result<()> {
+    run_mcp(paths, http, args).await
 }
 
 async fn cmd_pull(args: PullArgs) -> Result<()> {

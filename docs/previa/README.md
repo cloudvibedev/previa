@@ -42,6 +42,10 @@ This is the main documentation index for Previa as an operator-facing platform a
 - [MCP integration](./mcp.md)
 - [API workflows](./api-workflows.md)
 
+Useful MCP workflow:
+
+- use `previa mcp install <target>` to wire the local Previa MCP endpoint into a supported client such as Codex, Cursor, Claude Code, Warp, or Copilot for VS Code
+
 ## Reference
 - [Version compatibility](./version-compatibility.md)
 - [Security](./security.md)

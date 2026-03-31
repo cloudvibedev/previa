@@ -18,6 +18,7 @@ Current commands:
 
 - `init`
 - `up`
+- `mcp`
 - `pull`
 - `down`
 - `restart`
@@ -141,6 +142,58 @@ See also:
 - [Compose source](./compose.md)
 - [Pipeline import](./pipeline-import.md)
 - [Main and runner authentication](./main-runner-auth.md)
+
+## `previa mcp`
+
+Installs, removes, inspects, or prints MCP client configuration for supported tools.
+
+```text
+previa mcp install <target> [OPTIONS]
+previa mcp uninstall <target> [OPTIONS]
+previa mcp status <target> [OPTIONS]
+previa mcp print <target> [OPTIONS]
+```
+
+Supported targets in the current Linux-first release:
+
+- `codex`
+- `cursor`
+- `claude-desktop`
+- `claude-code`
+- `warp`
+- `copilot-vscode`
+
+Important options:
+
+- `--scope global|project`: defaults to `global`
+- `--name <SERVER_NAME>`: defaults to `previa`
+- `--context <CONTEXT>`: resolves the MCP URL from a detached Previa context
+- `--url <MCP_URL>`: bypasses context lookup and uses an explicit MCP URL
+- `--force`: replaces a conflicting named entry for `install`
+- `--no-verify`: skips the `OPTIONS` check against the MCP endpoint during `install`
+
+Examples:
+
+```bash
+previa mcp install codex --context default
+previa mcp install cursor --scope project --url http://localhost:5588/mcp
+previa mcp status copilot-vscode --scope project
+previa mcp print claude-code --context default
+previa mcp uninstall warp
+```
+
+Notes:
+
+- `install` and `print` resolve the URL from `--url` or a detached context, defaulting to context `default`
+- `claude-desktop` is manual-only in this version; use `previa mcp print claude-desktop`
+- `warp` writes a Previa-managed Oz-compatible JSON file under `PREVIA_HOME/clients/warp/`
+- `claude-code` is driven through the external `claude mcp ...` CLI
+- global vs project scope depends on the target client
+
+See also:
+
+- [MCP integration](./mcp.md)
+- [Troubleshooting](./troubleshooting.md)
 
 ## `previa pull`
 

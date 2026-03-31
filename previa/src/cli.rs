@@ -31,6 +31,8 @@ pub enum Commands {
     Init(InitArgs),
     #[command(about = "Start a Previa context")]
     Up(UpArgs),
+    #[command(about = "Install and inspect MCP client configuration")]
+    Mcp(McpArgs),
     #[command(about = "Pull published runtime images")]
     Pull(PullArgs),
     #[command(about = "Stop a detached context or selected local runners")]
@@ -51,6 +53,97 @@ pub enum Commands {
     Export(ExportArgs),
     #[command(about = "Print the CLI version")]
     Version,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Install and inspect MCP client configuration")]
+pub struct McpArgs {
+    #[command(subcommand)]
+    pub action: McpAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum McpAction {
+    #[command(about = "Install Previa MCP into a supported client")]
+    Install(McpInstallArgs),
+    #[command(about = "Remove Previa MCP from a supported client")]
+    Uninstall(McpUninstallArgs),
+    #[command(about = "Show current Previa MCP configuration for a supported client")]
+    Status(McpStatusArgs),
+    #[command(about = "Print the MCP snippet or command for a supported client")]
+    Print(McpPrintArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum McpTarget {
+    Codex,
+    Cursor,
+    ClaudeDesktop,
+    ClaudeCode,
+    Warp,
+    CopilotVscode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum McpScope {
+    Global,
+    Project,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Install Previa MCP into a supported client")]
+pub struct McpInstallArgs {
+    #[arg(value_enum)]
+    pub target: McpTarget,
+    #[arg(long = "context", value_name = "CONTEXT", conflicts_with = "url")]
+    pub context: Option<String>,
+    #[arg(long = "url", value_name = "MCP_URL", conflicts_with = "context")]
+    pub url: Option<String>,
+    #[arg(long = "scope", value_enum, default_value_t = McpScope::Global)]
+    pub scope: McpScope,
+    #[arg(long = "name", value_name = "SERVER_NAME", default_value = "previa")]
+    pub name: String,
+    #[arg(long = "force")]
+    pub force: bool,
+    #[arg(long = "no-verify")]
+    pub no_verify: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Remove Previa MCP from a supported client")]
+pub struct McpUninstallArgs {
+    #[arg(value_enum)]
+    pub target: McpTarget,
+    #[arg(long = "scope", value_enum, default_value_t = McpScope::Global)]
+    pub scope: McpScope,
+    #[arg(long = "name", value_name = "SERVER_NAME", default_value = "previa")]
+    pub name: String,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Show current Previa MCP configuration for a supported client")]
+pub struct McpStatusArgs {
+    #[arg(value_enum)]
+    pub target: McpTarget,
+    #[arg(long = "scope", value_enum, default_value_t = McpScope::Global)]
+    pub scope: McpScope,
+    #[arg(long = "name", value_name = "SERVER_NAME", default_value = "previa")]
+    pub name: String,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Print the MCP snippet or command for a supported client")]
+pub struct McpPrintArgs {
+    #[arg(value_enum)]
+    pub target: McpTarget,
+    #[arg(long = "context", value_name = "CONTEXT", conflicts_with = "url")]
+    pub context: Option<String>,
+    #[arg(long = "url", value_name = "MCP_URL", conflicts_with = "context")]
+    pub url: Option<String>,
+    #[arg(long = "scope", value_enum, default_value_t = McpScope::Global)]
+    pub scope: McpScope,
+    #[arg(long = "name", value_name = "SERVER_NAME", default_value = "previa")]
+    pub name: String,
 }
 
 #[derive(Debug, Args)]

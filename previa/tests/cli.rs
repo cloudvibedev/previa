@@ -109,6 +109,14 @@ def catalog_from_state(state):
     return items
 
 class Handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        if self.path == "/mcp":
+            self.send_response(204)
+            self.end_headers()
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -867,6 +875,88 @@ PY
     fs::set_permissions(path, permissions).expect("chmod");
 }
 
+fn write_fake_claude(path: &Path) {
+    let script = r#"#!/bin/sh
+exec python3 -u - "$@" <<'PY'
+import json
+import os
+import pathlib
+import sys
+
+state_path = pathlib.Path(
+    os.environ.get(
+        "PREVIA_FAKE_CLAUDE_STATE",
+        str(pathlib.Path(os.environ.get("PREVIA_HOME", ".")) / "fake-claude-mcp.json"),
+    )
+)
+
+def load_state():
+    if not state_path.exists():
+        return {"user": {}, "project": {}}
+    return json.loads(state_path.read_text(encoding="utf-8"))
+
+def save_state(state):
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+argv = sys.argv[1:]
+if len(argv) < 2 or argv[0] != "mcp":
+    sys.stderr.write("unsupported command\n")
+    sys.exit(1)
+
+command = argv[1]
+scope = "user"
+idx = 2
+while idx < len(argv):
+    if argv[idx] == "--scope":
+        scope = argv[idx + 1]
+        idx += 2
+    elif argv[idx] == "--transport":
+        idx += 2
+    else:
+        break
+
+state = load_state()
+bucket = state.setdefault(scope, {})
+
+if command == "add":
+    name = argv[idx]
+    url = argv[idx + 1]
+    bucket[name] = {"url": url}
+    save_state(state)
+    print(f"added {name} {url} {scope}")
+    sys.exit(0)
+
+if command == "remove":
+    name = argv[idx]
+    if name in bucket:
+        del bucket[name]
+        save_state(state)
+        print(f"removed {name} {scope}")
+        sys.exit(0)
+    sys.stderr.write("not found\n")
+    sys.exit(1)
+
+if command == "get":
+    name = argv[idx]
+    entry = bucket.get(name)
+    if not entry:
+        sys.stderr.write("not found\n")
+        sys.exit(1)
+    print(f"name={name} url={entry['url']} scope={scope}")
+    sys.exit(0)
+
+sys.stderr.write("unsupported command\n")
+sys.exit(1)
+PY
+"#;
+
+    fs::write(path, script).expect("write fake claude");
+    let mut permissions = fs::metadata(path).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).expect("chmod");
+}
+
 fn cargo_bin() -> Command {
     Command::cargo_bin("previa").expect("previa binary")
 }
@@ -896,6 +986,12 @@ fn setup_fake_docker() -> TempDir {
     temp
 }
 
+fn setup_fake_claude(temp: &TempDir) {
+    let bin_dir = temp.path().join("bin");
+    fs::create_dir_all(&bin_dir).expect("bin dir");
+    write_fake_claude(&bin_dir.join("claude"));
+}
+
 fn setup_fake_binaries(temp: &TempDir) {
     let bin_dir = temp.path().join("bin");
     fs::create_dir_all(&bin_dir).expect("bin dir");
@@ -913,6 +1009,7 @@ fn setup_fake_binaries_with_protected_runner(temp: &TempDir) {
 fn docker_env(temp: &TempDir, command: &mut Command) {
     command
         .current_dir(temp.path())
+        .env("HOME", temp.path())
         .env("PREVIA_HOME", temp.path())
         .env("PATH", prepend_path(&temp.path().join("docker-bin")));
 }
@@ -920,8 +1017,19 @@ fn docker_env(temp: &TempDir, command: &mut Command) {
 fn docker_env_with_previa_home(preview_home: &Path, docker_root: &TempDir, command: &mut Command) {
     command
         .current_dir(docker_root.path())
+        .env("HOME", docker_root.path())
         .env("PREVIA_HOME", preview_home)
         .env("PATH", prepend_path(&docker_root.path().join("docker-bin")));
+}
+
+fn mcp_env(temp: &TempDir, command: &mut Command) -> std::path::PathBuf {
+    let workspace = temp.path().join("workspace");
+    fs::create_dir_all(&workspace).expect("workspace dir");
+    command
+        .current_dir(&workspace)
+        .env("HOME", temp.path())
+        .env("PREVIA_HOME", temp.path());
+    workspace
 }
 
 fn write_pipeline_json(path: &Path, name: &str, pipeline_id: Option<&str>) {
@@ -2529,6 +2637,464 @@ fn export_pipelines_requires_detached_context() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
     assert!(stderr.contains("no detached runtime exists for context 'missing-context'"));
+}
+
+#[test]
+fn mcp_install_status_print_and_uninstall_codex_global() {
+    if !python3_available() {
+        return;
+    }
+
+    let temp = setup_fake_docker();
+    let stack = "mcp-codex";
+    start_detached_bin_context(&temp, stack);
+
+    let mut install = cargo_bin();
+    mcp_env(&temp, &mut install);
+    install
+        .args(["mcp", "install", "codex", "--context", stack])
+        .assert()
+        .success();
+
+    let config_path = temp.path().join(".codex").join("config.toml");
+    let config = fs::read_to_string(&config_path).expect("codex config");
+    assert!(config.contains("mcp_servers"));
+    assert!(config.contains("previa"));
+    assert!(config.contains("enabled = true"));
+    assert!(config.contains("url = \"http://127.0.0.1:"));
+    assert!(config.contains("/mcp\""));
+
+    let mut status = cargo_bin();
+    mcp_env(&temp, &mut status);
+    let output = status
+        .args(["mcp", "status", "codex"])
+        .output()
+        .expect("status output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("target: codex"));
+    assert!(stdout.contains("installed: yes"));
+    assert!(stdout.contains("live: reachable"));
+
+    let mut print = cargo_bin();
+    mcp_env(&temp, &mut print);
+    let output = print
+        .args(["mcp", "print", "codex", "--context", stack])
+        .output()
+        .expect("print output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("[mcp_servers.previa]"));
+
+    let mut uninstall = cargo_bin();
+    mcp_env(&temp, &mut uninstall);
+    uninstall
+        .args(["mcp", "uninstall", "codex"])
+        .assert()
+        .success();
+
+    let config = fs::read_to_string(&config_path).expect("codex config after uninstall");
+    assert!(!config.contains("[mcp_servers.previa]"));
+}
+
+#[test]
+fn mcp_install_codex_requires_force_for_conflicting_entry() {
+    let temp = TempDir::new().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    fs::create_dir_all(workspace.join(".codex")).expect("workspace codex dir");
+    fs::create_dir_all(temp.path().join(".codex")).expect("global codex dir");
+    fs::write(
+        temp.path().join(".codex").join("config.toml"),
+        r#"[mcp_servers.previa]
+enabled = true
+url = "http://old.example/mcp"
+"#,
+    )
+    .expect("seed codex config");
+
+    let mut install = cargo_bin();
+    install
+        .current_dir(&workspace)
+        .env("HOME", temp.path())
+        .env("PREVIA_HOME", temp.path());
+    let output = install
+        .args([
+            "mcp",
+            "install",
+            "codex",
+            "--url",
+            "http://new.example/mcp",
+            "--no-verify",
+        ])
+        .output()
+        .expect("install output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("rerun with --force"));
+
+    let mut force_install = cargo_bin();
+    force_install
+        .current_dir(&workspace)
+        .env("HOME", temp.path())
+        .env("PREVIA_HOME", temp.path());
+    force_install
+        .args([
+            "mcp",
+            "install",
+            "codex",
+            "--url",
+            "http://new.example/mcp",
+            "--force",
+            "--no-verify",
+        ])
+        .assert()
+        .success();
+
+    let config = fs::read_to_string(temp.path().join(".codex").join("config.toml"))
+        .expect("codex config");
+    assert!(config.contains("http://new.example/mcp"));
+}
+
+#[test]
+fn mcp_install_and_uninstall_cursor_project_preserves_other_servers() {
+    let temp = TempDir::new().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    fs::create_dir_all(workspace.join(".cursor")).expect("cursor dir");
+    fs::write(
+        workspace.join(".cursor").join("mcp.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "mcpServers": {
+                "existing": {
+                    "url": "http://existing.example/mcp"
+                }
+            },
+            "otherKey": true
+        }))
+        .expect("seed json"),
+    )
+    .expect("seed file");
+
+    let mut install = cargo_bin();
+    install
+        .current_dir(&workspace)
+        .env("HOME", temp.path())
+        .env("PREVIA_HOME", temp.path());
+    install
+        .args([
+            "mcp",
+            "install",
+            "cursor",
+            "--scope",
+            "project",
+            "--url",
+            "http://cursor.example/mcp",
+            "--no-verify",
+        ])
+        .assert()
+        .success();
+
+    let config: serde_json::Value = serde_json::from_slice(
+        &fs::read(workspace.join(".cursor").join("mcp.json")).expect("cursor config"),
+    )
+    .expect("cursor json");
+    assert_eq!(config["otherKey"], true);
+    assert_eq!(
+        config["mcpServers"]["existing"]["url"],
+        "http://existing.example/mcp"
+    );
+    assert_eq!(
+        config["mcpServers"]["previa"]["url"],
+        "http://cursor.example/mcp"
+    );
+
+    let mut uninstall = cargo_bin();
+    uninstall
+        .current_dir(&workspace)
+        .env("HOME", temp.path())
+        .env("PREVIA_HOME", temp.path());
+    uninstall
+        .args(["mcp", "uninstall", "cursor", "--scope", "project"])
+        .assert()
+        .success();
+
+    let config: serde_json::Value = serde_json::from_slice(
+        &fs::read(workspace.join(".cursor").join("mcp.json")).expect("cursor config"),
+    )
+    .expect("cursor json");
+    assert!(config["mcpServers"].get("previa").is_none());
+    assert_eq!(
+        config["mcpServers"]["existing"]["url"],
+        "http://existing.example/mcp"
+    );
+}
+
+#[test]
+fn mcp_install_and_status_copilot_vscode_project() {
+    let temp = TempDir::new().expect("tempdir");
+
+    let mut install = cargo_bin();
+    let workspace = mcp_env(&temp, &mut install);
+    install
+        .args([
+            "mcp",
+            "install",
+            "copilot-vscode",
+            "--scope",
+            "project",
+            "--url",
+            "http://copilot.example/mcp",
+            "--no-verify",
+        ])
+        .assert()
+        .success();
+
+    let config: serde_json::Value = serde_json::from_slice(
+        &fs::read(workspace.join(".vscode").join("mcp.json")).expect("copilot config"),
+    )
+    .expect("copilot json");
+    assert_eq!(
+        config["mcpServers"]["previa"]["url"],
+        "http://copilot.example/mcp"
+    );
+
+    let mut status = cargo_bin();
+    mcp_env(&temp, &mut status);
+    let output = status
+        .args(["mcp", "status", "copilot-vscode", "--scope", "project"])
+        .output()
+        .expect("status output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("target: copilot-vscode"));
+    assert!(stdout.contains("installed: yes"));
+    assert!(stdout.contains("live: unreachable"));
+}
+
+#[test]
+fn mcp_install_status_print_and_uninstall_warp_global() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut install = cargo_bin();
+    mcp_env(&temp, &mut install);
+    install
+        .args([
+            "mcp",
+            "install",
+            "warp",
+            "--url",
+            "http://warp.example/mcp",
+            "--no-verify",
+        ])
+        .assert()
+        .success();
+
+    let path = temp
+        .path()
+        .join("clients")
+        .join("warp")
+        .join("previa.json");
+    let config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("warp config")).expect("warp json");
+    assert_eq!(config["mcpServers"]["previa"]["url"], "http://warp.example/mcp");
+
+    let mut status = cargo_bin();
+    mcp_env(&temp, &mut status);
+    let output = status
+        .args(["mcp", "status", "warp"])
+        .output()
+        .expect("status output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("config:"));
+    assert!(stdout.contains("installed: yes"));
+
+    let mut print = cargo_bin();
+    mcp_env(&temp, &mut print);
+    let output = print
+        .args([
+            "mcp",
+            "print",
+            "warp",
+            "--url",
+            "http://warp.example/mcp",
+        ])
+        .output()
+        .expect("print output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("oz agent run --mcp"));
+
+    let mut uninstall = cargo_bin();
+    mcp_env(&temp, &mut uninstall);
+    uninstall.args(["mcp", "uninstall", "warp"]).assert().success();
+    assert!(!path.exists());
+}
+
+#[test]
+fn mcp_warp_project_scope_is_unsupported() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut command = cargo_bin();
+    mcp_env(&temp, &mut command);
+    let output = command
+        .args([
+            "mcp",
+            "install",
+            "warp",
+            "--scope",
+            "project",
+            "--url",
+            "http://warp.example/mcp",
+        ])
+        .output()
+        .expect("install output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("supports only --scope global"));
+}
+
+#[test]
+fn mcp_claude_code_install_status_print_and_uninstall() {
+    let temp = TempDir::new().expect("tempdir");
+    setup_fake_claude(&temp);
+
+    let mut install = cargo_bin();
+    mcp_env(&temp, &mut install);
+    install.env("PATH", prepend_path(&temp.path().join("bin")));
+    install
+        .args([
+            "mcp",
+            "install",
+            "claude-code",
+            "--url",
+            "http://claude.example/mcp",
+            "--no-verify",
+        ])
+        .assert()
+        .success();
+
+    let mut status = cargo_bin();
+    mcp_env(&temp, &mut status);
+    status.env("PATH", prepend_path(&temp.path().join("bin")));
+    let output = status
+        .args(["mcp", "status", "claude-code"])
+        .output()
+        .expect("status output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("mode: claude-cli"));
+    assert!(stdout.contains("installed: yes"));
+    assert!(stdout.contains("url: http://claude.example/mcp"));
+
+    let mut print = cargo_bin();
+    mcp_env(&temp, &mut print);
+    let output = print
+        .env("PATH", prepend_path(&temp.path().join("bin")))
+        .args([
+            "mcp",
+            "print",
+            "claude-code",
+            "--url",
+            "http://claude.example/mcp",
+        ])
+        .output()
+        .expect("print output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("claude mcp add --scope user --transport http previa http://claude.example/mcp"));
+
+    let mut uninstall = cargo_bin();
+    mcp_env(&temp, &mut uninstall);
+    uninstall.env("PATH", prepend_path(&temp.path().join("bin")));
+    uninstall
+        .args(["mcp", "uninstall", "claude-code"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn mcp_claude_desktop_is_manual_only() {
+    let temp = TempDir::new().expect("tempdir");
+
+    let mut print = cargo_bin();
+    mcp_env(&temp, &mut print);
+    let output = print
+        .args([
+            "mcp",
+            "print",
+            "claude-desktop",
+            "--url",
+            "http://desktop.example/mcp",
+        ])
+        .output()
+        .expect("print output");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("manual-only"));
+    assert!(stdout.contains("http://desktop.example/mcp"));
+
+    let mut install = cargo_bin();
+    mcp_env(&temp, &mut install);
+    let output = install
+        .args([
+            "mcp",
+            "install",
+            "claude-desktop",
+            "--url",
+            "http://desktop.example/mcp",
+        ])
+        .output()
+        .expect("install output");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("print claude-desktop"));
+}
+
+#[test]
+fn mcp_install_fails_without_context_or_url() {
+    let temp = TempDir::new().expect("tempdir");
+    let mut command = cargo_bin();
+    mcp_env(&temp, &mut command);
+    let output = command
+        .args(["mcp", "install", "codex"])
+        .output()
+        .expect("install output");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("no detached runtime exists for context 'default'"));
+}
+
+#[test]
+fn mcp_install_honors_no_verify_for_unreachable_url() {
+    let temp = TempDir::new().expect("tempdir");
+
+    let mut without = cargo_bin();
+    mcp_env(&temp, &mut without);
+    let output = without
+        .args([
+            "mcp",
+            "install",
+            "codex",
+            "--url",
+            "http://127.0.0.1:9/mcp",
+        ])
+        .output()
+        .expect("install output");
+    assert!(!output.status.success());
+
+    let mut with = cargo_bin();
+    mcp_env(&temp, &mut with);
+    with.args([
+        "mcp",
+        "install",
+        "codex",
+        "--url",
+        "http://127.0.0.1:9/mcp",
+        "--no-verify",
+    ])
+    .assert()
+    .success();
 }
 
 #[test]
