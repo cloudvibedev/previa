@@ -8,6 +8,7 @@ All notable changes to Previa are documented in this file.
 - Add MCP client install commands (433737b)
 
 ### Documentation
+- Changelog: update for v1.0.0-alpha.14 (a90f383)
 - Expand helper and template variable guidance (f21c293)
 - Changelog: update for v1.0.0-alpha.12 (c9d17a3)
 
