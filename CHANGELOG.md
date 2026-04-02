@@ -2,6 +2,22 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.14] - 2026-04-02
+
+### Features
+- Add MCP client install commands (433737b)
+
+### Documentation
+- Expand helper and template variable guidance (f21c293)
+- Changelog: update for v1.0.0-alpha.12 (c9d17a3)
+
+### Maintenance
+- Bump version to 1.0.0-alpha.14 in Cargo.lock and Cargo.toml (fbafaa1)
+- Move release metadata into repo (baf5f50)
+- Bump version to 1.0.0-alpha.13 in Cargo.lock and Cargo.toml (06d65b0)
+
+Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.12...v1.0.0-alpha.14
+
 ## [v1.0.0-alpha.12] - 2026-03-30
 
 ### Features
