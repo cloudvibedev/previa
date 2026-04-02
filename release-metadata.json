@@ -1,0 +1,16 @@
+{
+  "links": {
+    "previa_linux_amd64": "https://github.com/cloudvibedev/previa/releases/download/v1.0.0-alpha.13/previa-linux-amd64",
+    "previa_linux_arm64": "https://github.com/cloudvibedev/previa/releases/download/v1.0.0-alpha.13/previa-linux-arm64",
+    "previa_macos_amd64": "https://github.com/cloudvibedev/previa/releases/download/v1.0.0-alpha.13/previa-macos-amd64",
+    "previa_main_linux_amd64": "https://github.com/cloudvibedev/previa/releases/download/v1.0.0-alpha.13/previa-main-linux-amd64",
+    "previa_main_linux_arm64": "https://github.com/cloudvibedev/previa/releases/download/v1.0.0-alpha.13/previa-main-linux-arm64",
+    "previa_runner_linux_amd64": "https://github.com/cloudvibedev/previa/releases/download/v1.0.0-alpha.13/previa-runner-linux-amd64",
+    "previa_runner_linux_arm64": "https://github.com/cloudvibedev/previa/releases/download/v1.0.0-alpha.13/previa-runner-linux-arm64",
+    "previa_windows_amd64": "https://github.com/cloudvibedev/previa/releases/download/v1.0.0-alpha.13/previa-windows-amd64.exe"
+  },
+  "name": "previa",
+  "published_at": "2026-04-02T12:24:04Z",
+  "tag": "v1.0.0-alpha.13",
+  "version": "1.0.0-alpha.13"
+}

@@ -2,7 +2,7 @@
 
 set -eu
 
-MANIFEST_URL="${MANIFEST_URL:-https://downloads.previa.dev/latest.json}"
+MANIFEST_URL="${MANIFEST_URL:-https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json}"
 PREVIA_RELEASE_BASE_URL="${PREVIA_RELEASE_BASE_URL:-https://github.com/cloudvibedev/previa/releases/download}"
 PREVIA_HOME_DEFAULT="${HOME}/.previa"
 PREVIA_BIN_DIR="${PREVIA_HOME_DEFAULT}/bin"
@@ -113,11 +113,11 @@ manifest_value() {
   query="$1"
 
   if [ "${JSON_TOOL}" = "jq" ]; then
-    jq -r "${query}" "${TEMP_DIR}/latest.json"
+    jq -r "${query}" "${TEMP_DIR}/manifest.json"
     return
   fi
 
-  "${JSON_TOOL}" - "$query" "${TEMP_DIR}/latest.json" <<'PY'
+  "${JSON_TOOL}" - "$query" "${TEMP_DIR}/manifest.json" <<'PY'
 import json
 import pathlib
 import sys
@@ -273,7 +273,7 @@ main() {
   success "Using ${DOWNLOADER} and ${JSON_TOOL}"
 
   info "Downloading manifest"
-  download_to "${MANIFEST_URL}" "${TEMP_DIR}/latest.json"
+  download_to "${MANIFEST_URL}" "${TEMP_DIR}/manifest.json"
   VERSION="$(manifest_value ".version")"
   [ -n "${VERSION}" ] && [ "${VERSION}" != "null" ] || fail "Manifest is invalid: missing version."
   success "Resolved latest version ${VERSION}"

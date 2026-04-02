@@ -17,13 +17,13 @@ If you want the shortest operator flow, it is:
 On Linux or macOS:
 
 ```bash
-curl -fsSL https://downloads.previa.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cloudvibedev/previa/main/install.sh | sh
 ```
 
 On Windows:
 
 ```powershell
-irm https://downloads.previa.dev/install.ps1 | iex
+irm https://raw.githubusercontent.com/cloudvibedev/previa/main/install.ps1 | iex
 ```
 
 The installer detects the local OS, places `previa` under the default Previa home, and configures

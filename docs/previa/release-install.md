@@ -7,18 +7,18 @@ This guide explains how Previa binaries and Docker images are published, and how
 The public installer is:
 
 ```bash
-curl -fsSL https://downloads.previa.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cloudvibedev/previa/main/install.sh | sh
 ```
 
 For Windows PowerShell:
 
 ```powershell
-irm https://downloads.previa.dev/install.ps1 | iex
+irm https://raw.githubusercontent.com/cloudvibedev/previa/main/install.ps1 | iex
 ```
 
 It currently:
 
-- downloads `latest.json` from `https://downloads.previa.dev/latest.json`
+- downloads `release-metadata.json` from `https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json`
 - resolves the latest published version and links
 - detects Linux, macOS, or Windows before choosing the `previa` control binary to install
 - installs the `previa` CLI under the default user-scoped Previa home
@@ -96,12 +96,12 @@ After removing the block, open a new shell or reload your rc file so `PATH` no l
 
 On Windows, remove the user-scoped `PREVIA_HOME` environment variable and remove `%USERPROFILE%\.previa\bin` from the user PATH if you want to fully uninstall the CLI.
 
-## `latest.json`
+## `release-metadata.json`
 
 The release workflow publishes a manifest at:
 
 ```text
-https://downloads.previa.dev/latest.json
+https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json
 ```
 
 That manifest contains:
@@ -131,18 +131,16 @@ At a high level, the release workflow:
 1. resolves the workspace version
 2. builds binaries for the selected release scope
 3. creates a git tag and GitHub release
-4. optionally uploads Linux binaries to Cloudflare R2
-5. optionally publishes `latest.json`
-6. optionally publishes `install.sh`
-7. optionally builds and pushes Docker images to GHCR
-8. optionally publishes runtime crates to crates.io
+4. optionally publishes `release-metadata.json` into `main`
+5. optionally builds and pushes Docker images to GHCR
+6. optionally publishes runtime crates to crates.io
 
 The workflow dispatch now accepts a `release_scope` choice:
 
-- `linux`: publishes Linux release assets and also runs Docker, crates.io, and bucket/R2 publishing
+- `linux`: publishes Linux release assets and also runs Docker, crates.io, and release metadata publishing
 - `mac`: publishes only the macOS release asset
 - `windows`: publishes only the Windows release asset
-- `all`: publishes Linux release assets plus Docker, crates.io, bucket/R2, and also adds macOS and Windows release assets
+- `all`: publishes Linux release assets plus Docker, crates.io, release metadata, and also adds macOS and Windows release assets
 
 Current platform coverage:
 
@@ -158,7 +156,7 @@ Current platform coverage:
   - `previa.exe`
   - `amd64`
 
-Only Linux artifacts are uploaded to Cloudflare R2 and included in `latest.json`, because the installer and runtime binary download flow remain Linux-centric in this release model.
+The metadata file is stored in the repository, while the binary links inside it point to GitHub Release assets. Linux remains the only platform where `previa up --bin` auto-downloads runtime binaries.
 
 ## Practical Notes
 

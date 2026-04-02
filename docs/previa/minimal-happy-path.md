@@ -5,7 +5,7 @@ This is the shortest practical path from zero to a working local Previa flow.
 ## 1. Install
 
 ```bash
-curl -fsSL https://downloads.previa.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cloudvibedev/previa/main/install.sh | sh
 ```
 
 ## 2. Start a Local Stack

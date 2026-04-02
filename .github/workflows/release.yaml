@@ -76,7 +76,7 @@ jobs:
       build_windows: ${{ steps.scope.outputs.build_windows }}
       publish_docker: ${{ steps.scope.outputs.publish_docker }}
       publish_crates: ${{ steps.scope.outputs.publish_crates }}
-      publish_bucket: ${{ steps.scope.outputs.publish_bucket }}
+      publish_metadata: ${{ steps.scope.outputs.publish_metadata }}
       publish_github_release: ${{ steps.scope.outputs.publish_github_release }}
     steps:
       - name: Normalize release scope
@@ -105,7 +105,7 @@ jobs:
               build_windows=false
               publish_docker=true
               publish_crates=true
-              publish_bucket=true
+              publish_metadata=true
               build_matrix="${linux_matrix}"
               ;;
             mac)
@@ -114,7 +114,7 @@ jobs:
               build_windows=false
               publish_docker=false
               publish_crates=false
-              publish_bucket=false
+              publish_metadata=false
               build_matrix="${mac_matrix}"
               ;;
             windows)
@@ -123,7 +123,7 @@ jobs:
               build_windows=true
               publish_docker=false
               publish_crates=false
-              publish_bucket=false
+              publish_metadata=false
               build_matrix="${windows_matrix}"
               ;;
             all)
@@ -132,7 +132,7 @@ jobs:
               build_windows=true
               publish_docker=true
               publish_crates=true
-              publish_bucket=true
+              publish_metadata=true
               build_matrix='[
                 {"name":"linux-amd64","artifact_name":"release-linux-amd64","runs_on":"ubuntu-latest","target":"x86_64-unknown-linux-musl","os_slug":"linux","arch_slug":"amd64","exe_ext":"","use_cross":true,"build_runner":true,"build_main":true,"build_ctl":true},
                 {"name":"linux-arm64","artifact_name":"release-linux-arm64","runs_on":"ubuntu-latest","target":"aarch64-unknown-linux-musl","os_slug":"linux","arch_slug":"arm64","exe_ext":"","use_cross":true,"build_runner":true,"build_main":true,"build_ctl":true},
@@ -156,7 +156,7 @@ jobs:
             echo "build_windows=${build_windows}"
             echo "publish_docker=${publish_docker}"
             echo "publish_crates=${publish_crates}"
-            echo "publish_bucket=${publish_bucket}"
+            echo "publish_metadata=${publish_metadata}"
             echo "publish_github_release=true"
           } >> "${GITHUB_OUTPUT}"
 
@@ -306,128 +306,6 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  upload_r2_artifacts:
-    name: Upload release artifacts to Cloudflare R2
-    needs: [version_check, resolve_scope, prepare_changelog, build_binaries]
-    if: needs.resolve_scope.outputs.publish_bucket == 'true'
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ needs.version_check.outputs.version }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-      AWS_REGION: auto
-      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-      R2_ENDPOINT: ${{ secrets.R2_S3_API || secrets.R2_ENPOINT }}
-      R2_BUCKET: ${{ vars.R2_BUCKET || secrets.R2_BUCKET || vars.CLOUDFLARE_R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare_changelog.outputs.release_sha }}
-
-      - name: Download Linux release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: release-linux-*
-          merge-multiple: true
-          path: release-assets
-
-      - name: Upload artifacts to R2
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          : "${R2_BUCKET:?Missing var/secret R2_BUCKET (or CLOUDFLARE_R2_BUCKET fallback)}"
-          : "${AWS_ACCESS_KEY_ID:?Missing secret R2_ACCESS_KEY_ID}"
-          : "${AWS_SECRET_ACCESS_KEY:?Missing secret R2_SECRET_ACCESS_KEY}"
-          : "${VERSION:?Missing resolved release version}"
-
-          if [ -n "${R2_ENDPOINT:-}" ]; then
-            endpoint="${R2_ENDPOINT}"
-          else
-            : "${R2_ACCOUNT_ID:?Missing secret R2_ACCOUNT_ID when R2_S3_API/R2_ENPOINT is not set}"
-            endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          fi
-
-          shopt -s nullglob
-          files=(release-assets/*)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::No release assets found to upload"
-            exit 1
-          fi
-
-          for file in "${files[@]}"; do
-            filename="$(basename "${file}")"
-            key="${VERSION}/files/${filename}"
-            echo "Uploading ${file} to s3://${R2_BUCKET}/${key}"
-            aws s3 cp "${file}" "s3://${R2_BUCKET}/${key}" --endpoint-url "${endpoint}" --no-progress
-          done
-
-      - name: Publish latest manifest to R2
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          : "${R2_BUCKET:?Missing var/secret R2_BUCKET (or CLOUDFLARE_R2_BUCKET fallback)}"
-          : "${VERSION:?Missing resolved release version}"
-
-          if [ -n "${R2_ENDPOINT:-}" ]; then
-            endpoint="${R2_ENDPOINT}"
-          else
-            : "${R2_ACCOUNT_ID:?Missing secret R2_ACCOUNT_ID when R2_S3_API/R2_ENPOINT is not set}"
-            endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          fi
-
-          shopt -s nullglob
-          files=(release-assets/*)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::No release assets found to generate manifest"
-            exit 1
-          fi
-
-          created_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          links_json=""
-
-          for file in "${files[@]}"; do
-            filename="$(basename "${file}")"
-            link_key="${filename%.exe}"
-            link_key="${link_key//-/_}"
-            link_value="https://downloads.previa.dev/${VERSION}/files/${filename}"
-
-            if [ -n "${links_json}" ]; then
-              links_json="${links_json},"
-            fi
-
-            links_json="${links_json}\"${link_key}\":\"${link_value}\""
-          done
-
-          cat > latest.json <<EOF
-          {"name":"previa","version":"${VERSION}","create_at":"${created_at}","links":{${links_json}}}
-          EOF
-
-          echo "Uploading latest.json to s3://${R2_BUCKET}/latest.json"
-          aws s3 cp latest.json "s3://${R2_BUCKET}/latest.json" --endpoint-url "${endpoint}" --no-progress
-
-      - name: Publish install scripts to R2
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          : "${R2_BUCKET:?Missing var/secret R2_BUCKET (or CLOUDFLARE_R2_BUCKET fallback)}"
-
-          if [ -n "${R2_ENDPOINT:-}" ]; then
-            endpoint="${R2_ENDPOINT}"
-          else
-            : "${R2_ACCOUNT_ID:?Missing secret R2_ACCOUNT_ID when R2_S3_API/R2_ENPOINT is not set}"
-            endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          fi
-
-          echo "Uploading install.sh to s3://${R2_BUCKET}/install.sh"
-          aws s3 cp install.sh "s3://${R2_BUCKET}/install.sh" --endpoint-url "${endpoint}" --no-progress
-
-          echo "Uploading install.ps1 to s3://${R2_BUCKET}/install.ps1"
-          aws s3 cp install.ps1 "s3://${R2_BUCKET}/install.ps1" --endpoint-url "${endpoint}" --no-progress
-
   tag_release:
     name: Create git tag
     needs: [version_check, prepare_changelog]
@@ -495,6 +373,58 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish_release_metadata:
+    name: Publish release metadata
+    needs: [version_check, resolve_scope, github_release]
+    if: needs.resolve_scope.outputs.publish_metadata == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version_check.outputs.version }}
+      RELEASE_SCOPE: ${{ needs.resolve_scope.outputs.release_scope }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+
+      - name: Validate installer script
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n install.sh
+
+      - name: Generate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          python3 scripts/generate_release_metadata.py
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m json.tool release-metadata.json >/dev/null
+
+      - name: Commit release metadata if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- release-metadata.json; then
+            echo "release-metadata.json already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add release-metadata.json
+          git commit -m "ci: update release metadata for v${VERSION}"
+          git pull --rebase origin main
+          git push origin HEAD:main
 
   docker_build_arch:
     name: Build and push Docker (${{ matrix.service }}-${{ matrix.arch }})

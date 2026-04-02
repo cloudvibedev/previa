@@ -63,13 +63,13 @@ The main idea is simple: your assistant should not have to guess whether a workf
 Install the CLI with:
 
 ```bash
-curl -fsSL https://downloads.previa.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cloudvibedev/previa/main/install.sh | sh
 ```
 
 On Windows, use:
 
 ```powershell
-irm https://downloads.previa.dev/install.ps1 | iex
+irm https://raw.githubusercontent.com/cloudvibedev/previa/main/install.ps1 | iex
 ```
 
 The installers detect Linux, macOS, or Windows, install the matching `previa` control binary under the default user home, and configure `PREVIA_HOME`.
@@ -137,10 +137,10 @@ Recommended first reads:
 
 The release workflow supports four manual publishing scopes:
 
-- `linux`: GitHub Release assets for Linux plus Docker, crates.io, and bucket/R2 publishing
+- `linux`: GitHub Release assets for Linux plus Docker, crates.io, and release metadata publishing
 - `mac`: GitHub Release asset for macOS only
 - `windows`: GitHub Release asset for Windows only
-- `all`: Linux full publishing plus macOS and Windows release assets
+- `all`: Linux full publishing plus release metadata and macOS and Windows release assets
 
 Today, macOS and Windows release assets contain only the `previa` control binary. Linux continues to publish `previa`, `previa-main`, and `previa-runner`.
 

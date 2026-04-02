@@ -12,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::paths::PreviaPaths;
 
-const DEFAULT_DOWNLOAD_BASE_URL: &str = "https://downloads.previa.dev";
+const DEFAULT_DOWNLOAD_BASE_URL: &str = "https://github.com/cloudvibedev/previa/releases/download";
 const DOWNLOAD_BASE_URL_ENV: &str = "PREVIA_DOWNLOAD_BASE_URL";
 const LEGACY_MANIFEST_URL_ENV: &str = "PREVIA_DOWNLOAD_MANIFEST_URL";
 
@@ -64,18 +64,42 @@ fn download_base_url() -> String {
         return value;
     }
 
-    if let Some(value) = env::var(LEGACY_MANIFEST_URL_ENV)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-    {
-        return value
-            .trim_end_matches("/latest.json")
-            .trim_end_matches('/')
-            .to_owned();
+    if let Some(value) = env::var(LEGACY_MANIFEST_URL_ENV).ok() {
+        if let Some(base_url) = legacy_manifest_base_url(&value) {
+            return base_url;
+        }
     }
 
     DEFAULT_DOWNLOAD_BASE_URL.to_owned()
+}
+
+fn legacy_manifest_base_url(manifest_url: &str) -> Option<String> {
+    let manifest_url = manifest_url.trim();
+    if manifest_url.is_empty() {
+        return None;
+    }
+
+    if let Some(path) = manifest_url
+        .strip_prefix("https://raw.githubusercontent.com/")
+        .or_else(|| manifest_url.strip_prefix("http://raw.githubusercontent.com/"))
+    {
+        let mut parts = path.split('/');
+        if let (Some(owner), Some(repo), Some(_git_ref), Some(_filename)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        {
+            return Some(format!(
+                "https://github.com/{owner}/{repo}/releases/download"
+            ));
+        }
+    }
+
+    Some(
+        manifest_url
+            .trim_end_matches("/release-metadata.json")
+            .trim_end_matches("/latest.json")
+            .trim_end_matches('/')
+            .to_owned(),
+    )
 }
 
 async fn download_binary(
@@ -206,7 +230,18 @@ fn read_binary_version(path: &Path) -> Option<String> {
 }
 
 fn binary_download_url(version: &str, asset_name: &str) -> String {
-    format!("{}/{version}/files/{asset_name}", download_base_url())
+    let base_url = download_base_url();
+    if uses_github_release_layout(&base_url) {
+        format!("{base_url}/v{version}/{asset_name}")
+    } else {
+        format!("{base_url}/{version}/files/{asset_name}")
+    }
+}
+
+fn uses_github_release_layout(base_url: &str) -> bool {
+    base_url
+        .trim_end_matches('/')
+        .ends_with("/releases/download")
 }
 
 fn binary_install_path(paths: &PreviaPaths, binary_name: &str) -> PathBuf {
@@ -355,7 +390,8 @@ mod tests {
         DEFAULT_DOWNLOAD_BASE_URL, DOWNLOAD_BASE_URL_ENV, DOWNLOAD_ENV_LOCK, DownloadReporter,
         LEGACY_MANIFEST_URL_ENV, asset_filename, binary_download_url, binary_install_path,
         binary_matches_version, current_release_version, download_base_url, download_binary,
-        normalized_platform, read_binary_version, should_install_binary,
+        legacy_manifest_base_url, normalized_platform, read_binary_version, should_install_binary,
+        uses_github_release_layout,
     };
     use crate::paths::PreviaPaths;
 
@@ -670,6 +706,24 @@ exit 1
     }
 
     #[test]
+    fn download_base_url_supports_raw_github_manifest_override() {
+        assert_eq!(
+            legacy_manifest_base_url(
+                "https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json"
+            ),
+            Some("https://github.com/cloudvibedev/previa/releases/download".to_owned())
+        );
+    }
+
+    #[test]
+    fn github_release_layout_is_detected() {
+        assert!(uses_github_release_layout(
+            "https://github.com/cloudvibedev/previa/releases/download"
+        ));
+        assert!(!uses_github_release_layout("http://downloads.test"));
+    }
+
+    #[test]
     fn versioned_url_uses_exact_cli_version() {
         let _guard = DOWNLOAD_ENV_LOCK.lock().expect("download env lock");
         unsafe {
@@ -679,7 +733,7 @@ exit 1
         assert_eq!(
             binary_download_url(current_release_version(), "previa-main-linux-amd64"),
             format!(
-                "{}/{}/files/previa-main-linux-amd64",
+                "{}/v{}/previa-main-linux-amd64",
                 DEFAULT_DOWNLOAD_BASE_URL,
                 current_release_version()
             )
