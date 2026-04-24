@@ -595,13 +595,19 @@ fn merge_env(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    #[cfg(target_os = "linux")]
     use std::sync::{Arc, Mutex};
 
+    #[cfg(target_os = "linux")]
     use axum::Router;
+    #[cfg(target_os = "linux")]
     use axum::extract::State;
+    #[cfg(target_os = "linux")]
     use axum::http::StatusCode;
+    #[cfg(target_os = "linux")]
     use axum::routing::get;
     use tempfile::TempDir;
+    #[cfg(target_os = "linux")]
     use tokio::net::TcpListener;
 
     use super::{configured_runner_auth_key, resolve_runner_auth_key, resolve_up_config};
@@ -612,12 +618,14 @@ mod tests {
     };
     use uuid::Uuid;
 
+    #[cfg(target_os = "linux")]
     #[derive(Clone)]
     struct TestServerState {
         binaries: BTreeMap<String, Vec<u8>>,
         requests: Arc<Mutex<Vec<String>>>,
     }
 
+    #[cfg(target_os = "linux")]
     async fn binary_asset(
         State(state): State<TestServerState>,
         axum::extract::Path((version, name)): axum::extract::Path<(String, String)>,
@@ -633,6 +641,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     async fn spawn_test_server(
         binaries: BTreeMap<String, Vec<u8>>,
     ) -> (String, Arc<Mutex<Vec<String>>>) {
@@ -686,10 +695,10 @@ mod tests {
         }
     }
 
-    fn set_bin(args: &mut UpArgs, value: bool) {
+    fn set_bin(_args: &mut UpArgs, value: bool) {
         #[cfg(target_os = "linux")]
         {
-            args.bin = value;
+            _args.bin = value;
         }
 
         #[cfg(not(target_os = "linux"))]
@@ -701,6 +710,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn resolve_up_config_downloads_missing_main_and_runner_for_bin_runtime() {
         let _guard = crate::download::DOWNLOAD_ENV_LOCK
@@ -743,6 +753,7 @@ mod tests {
             )));
     }
 
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn resolve_up_config_attached_runner_only_does_not_download_runner_binary() {
         let _guard = crate::download::DOWNLOAD_ENV_LOCK

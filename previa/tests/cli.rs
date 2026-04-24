@@ -12,6 +12,7 @@ use assert_cmd::prelude::*;
 use tempfile::TempDir;
 use uuid::Uuid;
 
+#[cfg(target_os = "linux")]
 const TEST_BINARY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn python3_available() -> bool {
@@ -29,6 +30,7 @@ printf '%s' "$1" > "$PREVIA_OPEN_CAPTURE"
     fs::set_permissions(path, permissions).expect("chmod");
 }
 
+#[cfg(target_os = "linux")]
 fn write_fake_binary(path: &Path, label: &str) {
     let script = r#"#!/bin/sh
 if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
@@ -275,6 +277,7 @@ PY
     fs::set_permissions(path, permissions).expect("chmod");
 }
 
+#[cfg(target_os = "linux")]
 fn write_fake_auth_runner_binary(path: &Path) {
     let script = r#"#!/bin/sh
 if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
@@ -875,6 +878,7 @@ PY
     fs::set_permissions(path, permissions).expect("chmod");
 }
 
+#[cfg(target_os = "linux")]
 fn write_fake_claude(path: &Path) {
     let script = r#"#!/bin/sh
 exec python3 -u - "$@" <<'PY'
@@ -978,6 +982,25 @@ fn find_free_port() -> u16 {
         .port()
 }
 
+#[cfg(target_os = "linux")]
+fn find_free_port_range(count: u16) -> (u16, u16) {
+    for _ in 0..1000 {
+        let start = find_free_port();
+        let Some(end) = start.checked_add(count.saturating_sub(1)) else {
+            continue;
+        };
+        let listeners = (start..=end)
+            .map(|port| TcpListener::bind(("127.0.0.1", port)))
+            .collect::<Result<Vec<_>, _>>();
+
+        if listeners.is_ok() {
+            return (start, end);
+        }
+    }
+
+    panic!("could not find {count} adjacent free ports");
+}
+
 fn setup_fake_docker() -> TempDir {
     let temp = TempDir::new().expect("tempdir");
     let docker_dir = temp.path().join("docker-bin");
@@ -986,12 +1009,14 @@ fn setup_fake_docker() -> TempDir {
     temp
 }
 
+#[cfg(target_os = "linux")]
 fn setup_fake_claude(temp: &TempDir) {
     let bin_dir = temp.path().join("bin");
     fs::create_dir_all(&bin_dir).expect("bin dir");
     write_fake_claude(&bin_dir.join("claude"));
 }
 
+#[cfg(target_os = "linux")]
 fn setup_fake_binaries(temp: &TempDir) {
     let bin_dir = temp.path().join("bin");
     fs::create_dir_all(&bin_dir).expect("bin dir");
@@ -999,6 +1024,7 @@ fn setup_fake_binaries(temp: &TempDir) {
     write_fake_binary(&bin_dir.join("previa-runner"), "previa-runner");
 }
 
+#[cfg(target_os = "linux")]
 fn setup_fake_binaries_with_protected_runner(temp: &TempDir) {
     let bin_dir = temp.path().join("bin");
     fs::create_dir_all(&bin_dir).expect("bin dir");
@@ -1022,6 +1048,7 @@ fn docker_env_with_previa_home(preview_home: &Path, docker_root: &TempDir, comma
         .env("PATH", prepend_path(&docker_root.path().join("docker-bin")));
 }
 
+#[cfg(target_os = "linux")]
 fn mcp_env(temp: &TempDir, command: &mut Command) -> std::path::PathBuf {
     let workspace = temp.path().join("workspace");
     fs::create_dir_all(&workspace).expect("workspace dir");
@@ -1087,6 +1114,7 @@ fn read_fake_import_state(previa_home: &Path) -> serde_json::Value {
     .expect("fake import state json")
 }
 
+#[cfg(target_os = "linux")]
 fn write_fake_api_state(previa_home: &Path, state: serde_json::Value) {
     fs::write(
         previa_home.join("fake-imports.json"),
@@ -1095,6 +1123,7 @@ fn write_fake_api_state(previa_home: &Path, state: serde_json::Value) {
     .expect("write fake api state");
 }
 
+#[cfg(target_os = "linux")]
 fn fake_pipeline_value(name: &str, pipeline_id: Option<&str>) -> serde_json::Value {
     serde_json::json!({
         "id": pipeline_id,
@@ -1111,16 +1140,19 @@ fn fake_pipeline_value(name: &str, pipeline_id: Option<&str>) -> serde_json::Val
     })
 }
 
+#[cfg(target_os = "linux")]
 fn read_exported_yaml(path: &Path) -> serde_json::Value {
     serde_yaml::from_slice(&fs::read(path).expect("read exported yaml"))
         .expect("parse exported yaml")
 }
 
+#[cfg(target_os = "linux")]
 fn read_exported_json(path: &Path) -> serde_json::Value {
     serde_json::from_slice(&fs::read(path).expect("read exported json"))
         .expect("parse exported json")
 }
 
+#[cfg(target_os = "linux")]
 fn start_detached_bin_context(temp: &TempDir, stack: &str) {
     setup_fake_binaries(temp);
     let main_port = find_free_port();
@@ -1284,6 +1316,7 @@ fn init_generated_compose_is_usable_by_up_dry_run() {
         .success();
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn up_bin_rejects_version_override() {
     let temp = setup_fake_docker();
@@ -1301,6 +1334,7 @@ fn up_bin_rejects_version_override() {
     assert!(stderr.contains("--version cannot be used with --bin"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn up_bin_reports_download_failures_when_exact_runtime_binary_is_unavailable() {
     let temp = setup_fake_docker();
@@ -1735,6 +1769,7 @@ fn up_auto_generates_runner_auth_key_for_local_runners() {
     assert_eq!(runner_env_key, main_key);
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn up_bin_uses_generated_runner_auth_key_for_protected_runner_health_checks() {
     if !python3_available() {
@@ -2172,6 +2207,7 @@ fn detached_up_import_stack_conflict_keeps_runtime_running() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_writes_default_yaml_files_using_project_name() {
     if !python3_available() {
@@ -2225,6 +2261,7 @@ fn export_pipelines_writes_default_yaml_files_using_project_name() {
     assert_eq!(read_exported_yaml(&beta_path)["name"], "Beta Smoke");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_supports_json_format_and_project_id_lookup() {
     if !python3_available() {
@@ -2269,6 +2306,7 @@ fn export_pipelines_supports_json_format_and_project_id_lookup() {
     assert_eq!(read_exported_json(&path)["id"], "pipe-alpha");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_filters_selection_and_preserves_stored_order() {
     if !python3_available() {
@@ -2326,6 +2364,7 @@ fn export_pipelines_filters_selection_and_preserves_stored_order() {
     assert!(written[1].ends_with("pipe-gamma.previa.yaml"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_fails_for_ambiguous_project_name() {
     if !python3_available() {
@@ -2368,6 +2407,7 @@ fn export_pipelines_fails_for_ambiguous_project_name() {
     assert!(stderr.contains("project-b"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_fails_for_missing_pipeline_selector() {
     if !python3_available() {
@@ -2411,6 +2451,7 @@ fn export_pipelines_fails_for_missing_pipeline_selector() {
     assert!(stderr.contains("pipeline 'missing-pipeline' not found"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_fails_for_ambiguous_pipeline_name() {
     if !python3_available() {
@@ -2459,6 +2500,7 @@ fn export_pipelines_fails_for_ambiguous_pipeline_name() {
     assert!(stderr.contains("pipe-beta"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_respects_overwrite_policy() {
     if !python3_available() {
@@ -2528,6 +2570,7 @@ fn export_pipelines_respects_overwrite_policy() {
     assert_eq!(read_exported_yaml(&existing)["name"], "Alpha Smoke");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_detects_duplicate_target_filenames_before_writing() {
     if !python3_available() {
@@ -2574,6 +2617,7 @@ fn export_pipelines_detects_duplicate_target_filenames_before_writing() {
     assert!(!output_dir.join("dup.previa.yaml").exists());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn export_pipelines_creates_output_directory_when_missing() {
     if !python3_available() {
@@ -2639,6 +2683,7 @@ fn export_pipelines_requires_detached_context() {
     assert!(stderr.contains("no detached runtime exists for context 'missing-context'"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_install_status_print_and_uninstall_codex_global() {
     if !python3_available() {
@@ -2697,6 +2742,7 @@ fn mcp_install_status_print_and_uninstall_codex_global() {
     assert!(!config.contains("[mcp_servers.previa]"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_install_codex_requires_force_for_conflicting_entry() {
     let temp = TempDir::new().expect("tempdir");
@@ -2751,11 +2797,12 @@ url = "http://old.example/mcp"
         .assert()
         .success();
 
-    let config = fs::read_to_string(temp.path().join(".codex").join("config.toml"))
-        .expect("codex config");
+    let config =
+        fs::read_to_string(temp.path().join(".codex").join("config.toml")).expect("codex config");
     assert!(config.contains("http://new.example/mcp"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_install_and_uninstall_cursor_project_preserves_other_servers() {
     let temp = TempDir::new().expect("tempdir");
@@ -2829,6 +2876,7 @@ fn mcp_install_and_uninstall_cursor_project_preserves_other_servers() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_install_and_status_copilot_vscode_project() {
     let temp = TempDir::new().expect("tempdir");
@@ -2871,6 +2919,7 @@ fn mcp_install_and_status_copilot_vscode_project() {
     assert!(stdout.contains("live: unreachable"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_install_status_print_and_uninstall_warp_global() {
     let temp = TempDir::new().expect("tempdir");
@@ -2888,14 +2937,13 @@ fn mcp_install_status_print_and_uninstall_warp_global() {
         .assert()
         .success();
 
-    let path = temp
-        .path()
-        .join("clients")
-        .join("warp")
-        .join("previa.json");
+    let path = temp.path().join("clients").join("warp").join("previa.json");
     let config: serde_json::Value =
         serde_json::from_slice(&fs::read(&path).expect("warp config")).expect("warp json");
-    assert_eq!(config["mcpServers"]["previa"]["url"], "http://warp.example/mcp");
+    assert_eq!(
+        config["mcpServers"]["previa"]["url"],
+        "http://warp.example/mcp"
+    );
 
     let mut status = cargo_bin();
     mcp_env(&temp, &mut status);
@@ -2911,13 +2959,7 @@ fn mcp_install_status_print_and_uninstall_warp_global() {
     let mut print = cargo_bin();
     mcp_env(&temp, &mut print);
     let output = print
-        .args([
-            "mcp",
-            "print",
-            "warp",
-            "--url",
-            "http://warp.example/mcp",
-        ])
+        .args(["mcp", "print", "warp", "--url", "http://warp.example/mcp"])
         .output()
         .expect("print output");
     assert!(output.status.success());
@@ -2926,10 +2968,14 @@ fn mcp_install_status_print_and_uninstall_warp_global() {
 
     let mut uninstall = cargo_bin();
     mcp_env(&temp, &mut uninstall);
-    uninstall.args(["mcp", "uninstall", "warp"]).assert().success();
+    uninstall
+        .args(["mcp", "uninstall", "warp"])
+        .assert()
+        .success();
     assert!(!path.exists());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_warp_project_scope_is_unsupported() {
     let temp = TempDir::new().expect("tempdir");
@@ -2953,6 +2999,7 @@ fn mcp_warp_project_scope_is_unsupported() {
     assert!(stderr.contains("supports only --scope global"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_claude_code_install_status_print_and_uninstall() {
     let temp = TempDir::new().expect("tempdir");
@@ -3001,7 +3048,11 @@ fn mcp_claude_code_install_status_print_and_uninstall() {
         .expect("print output");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
-    assert!(stdout.contains("claude mcp add --scope user --transport http previa http://claude.example/mcp"));
+    assert!(
+        stdout.contains(
+            "claude mcp add --scope user --transport http previa http://claude.example/mcp"
+        )
+    );
 
     let mut uninstall = cargo_bin();
     mcp_env(&temp, &mut uninstall);
@@ -3012,6 +3063,7 @@ fn mcp_claude_code_install_status_print_and_uninstall() {
         .success();
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_claude_desktop_is_manual_only() {
     let temp = TempDir::new().expect("tempdir");
@@ -3050,6 +3102,7 @@ fn mcp_claude_desktop_is_manual_only() {
     assert!(stderr.contains("print claude-desktop"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_install_fails_without_context_or_url() {
     let temp = TempDir::new().expect("tempdir");
@@ -3065,6 +3118,7 @@ fn mcp_install_fails_without_context_or_url() {
     assert!(stderr.contains("no detached runtime exists for context 'default'"));
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn mcp_install_honors_no_verify_for_unreachable_url() {
     let temp = TempDir::new().expect("tempdir");
@@ -3072,13 +3126,7 @@ fn mcp_install_honors_no_verify_for_unreachable_url() {
     let mut without = cargo_bin();
     mcp_env(&temp, &mut without);
     let output = without
-        .args([
-            "mcp",
-            "install",
-            "codex",
-            "--url",
-            "http://127.0.0.1:9/mcp",
-        ])
+        .args(["mcp", "install", "codex", "--url", "http://127.0.0.1:9/mcp"])
         .output()
         .expect("install output");
     assert!(!output.status.success());
@@ -3097,6 +3145,7 @@ fn mcp_install_honors_no_verify_for_unreachable_url() {
     .success();
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn detached_binary_lifecycle_supports_status_ps_logs_restart_and_down() {
     if !python3_available() {
@@ -3215,6 +3264,7 @@ fn detached_binary_lifecycle_supports_status_ps_logs_restart_and_down() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn down_runner_removes_selected_runner_and_rewrites_runtime() {
     if !python3_available() {
@@ -3224,8 +3274,7 @@ fn down_runner_removes_selected_runner_and_rewrites_runtime() {
     let temp = setup_fake_docker();
     let stack = "partial";
     let main_port = find_free_port();
-    let runner_start = find_free_port();
-    let runner_end = runner_start + 1;
+    let (runner_start, runner_end) = find_free_port_range(2);
 
     let mut up = cargo_bin();
     docker_env(&temp, &mut up);

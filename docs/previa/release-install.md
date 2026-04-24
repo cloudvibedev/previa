@@ -21,6 +21,7 @@ It currently:
 - downloads `release-metadata.json` from `https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json`
 - resolves the latest published version and links
 - detects Linux, macOS, or Windows before choosing the `previa` control binary to install
+- installs the native macOS `arm64` control binary on Apple Silicon
 - installs the `previa` CLI under the default user-scoped Previa home
 - sets `PREVIA_HOME`
 - updates shell startup files on Unix-like systems or the user PATH on Windows
@@ -31,7 +32,7 @@ The installer installs the `previa` control binary.
 
 Published Linux binaries are built against `musl` so they stay portable across a wider range of Linux distributions and do not depend on a very recent host `glibc`.
 
-On macOS, the installer resolves the `previa` control binary for macOS. When the manifest does not yet expose a direct macOS download link, the installer falls back to the matching GitHub Release asset for the resolved version.
+On macOS, the installer resolves the `previa` control binary for the local architecture. Apple Silicon hosts use the `macos/arm64` asset, while Intel hosts use the `macos/amd64` asset. When the manifest does not yet expose a direct macOS download link, the installer falls back to the matching GitHub Release asset for the resolved version.
 
 On Windows, the PowerShell installer resolves the `previa.exe` control binary for Windows. When the manifest does not yet expose a direct Windows download link, the installer falls back to the matching GitHub Release asset for the resolved version.
 
@@ -112,6 +113,7 @@ That manifest contains:
 Example link keys include:
 
 - `previa_linux_amd64`
+- `previa_macos_arm64`
 - `previa_main_linux_amd64`
 - `previa_runner_linux_amd64`
 
@@ -138,7 +140,7 @@ At a high level, the release workflow:
 The workflow dispatch now accepts a `release_scope` choice:
 
 - `linux`: publishes Linux release assets and also runs Docker, crates.io, and release metadata publishing
-- `mac`: publishes only the macOS release asset
+- `mac`: publishes only the macOS release assets
 - `windows`: publishes only the Windows release asset
 - `all`: publishes Linux release assets plus Docker, crates.io, release metadata, and also adds macOS and Windows release assets
 
@@ -151,7 +153,7 @@ Current platform coverage:
   - `amd64` and `arm64`
 - macOS:
   - `previa`
-  - `amd64`
+  - `amd64` and `arm64`
 - Windows:
   - `previa.exe`
   - `amd64`
@@ -165,6 +167,7 @@ The metadata file is stored in the repository, while the binary links inside it 
 - the default path keeps CLI and runtime versions aligned
 - published runtime binaries currently target Linux
 - macOS and Windows release assets currently ship only the control binary `previa`
+- Apple Silicon installs use the native macOS `arm64` asset instead of requiring Rosetta 2 for the CLI
 
 ## See Also
 

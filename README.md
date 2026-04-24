@@ -72,7 +72,7 @@ On Windows, use:
 irm https://raw.githubusercontent.com/cloudvibedev/previa/main/install.ps1 | iex
 ```
 
-The installers detect Linux, macOS, or Windows, install the matching `previa` control binary under the default user home, and configure `PREVIA_HOME`.
+The installers detect Linux, macOS, or Windows, install the matching `previa` control binary under the default user home, and configure `PREVIA_HOME`. macOS releases publish native `amd64` and Apple Silicon `arm64` control binaries.
 
 ## Quick Start
 
@@ -138,11 +138,11 @@ Recommended first reads:
 The release workflow supports four manual publishing scopes:
 
 - `linux`: GitHub Release assets for Linux plus Docker, crates.io, and release metadata publishing
-- `mac`: GitHub Release asset for macOS only
+- `mac`: GitHub Release assets for macOS only
 - `windows`: GitHub Release asset for Windows only
 - `all`: Linux full publishing plus release metadata and macOS and Windows release assets
 
-Today, macOS and Windows release assets contain only the `previa` control binary. Linux continues to publish `previa`, `previa-main`, and `previa-runner`.
+Today, macOS and Windows release assets contain only the `previa` control binary. macOS publishes both `amd64` and `arm64`; Linux continues to publish `previa`, `previa-main`, and `previa-runner`.
 
 ## Community
 

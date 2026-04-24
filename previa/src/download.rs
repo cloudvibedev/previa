@@ -15,6 +15,10 @@ use crate::paths::PreviaPaths;
 const DEFAULT_DOWNLOAD_BASE_URL: &str = "https://github.com/cloudvibedev/previa/releases/download";
 const DOWNLOAD_BASE_URL_ENV: &str = "PREVIA_DOWNLOAD_BASE_URL";
 const LEGACY_MANIFEST_URL_ENV: &str = "PREVIA_DOWNLOAD_MANIFEST_URL";
+#[cfg(test)]
+const TEST_DOWNLOAD_OS_ENV: &str = "PREVIA_TEST_DOWNLOAD_OS";
+#[cfg(test)]
+const TEST_DOWNLOAD_ARCH_ENV: &str = "PREVIA_TEST_DOWNLOAD_ARCH";
 
 #[cfg(test)]
 pub(crate) static DOWNLOAD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -254,7 +258,10 @@ fn temporary_download_path(target_path: &Path) -> PathBuf {
 }
 
 fn normalized_platform() -> Result<(String, String)> {
-    let os_slug = match env::consts::OS {
+    let os = normalized_platform_os();
+    let arch = normalized_platform_arch();
+
+    let os_slug = match os.as_str() {
         "linux" => "linux",
         other => {
             bail!(
@@ -262,13 +269,31 @@ fn normalized_platform() -> Result<(String, String)> {
             )
         }
     };
-    let arch_slug = match env::consts::ARCH {
+    let arch_slug = match arch.as_str() {
         "x86_64" | "amd64" => "amd64",
         "aarch64" | "arm64" => "arm64",
         other => bail!("unsupported architecture: {other}."),
     };
 
     Ok((os_slug.to_owned(), arch_slug.to_owned()))
+}
+
+fn normalized_platform_os() -> String {
+    #[cfg(test)]
+    if let Ok(value) = env::var(TEST_DOWNLOAD_OS_ENV) {
+        return value;
+    }
+
+    env::consts::OS.to_owned()
+}
+
+fn normalized_platform_arch() -> String {
+    #[cfg(test)]
+    if let Ok(value) = env::var(TEST_DOWNLOAD_ARCH_ENV) {
+        return value;
+    }
+
+    env::consts::ARCH.to_owned()
 }
 
 fn asset_filename(binary_name: &str, os_slug: &str, arch_slug: &str) -> Result<String> {
@@ -388,10 +413,10 @@ mod tests {
 
     use super::{
         DEFAULT_DOWNLOAD_BASE_URL, DOWNLOAD_BASE_URL_ENV, DOWNLOAD_ENV_LOCK, DownloadReporter,
-        LEGACY_MANIFEST_URL_ENV, asset_filename, binary_download_url, binary_install_path,
-        binary_matches_version, current_release_version, download_base_url, download_binary,
-        legacy_manifest_base_url, normalized_platform, read_binary_version, should_install_binary,
-        uses_github_release_layout,
+        LEGACY_MANIFEST_URL_ENV, TEST_DOWNLOAD_ARCH_ENV, TEST_DOWNLOAD_OS_ENV, asset_filename,
+        binary_download_url, binary_install_path, binary_matches_version, current_release_version,
+        download_base_url, download_binary, legacy_manifest_base_url, normalized_platform,
+        read_binary_version, should_install_binary, uses_github_release_layout,
     };
     use crate::paths::PreviaPaths;
 
@@ -480,6 +505,20 @@ mod tests {
         (temp, paths)
     }
 
+    fn set_linux_amd64_download_platform() {
+        unsafe {
+            env::set_var(TEST_DOWNLOAD_OS_ENV, "linux");
+            env::set_var(TEST_DOWNLOAD_ARCH_ENV, "amd64");
+        }
+    }
+
+    fn clear_download_platform() {
+        unsafe {
+            env::remove_var(TEST_DOWNLOAD_OS_ENV);
+            env::remove_var(TEST_DOWNLOAD_ARCH_ENV);
+        }
+    }
+
     fn write_version_script(path: &Path, binary_name: &str, version: &str) {
         let script = r#"#!/bin/sh
 if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
@@ -516,7 +555,11 @@ exit 1
 
     #[test]
     fn platform_normalization_matches_supported_linux_targets() {
+        let _guard = DOWNLOAD_ENV_LOCK.lock().expect("download env lock");
+        set_linux_amd64_download_platform();
         let (os_slug, arch_slug) = normalized_platform().expect("platform");
+        clear_download_platform();
+
         assert_eq!(os_slug, "linux");
         assert!(matches!(arch_slug.as_str(), "amd64" | "arm64"));
     }
@@ -554,6 +597,7 @@ exit 1
         unsafe {
             env::set_var(DOWNLOAD_BASE_URL_ENV, &base_url);
         }
+        set_linux_amd64_download_platform();
 
         let mut reporter = RecordingReporter::default();
         let client = super::build_download_client().expect("client");
@@ -571,6 +615,7 @@ exit 1
         unsafe {
             env::remove_var(DOWNLOAD_BASE_URL_ENV);
         }
+        clear_download_platform();
 
         assert_eq!(installed, binary_install_path(&paths, binary_name));
         assert_eq!(std::fs::read(&installed).expect("binary bytes"), payload);
@@ -660,6 +705,7 @@ exit 1
         unsafe {
             env::set_var(DOWNLOAD_BASE_URL_ENV, &base_url);
         }
+        set_linux_amd64_download_platform();
 
         let err = download_binary(
             &super::build_download_client().expect("client"),
@@ -674,6 +720,7 @@ exit 1
         unsafe {
             env::remove_var(DOWNLOAD_BASE_URL_ENV);
         }
+        clear_download_platform();
 
         assert!(
             err.to_string()
