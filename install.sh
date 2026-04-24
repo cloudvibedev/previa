@@ -148,14 +148,7 @@ detect_platform() {
 
   case "${arch_name}" in
     x86_64|amd64) ARCH_SLUG="amd64" ;;
-    arm64|aarch64)
-      if [ "${OS_SLUG}" = "linux" ]; then
-        ARCH_SLUG="arm64"
-      else
-        ARCH_SLUG="amd64"
-        warn "macOS arm64 currently installs the published amd64 control binary. Rosetta 2 may be required."
-      fi
-      ;;
+    arm64|aarch64) ARCH_SLUG="arm64" ;;
     *) fail "Unsupported architecture: ${arch_name}." ;;
   esac
 }

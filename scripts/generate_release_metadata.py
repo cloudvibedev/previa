@@ -28,6 +28,7 @@ def main() -> None:
 
     if release_scope in {"mac", "all"}:
         links["previa_macos_amd64"] = f"{base_url}/previa-macos-amd64"
+        links["previa_macos_arm64"] = f"{base_url}/previa-macos-arm64"
 
     if release_scope in {"windows", "all"}:
         links["previa_windows_amd64"] = f"{base_url}/previa-windows-amd64.exe"
