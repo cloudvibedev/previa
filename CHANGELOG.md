@@ -2,6 +2,28 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.16] - 2026-04-29
+
+### Features
+- Add dynamic runner registry (939b7b3)
+- Support postgres orchestrator database (73458fd)
+- Add local push command (df1091d)
+- Add local cli workflow (d1e293e)
+
+### Documentation
+- Changelog: update for v1.0.0-alpha.14 (65fed53)
+- Changelog: update for v1.0.0-alpha.14 (6158aee)
+- Changelog: update for v1.0.0-alpha.14 (7b1c03a)
+
+### Maintenance
+- Bump version to 1.0.0-alpha.16 (0a7d9b3)
+- Bump version to 1.0.0-alpha.15 (be9aab7)
+- Update release metadata for v1.0.0-alpha.14 (bc19b70)
+- Publish native macos arm64 cli (d6faa07)
+- Update release metadata for v1.0.0-alpha.14 (8f40110)
+
+Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.14...v1.0.0-alpha.16
+
 ## [v1.0.0-alpha.14] - 2026-04-29
 
 ### Features
