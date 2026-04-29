@@ -108,6 +108,15 @@ previa status
 previa open
 ```
 
+Inside an application repository, use the project-local workflow to keep state
+under `./.previa`:
+
+```bash
+previa local up -d
+previa local status
+previa local open
+```
+
 `previa open` launches:
 
 ```text

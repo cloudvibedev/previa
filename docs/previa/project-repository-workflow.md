@@ -42,9 +42,9 @@ Why this layout works well:
 From the application repository root:
 
 ```bash
-previa --home ./.previa up -d .
-previa --home ./.previa status
-previa --home ./.previa open
+previa local up -d .
+previa local status
+previa local open
 ```
 
 This keeps the detached stack for this repository under `./.previa` instead of mixing it with a shared global home.

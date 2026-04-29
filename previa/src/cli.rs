@@ -29,6 +29,8 @@ pub struct Cli {
 pub enum Commands {
     #[command(about = "Create a starter previa-compose.yaml in the current directory")]
     Init(InitArgs),
+    #[command(about = "Run Previa commands with project-local home ./.previa")]
+    Local(LocalArgs),
     #[command(about = "Start a Previa context")]
     Up(UpArgs),
     #[command(about = "Install and inspect MCP client configuration")]
@@ -53,6 +55,27 @@ pub enum Commands {
     Export(ExportArgs),
     #[command(about = "Print the CLI version")]
     Version,
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Run Previa commands with project-local home ./.previa")]
+pub struct LocalArgs {
+    #[command(subcommand)]
+    pub command: LocalCommands,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LocalCommands {
+    #[command(about = "Start a project-local Previa context")]
+    Up(UpArgs),
+    #[command(about = "Stop a project-local detached context or selected local runners")]
+    Down(DownArgs),
+    #[command(about = "Show the current state of a project-local context")]
+    Status(StatusArgs),
+    #[command(about = "Read logs from a project-local detached context")]
+    Logs(LogsArgs),
+    #[command(about = "Open the Previa IDE with the project-local context")]
+    Open(OpenArgs),
 }
 
 #[derive(Debug, Args)]
@@ -369,4 +392,49 @@ pub struct OpenArgs {
         help = "Context name"
     )]
     pub context: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands};
+    use clap::Parser;
+
+    #[test]
+    fn parses_local_up() {
+        let cli = Cli::try_parse_from(["previa", "local", "up", "-d"]).expect("parse local up");
+
+        assert!(cli.home.is_none());
+        let Commands::Local(local) = cli.command else {
+            panic!("expected local command");
+        };
+        let super::LocalCommands::Up(args) = local.command else {
+            panic!("expected local up");
+        };
+        assert!(args.detach);
+        assert_eq!(args.context, "default");
+    }
+
+    #[test]
+    fn parses_local_status() {
+        let cli = Cli::try_parse_from(["previa", "local", "status"]).expect("parse local status");
+
+        assert!(cli.home.is_none());
+        let Commands::Local(local) = cli.command else {
+            panic!("expected local command");
+        };
+        let super::LocalCommands::Status(args) = local.command else {
+            panic!("expected local status");
+        };
+        assert_eq!(args.context, "default");
+        assert!(!args.json);
+    }
+
+    #[test]
+    fn preserves_explicit_home_for_local_command() {
+        let cli = Cli::try_parse_from(["previa", "--home", "./custom", "local", "status"])
+            .expect("parse local status with home");
+
+        assert_eq!(cli.home.as_deref(), Some(std::path::Path::new("./custom")));
+        assert!(matches!(cli.command, Commands::Local(_)));
+    }
 }

@@ -54,9 +54,9 @@ previa down --context other
 ## Use a Local Home
 
 ```bash
-previa --home ./.previa up -d
-previa --home ./.previa status
-previa --home ./.previa down
+previa local up -d
+previa local status
+previa local down
 ```
 
 ## Import Pipelines

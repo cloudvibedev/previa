@@ -29,8 +29,8 @@ use tokio::time::sleep;
 
 use crate::browser::{build_open_url, open_browser};
 use crate::cli::{
-    Cli, Commands, DownArgs, ExportArgs, ExportTarget, InitArgs, LogsArgs, McpArgs, OpenArgs,
-    PsArgs, PullArgs, RestartArgs, StatusArgs, UpArgs,
+    Cli, Commands, DownArgs, ExportArgs, ExportTarget, InitArgs, LocalArgs, LocalCommands,
+    LogsArgs, McpArgs, OpenArgs, PsArgs, PullArgs, RestartArgs, StatusArgs, UpArgs,
 };
 use crate::compose::{
     ComposeProject, MAIN_SERVICE_NAME, ServiceInspect, compose_project_from_state,
@@ -65,7 +65,8 @@ use crate::selectors::{RunnerSelector, parse_stack_name};
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
-    let paths = PreviaPaths::discover(cli.home.as_deref())?;
+    let home = effective_home(&cli);
+    let paths = PreviaPaths::discover(home.as_deref())?;
     let http = Client::builder()
         .timeout(Duration::from_secs(1))
         .build()
@@ -73,6 +74,7 @@ pub async fn run() -> Result<()> {
 
     match cli.command {
         Commands::Init(args) => cmd_init(args),
+        Commands::Local(args) => cmd_local(&paths, &http, args).await,
         Commands::Up(args) => cmd_up(&paths, &http, args).await,
         Commands::Mcp(args) => cmd_mcp(&paths, &http, args).await,
         Commands::Pull(args) => cmd_pull(args).await,
@@ -88,6 +90,24 @@ pub async fn run() -> Result<()> {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+    }
+}
+
+fn effective_home(cli: &Cli) -> Option<PathBuf> {
+    if cli.home.is_none() && matches!(cli.command, Commands::Local(_)) {
+        return Some(PathBuf::from("./.previa"));
+    }
+
+    cli.home.clone()
+}
+
+async fn cmd_local(paths: &PreviaPaths, http: &Client, args: LocalArgs) -> Result<()> {
+    match args.command {
+        LocalCommands::Up(args) => cmd_up(paths, http, args).await,
+        LocalCommands::Down(args) => cmd_down(paths, args).await,
+        LocalCommands::Status(args) => cmd_status(paths, http, args).await,
+        LocalCommands::Logs(args) => cmd_logs(paths, args).await,
+        LocalCommands::Open(args) => cmd_open(paths, args).await,
     }
 }
 
@@ -1279,6 +1299,10 @@ async fn wait_for_detached_startup(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use super::effective_home;
+    use crate::cli::{Cli, Commands, LocalArgs, LocalCommands, StatusArgs};
     use crate::selectors::{RunnerSelector, normalize_attach_runner};
 
     #[test]
@@ -1310,5 +1334,42 @@ mod tests {
             normalize_attach_runner("10.0.0.8:56000").expect("normalize host:port"),
             "http://10.0.0.8:56000"
         );
+    }
+
+    #[test]
+    fn local_command_uses_project_local_home_when_home_is_omitted() {
+        let cli = Cli {
+            home: None,
+            command: Commands::Local(LocalArgs {
+                command: LocalCommands::Status(StatusArgs {
+                    context: "default".to_owned(),
+                    main: false,
+                    runner: None,
+                    json: false,
+                }),
+            }),
+        };
+
+        assert_eq!(
+            effective_home(&cli).as_deref(),
+            Some(Path::new("./.previa"))
+        );
+    }
+
+    #[test]
+    fn local_command_preserves_explicit_home() {
+        let cli = Cli {
+            home: Some("./custom".into()),
+            command: Commands::Local(LocalArgs {
+                command: LocalCommands::Status(StatusArgs {
+                    context: "default".to_owned(),
+                    main: false,
+                    runner: None,
+                    json: false,
+                }),
+            }),
+        };
+
+        assert_eq!(effective_home(&cli).as_deref(), Some(Path::new("./custom")));
     }
 }
