@@ -258,12 +258,14 @@ mod tests {
         insert_project_pipeline(&db, "project-1", pipeline("pipe-1"))
             .await
             .expect("insert pipeline");
+        crate::server::db::seed_env_runner_records(&db, &[runner_url])
+            .await
+            .expect("seed runner");
 
         let state = AppState {
             client: Client::new(),
             db,
             context_name: "default".to_owned(),
-            runner_endpoints: vec![runner_url],
             runner_auth_key: None,
             rps_per_node: 1000,
             scheduler: ExecutionScheduler::new(Default::default()),

@@ -11,7 +11,8 @@ use crate::server::models::{
     ProjectExportProject, ProjectHistoryExport, ProjectImportResponse, ProjectListQuery,
     ProjectLoadTestRequest, ProjectMetadataUpsertRequest, ProjectPipelineRecord, ProjectRecord,
     ProjectSpecRecord, ProjectSpecUpsertRequest, ProjectTransferQuery, ProjectUpsertRequest,
-    ProxyRequest, RunnerInfo, RunnerLoadLine, RunnerRuntimeInfo, SpecUrlEntry,
+    ProxyRequest, RunnerInfo, RunnerLoadLine, RunnerRecord, RunnerRuntimeInfo, RunnerUpdateRequest,
+    RunnerUpsertRequest, SpecUrlEntry,
 };
 
 #[derive(OpenApi)]
@@ -30,6 +31,11 @@ use crate::server::models::{
         crate::server::handlers::transfers::export_project,
         crate::server::handlers::transfers::import_project,
         crate::server::handlers::transfers::import_pipelines,
+        crate::server::handlers::runners::list_runners,
+        crate::server::handlers::runners::create_runner,
+        crate::server::handlers::runners::get_runner,
+        crate::server::handlers::runners::update_runner,
+        crate::server::handlers::runners::delete_runner,
         crate::server::handlers::specs::validate_openapi_spec,
         crate::server::handlers::specs::list_project_specs,
         crate::server::handlers::specs::create_project_spec,
@@ -105,6 +111,9 @@ use crate::server::models::{
         LoadHistoryRecord,
         RunnerRuntimeInfo,
         RunnerInfo,
+        RunnerRecord,
+        RunnerUpsertRequest,
+        RunnerUpdateRequest,
         OrchestratorInfoResponse,
         OrchestratorSseEventData,
         RunnerLoadLine,

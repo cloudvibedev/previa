@@ -11,6 +11,7 @@ use tracing::info;
 use crate::server::build_app;
 use crate::server::db::{
     DatabaseKind, DbPool, backfill_project_spec_md5_hashes, cancel_stale_e2e_queues,
+    seed_env_runner_records,
 };
 use crate::server::execution::{SchedulerConfig, parse_runner_endpoints};
 use crate::server::mcp::models::McpConfig;
@@ -91,6 +92,9 @@ async fn main() {
     let backfilled_spec_hashes = backfill_project_spec_md5_hashes(&db)
         .await
         .expect("failed to backfill OpenAPI spec md5 hashes");
+    seed_env_runner_records(&db, &runner_endpoints)
+        .await
+        .expect("failed to seed env runner endpoints");
     let cancelled_stale_queues = cancel_stale_e2e_queues(&db, &now_iso())
         .await
         .expect("failed to cancel stale e2e queues");
@@ -99,7 +103,6 @@ async fn main() {
         client: Client::new(),
         db,
         context_name: context_name.clone(),
-        runner_endpoints,
         runner_auth_key,
         rps_per_node,
         scheduler: crate::server::execution::ExecutionScheduler::new(SchedulerConfig {

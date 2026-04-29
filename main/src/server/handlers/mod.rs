@@ -5,6 +5,7 @@ pub mod history_load;
 pub mod pipelines;
 pub mod projects;
 pub mod proxy;
+pub mod runners;
 pub mod specs;
 pub mod tests_e2e;
 pub mod tests_e2e_queue;

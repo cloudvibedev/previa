@@ -5,19 +5,6 @@ use reqwest::Client;
 use crate::server::execution::runner_auth::apply_runner_auth;
 use crate::server::models::{NodePlan, RunnerInfo, RunnerRuntimeInfo};
 
-pub async fn collect_active_nodes(
-    client: &Client,
-    runner_endpoints: &[String],
-    runner_auth_key: Option<&str>,
-) -> Vec<String> {
-    collect_runner_statuses(client, runner_endpoints, runner_auth_key)
-        .await
-        .into_iter()
-        .filter(|runner| runner.active)
-        .map(|runner| runner.endpoint)
-        .collect()
-}
-
 pub async fn collect_runner_statuses(
     client: &Client,
     runner_endpoints: &[String],

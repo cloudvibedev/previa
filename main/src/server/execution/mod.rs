@@ -22,8 +22,7 @@ pub use load_batch::{
     forward_runner_stream_load_chunked, snapshot_consolidated_metrics, snapshot_latest_lines,
 };
 pub use node_plan::{
-    calculate_node_plan, collect_active_nodes, collect_runner_statuses, parse_runner_endpoints,
-    split_even,
+    calculate_node_plan, collect_runner_statuses, parse_runner_endpoints, split_even,
 };
 pub use runtime_specs::resolve_runtime_specs_for_execution;
 pub use scheduler::{AcquireOutcome, ExecutionScheduler, ScheduledExecutionKind, SchedulerConfig};

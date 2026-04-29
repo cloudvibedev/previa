@@ -9,8 +9,8 @@ use tracing::error;
 use crate::server::db::{save_e2e_history, upsert_e2e_history};
 use crate::server::execution::{
     AcquireOutcome, ScheduledExecutionKind, add_context_fields, build_e2e_snapshot_payload,
-    collect_active_nodes, determine_e2e_history_status, forward_runner_stream,
-    resolve_runtime_specs_for_execution, send_sse_best_effort, spawn_broadcast_bridge,
+    determine_e2e_history_status, forward_runner_stream, resolve_runtime_specs_for_execution,
+    send_sse_best_effort, spawn_broadcast_bridge,
 };
 use crate::server::models::{
     E2eHistoryAccumulator, E2eHistoryWrite, E2eTestRequest, HistoryMetadata, NodePlan, SseMessage,
@@ -46,12 +46,6 @@ pub async fn start_e2e_execution(
     if payload.pipeline.steps.is_empty() {
         return Err(StartE2eExecutionError::BadRequest(
             "pipeline must contain at least one step".to_owned(),
-        ));
-    }
-
-    if state.runner_endpoints.is_empty() {
-        return Err(StartE2eExecutionError::ServiceUnavailable(
-            "RUNNER_ENDPOINTS not configured".to_owned(),
         ));
     }
 
@@ -99,10 +93,22 @@ pub async fn start_e2e_execution(
     let orchestrator_execution_id = new_uuid_v7();
     let (sse_tx, _) = broadcast::channel(EXECUTION_SSE_BUFFER_SIZE);
     let response_subscriber = sse_tx.subscribe();
-    let mut randomized = state.runner_endpoints.clone();
-    randomized.shuffle(&mut rand::rng());
-    let active_nodes =
-        collect_active_nodes(&state.client, &randomized, state.runner_auth_key.as_deref()).await;
+    let mut active_nodes =
+        crate::server::services::runner_registry::collect_active_registered_runner_endpoints(
+            &state.db,
+            &state.client,
+            state.runner_auth_key.as_deref(),
+        )
+        .await
+        .map_err(|err| {
+            StartE2eExecutionError::Internal(format!("failed to load runner registry: {err}"))
+        })?;
+    active_nodes.shuffle(&mut rand::rng());
+    if active_nodes.is_empty() {
+        return Err(StartE2eExecutionError::ServiceUnavailable(
+            "No active runners found via /health".to_owned(),
+        ));
+    }
     let queue_position = state
         .scheduler
         .enqueue(
@@ -187,14 +193,21 @@ pub async fn start_e2e_execution(
                     return;
                 }
 
-                let mut randomized = state_clone.runner_endpoints.clone();
-                randomized.shuffle(&mut rand::rng());
-                let active_nodes = collect_active_nodes(
-                    &state_clone.client,
-                    &randomized,
-                    state_clone.runner_auth_key.as_deref(),
-                )
-                .await;
+                let mut active_nodes =
+                    match crate::server::services::runner_registry::collect_active_registered_runner_endpoints(
+                        &state_clone.db,
+                        &state_clone.client,
+                        state_clone.runner_auth_key.as_deref(),
+                    )
+                    .await
+                    {
+                        Ok(active_nodes) => active_nodes,
+                        Err(err) => {
+                            error!("failed to load runner registry: {}", err);
+                            Vec::new()
+                        }
+                    };
+                active_nodes.shuffle(&mut rand::rng());
                 match state_clone
                     .scheduler
                     .try_acquire(&history_execution_id, &active_nodes)
@@ -448,12 +461,14 @@ mod tests {
             .run(db.pool())
             .await
             .expect("migrations");
+        crate::server::db::seed_env_runner_records(&db, &[runner])
+            .await
+            .expect("seed runner");
 
         let state = AppState {
             client: reqwest::Client::new(),
             db,
             context_name: "test".to_owned(),
-            runner_endpoints: vec![runner],
             runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),

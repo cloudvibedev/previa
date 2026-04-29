@@ -56,18 +56,16 @@ pub async fn start_load_execution(
         ));
     }
 
-    if state.runner_endpoints.is_empty() {
-        return Err(StartLoadExecutionError::ServiceUnavailable(
-            "RUNNER_ENDPOINTS not configured".to_owned(),
-        ));
-    }
-
-    let runner_statuses = crate::server::execution::collect_runner_statuses(
-        &state.client,
-        &state.runner_endpoints,
-        state.runner_auth_key.as_deref(),
-    )
-    .await;
+    let runner_statuses =
+        crate::server::services::runner_registry::collect_registered_runner_statuses(
+            &state.db,
+            &state.client,
+            state.runner_auth_key.as_deref(),
+        )
+        .await
+        .map_err(|err| {
+            StartLoadExecutionError::Internal(format!("failed to load runner registry: {err}"))
+        })?;
     let registered_nodes: Vec<String> = runner_statuses
         .iter()
         .map(|runner| runner.endpoint.clone())
@@ -249,12 +247,20 @@ pub async fn start_load_execution(
                     return;
                 }
 
-                let runner_statuses = crate::server::execution::collect_runner_statuses(
-                    &state_clone.client,
-                    &state_clone.runner_endpoints,
-                    state_clone.runner_auth_key.as_deref(),
-                )
-                .await;
+                let runner_statuses =
+                    match crate::server::services::runner_registry::collect_registered_runner_statuses(
+                        &state_clone.db,
+                        &state_clone.client,
+                        state_clone.runner_auth_key.as_deref(),
+                    )
+                    .await
+                    {
+                        Ok(runner_statuses) => runner_statuses,
+                        Err(err) => {
+                            error!("failed to load runner registry: {}", err);
+                            Vec::new()
+                        }
+                    };
                 let active_nodes = runner_statuses
                     .into_iter()
                     .filter(|runner| runner.active)
@@ -717,12 +723,14 @@ mod tests {
             .run(db.pool())
             .await
             .expect("migrations");
+        crate::server::db::seed_env_runner_records(&db, &[runner])
+            .await
+            .expect("seed runner");
 
         let state = AppState {
             client: reqwest::Client::new(),
             db,
             context_name: "test".to_owned(),
-            runner_endpoints: vec![runner],
             runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),
@@ -800,12 +808,14 @@ mod tests {
             .run(db.pool())
             .await
             .expect("migrations");
+        crate::server::db::seed_env_runner_records(&db, &[first_runner, second_runner])
+            .await
+            .expect("seed runners");
 
         let state = AppState {
             client: reqwest::Client::new(),
             db,
             context_name: "test".to_owned(),
-            runner_endpoints: vec![first_runner, second_runner],
             runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),
