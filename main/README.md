@@ -4,7 +4,7 @@
 
 ## Crate Purpose
 
-`previa-main` is the orchestrator API. It routes execution to runners, aggregates SSE streams, and stores E2E/load history in SQLite.
+`previa-main` is the orchestrator API. It routes execution to runners, aggregates SSE streams, and stores E2E/load history in SQLite or Postgres.
 
 ## Quick Start
 
@@ -26,6 +26,14 @@ ADDRESS=0.0.0.0 PORT=5588 \
 cargo run -p previa-main
 ```
 
+Postgres can be selected with the same environment variable:
+
+```bash
+ORCHESTRATOR_DATABASE_URL="postgres://previa:previa@127.0.0.1:5432/previa" \
+RUNNER_ENDPOINTS="http://127.0.0.1:55880" \
+cargo run -p previa-main
+```
+
 You can also download prebuilt binaries at: **https://previa.dev/downloads**
 
 ### Connect from UI
@@ -40,7 +48,7 @@ http://127.0.0.1:5588
 
 | Variable | Default | Description |
 |---|---|---|
-| `ORCHESTRATOR_DATABASE_URL` | `sqlite://orchestrator.db` | SQLite database URL |
+| `ORCHESTRATOR_DATABASE_URL` | `sqlite://orchestrator.db` | Orchestrator database URL. Supports `sqlite://`, `postgres://`, and `postgresql://` |
 | `RUNNER_RPS_PER_NODE` | `1000` | Per-node capacity hint for load planning |
 | `RUNNER_ENDPOINTS` | empty | Runner endpoints CSV |
 | `ADDRESS` | `0.0.0.0` | Bind address |

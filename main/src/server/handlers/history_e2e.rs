@@ -1,7 +1,7 @@
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, http::StatusCode};
-use sqlx::{QueryBuilder, Sqlite};
+use sqlx::QueryBuilder;
 
 use crate::server::db::{list_e2e_history_records, load_e2e_history_record_by_id, project_exists};
 use crate::server::errors::{internal_error_response, not_found_response};
@@ -66,7 +66,8 @@ pub async fn delete_e2e_history(
         Err(err) => return internal_error_response(format!("failed to load project: {err}")),
     }
 
-    let mut qb = QueryBuilder::<Sqlite>::new("DELETE FROM integration_history WHERE project_id = ");
+    let mut qb =
+        QueryBuilder::<sqlx::Any>::new("DELETE FROM integration_history WHERE project_id = ");
     qb.push_bind(&project_id);
     if let Some(pipeline_index) = query.pipeline_index {
         qb.push(" AND pipeline_index = ").push_bind(pipeline_index);

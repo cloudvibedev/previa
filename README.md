@@ -117,6 +117,13 @@ previa local status
 previa local open
 ```
 
+Push a local project to a remote Previa main:
+
+```bash
+previa local push --project my_app --to https://previa.example.com
+previa local push --project my_app --to https://previa.example.com --overwrite
+```
+
 `previa open` launches:
 
 ```text

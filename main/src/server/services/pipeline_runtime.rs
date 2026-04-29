@@ -151,7 +151,6 @@ mod tests {
     use std::sync::Arc;
 
     use serde_json::json;
-    use sqlx::sqlite::SqlitePoolOptions;
     use tokio::sync::{RwLock, broadcast};
     use tokio_util::sync::CancellationToken;
 
@@ -235,13 +234,11 @@ mod tests {
     }
 
     async fn empty_state() -> AppState {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
-        sqlx::migrate!("./migrations")
-            .run(&db)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
             .await
             .expect("migrations");
 

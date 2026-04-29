@@ -51,6 +51,9 @@ When `SOURCE` is `.` or a directory, the lookup order is:
 - `RUNNER_ENDPOINTS`
 - `ORCHESTRATOR_DATABASE_URL`
 
+`ORCHESTRATOR_DATABASE_URL` defaults to a context-local SQLite file, but can
+also target Postgres with `postgres://...` or `postgresql://...`.
+
 ## Supported Shape
 
 Top-level fields:

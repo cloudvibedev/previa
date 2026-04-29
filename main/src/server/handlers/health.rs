@@ -51,7 +51,6 @@ mod tests {
     use std::sync::Arc;
 
     use reqwest::Client;
-    use sqlx::sqlite::SqlitePoolOptions;
     use tokio::sync::RwLock;
 
     use crate::server::execution::ExecutionScheduler;
@@ -61,9 +60,7 @@ mod tests {
 
     #[tokio::test]
     async fn info_includes_context_name() {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
         let state = AppState {

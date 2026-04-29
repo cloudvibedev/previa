@@ -2,6 +2,7 @@ pub mod common;
 pub mod e2e_queues;
 pub mod history;
 pub mod pipelines;
+pub mod pool;
 pub mod projects;
 pub mod query_utils;
 pub mod specs;
@@ -23,6 +24,7 @@ pub use pipelines::{
     load_existing_project_pipeline_ids, load_pipelines_for_project,
     load_project_pipeline_for_execution, load_project_pipeline_record, update_project_pipeline,
 };
+pub use pool::{DatabaseKind, DbPool};
 pub use projects::{
     create_project_with_pipelines, list_project_records, load_project_record, project_name_exists,
     upsert_project_metadata, upsert_project_with_pipelines,

@@ -1,7 +1,7 @@
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, http::StatusCode};
-use sqlx::{QueryBuilder, Sqlite};
+use sqlx::QueryBuilder;
 
 use crate::server::db::{
     list_load_history_records, load_load_history_record_by_id, project_exists,
@@ -68,7 +68,7 @@ pub async fn delete_load_history(
         Err(err) => return internal_error_response(format!("failed to load project: {err}")),
     }
 
-    let mut qb = QueryBuilder::<Sqlite>::new("DELETE FROM load_history WHERE project_id = ");
+    let mut qb = QueryBuilder::<sqlx::Any>::new("DELETE FROM load_history WHERE project_id = ");
     qb.push_bind(&project_id);
     if let Some(pipeline_index) = query.pipeline_index {
         qb.push(" AND pipeline_index = ").push_bind(pipeline_index);

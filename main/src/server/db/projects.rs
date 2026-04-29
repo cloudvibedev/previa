@@ -1,6 +1,7 @@
+use crate::server::db::DbPool;
 use previa_runner::Pipeline;
 use serde_json::Value;
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{QueryBuilder, Row};
 
 use crate::server::db::query_utils::{
     clamp_history_limit, clamp_history_offset, history_order_to_sql,
@@ -11,14 +12,14 @@ use crate::server::models::{
 use crate::server::utils::{new_uuid_v7, now_iso, now_ms};
 
 pub async fn list_project_records(
-    db: &SqlitePool,
+    db: &DbPool,
     query: ProjectListQuery,
 ) -> Result<Vec<ProjectRecord>, sqlx::Error> {
     let limit = clamp_history_limit(query.limit);
     let offset = clamp_history_offset(query.offset);
     let order_sql = history_order_to_sql(query.order);
 
-    let mut qb = QueryBuilder::<Sqlite>::new(
+    let mut qb = QueryBuilder::<sqlx::Any>::new(
         "SELECT id, name, description, created_at, updated_at FROM projects ORDER BY updated_at_ms ",
     );
     qb.push(order_sql)
@@ -47,15 +48,14 @@ pub async fn list_project_records(
 }
 
 pub async fn load_project_record(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
 ) -> Result<Option<ProjectRecord>, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT id, name, description, created_at, updated_at FROM projects WHERE id = ?",
-    )
-    .bind(project_id)
-    .fetch_optional(db)
-    .await?;
+    let row = db
+        .query("SELECT id, name, description, created_at, updated_at FROM projects WHERE id = ?")
+        .bind(project_id)
+        .fetch_optional(db)
+        .await?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -75,16 +75,18 @@ pub async fn load_project_record(
     }))
 }
 
-pub async fn project_name_exists(db: &SqlitePool, project_name: &str) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query_scalar::<_, i64>("SELECT 1 FROM projects WHERE name = ? LIMIT 1")
-        .bind(project_name)
-        .fetch_optional(db)
-        .await?;
+pub async fn project_name_exists(db: &DbPool, project_name: &str) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_scalar::<sqlx::Any, i64>(
+        db.sql("SELECT 1 FROM projects WHERE name = ? LIMIT 1"),
+    )
+    .bind(project_name)
+    .fetch_optional(db)
+    .await?;
     Ok(row.is_some())
 }
 
 pub async fn upsert_project_metadata(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: String,
     payload: ProjectMetadataUpsertRequest,
 ) -> Result<ProjectRecord, sqlx::Error> {
@@ -92,7 +94,8 @@ pub async fn upsert_project_metadata(
     let now_ms_i64 = now_ms() as i64;
     let mut tx = db.begin().await?;
 
-    let existing = sqlx::query("SELECT created_at, created_at_ms FROM projects WHERE id = ?")
+    let existing = db
+        .query("SELECT created_at, created_at_ms FROM projects WHERE id = ?")
         .bind(&project_id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -105,7 +108,7 @@ pub async fn upsert_project_metadata(
         .and_then(|row| row.try_get::<i64, _>("created_at_ms").ok())
         .unwrap_or(now_ms_i64);
 
-    sqlx::query(
+    db.query(
         "INSERT INTO projects (
             id, name, description, created_at, updated_at, created_at_ms, updated_at_ms
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -132,7 +135,7 @@ pub async fn upsert_project_metadata(
 }
 
 pub async fn upsert_project_with_pipelines(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: String,
     payload: ProjectUpsertRequest,
 ) -> Result<ProjectRecord, sqlx::Error> {
@@ -140,7 +143,8 @@ pub async fn upsert_project_with_pipelines(
     let now_ms_i64 = now_ms() as i64;
     let mut tx = db.begin().await?;
 
-    let existing = sqlx::query("SELECT created_at, created_at_ms FROM projects WHERE id = ?")
+    let existing = db
+        .query("SELECT created_at, created_at_ms FROM projects WHERE id = ?")
         .bind(&project_id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -159,7 +163,7 @@ pub async fn upsert_project_with_pipelines(
         .clone()
         .unwrap_or_else(|| now_iso.clone());
 
-    sqlx::query(
+    db.query(
         "INSERT INTO projects (
             id, name, description, created_at, updated_at, created_at_ms, updated_at_ms, spec_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -181,7 +185,7 @@ pub async fn upsert_project_with_pipelines(
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("DELETE FROM pipelines WHERE project_id = ?")
+    db.query("DELETE FROM pipelines WHERE project_id = ?")
         .bind(&project_id)
         .execute(&mut *tx)
         .await?;
@@ -195,7 +199,7 @@ pub async fn upsert_project_with_pipelines(
             steps: pipeline_input.steps,
         };
 
-        sqlx::query(
+        db.query(
             "INSERT INTO pipelines (
                 id, project_id, position, name, description, created_at, updated_at, pipeline_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -219,7 +223,7 @@ pub async fn upsert_project_with_pipelines(
 }
 
 pub async fn create_project_with_pipelines(
-    db: &SqlitePool,
+    db: &DbPool,
     project_name: String,
     pipelines: Vec<Pipeline>,
 ) -> Result<ProjectRecord, sqlx::Error> {
@@ -228,7 +232,7 @@ pub async fn create_project_with_pipelines(
     let now_ms_i64 = now_ms() as i64;
     let mut tx = db.begin().await?;
 
-    sqlx::query(
+    db.query(
         "INSERT INTO projects (
             id, name, description, created_at, updated_at, created_at_ms, updated_at_ms, spec_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -248,7 +252,7 @@ pub async fn create_project_with_pipelines(
         let pipeline_id = pipeline.id.clone().unwrap_or_else(new_uuid_v7);
         pipeline.id = Some(pipeline_id.clone());
 
-        sqlx::query(
+        db.query(
             "INSERT INTO pipelines (
                 id, project_id, position, name, description, created_at, updated_at, pipeline_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

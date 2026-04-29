@@ -68,6 +68,8 @@ pub struct LocalArgs {
 pub enum LocalCommands {
     #[command(about = "Start a project-local Previa context")]
     Up(UpArgs),
+    #[command(about = "Push a project-local Previa project to a remote Previa main")]
+    Push(LocalPushArgs),
     #[command(about = "Stop a project-local detached context or selected local runners")]
     Down(DownArgs),
     #[command(about = "Show the current state of a project-local context")]
@@ -76,6 +78,28 @@ pub enum LocalCommands {
     Logs(LogsArgs),
     #[command(about = "Open the Previa IDE with the project-local context")]
     Open(OpenArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Push a project-local Previa project to a remote Previa main")]
+pub struct LocalPushArgs {
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Local context name"
+    )]
+    pub context: String,
+    #[arg(long = "project", value_name = "ID_OR_NAME")]
+    pub project: String,
+    #[arg(long = "to", value_name = "REMOTE_URL")]
+    pub to: String,
+    #[arg(long = "remote-project-id", value_name = "PROJECT_ID")]
+    pub remote_project_id: Option<String>,
+    #[arg(long = "overwrite")]
+    pub overwrite: bool,
+    #[arg(long = "include-history")]
+    pub include_history: bool,
 }
 
 #[derive(Debug, Args)]
@@ -436,5 +460,33 @@ mod tests {
 
         assert_eq!(cli.home.as_deref(), Some(std::path::Path::new("./custom")));
         assert!(matches!(cli.command, Commands::Local(_)));
+    }
+
+    #[test]
+    fn parses_local_push() {
+        let cli = Cli::try_parse_from([
+            "previa",
+            "local",
+            "push",
+            "--project",
+            "my_app",
+            "--to",
+            "https://remote.example",
+            "--overwrite",
+            "--include-history",
+        ])
+        .expect("parse local push");
+
+        let Commands::Local(local) = cli.command else {
+            panic!("expected local command");
+        };
+        let super::LocalCommands::Push(args) = local.command else {
+            panic!("expected local push");
+        };
+        assert_eq!(args.context, "default");
+        assert_eq!(args.project, "my_app");
+        assert_eq!(args.to, "https://remote.example");
+        assert!(args.overwrite);
+        assert!(args.include_history);
     }
 }

@@ -1,17 +1,17 @@
 mod server;
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use reqwest::Client;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::server::build_app;
-use crate::server::db::{backfill_project_spec_md5_hashes, cancel_stale_e2e_queues};
+use crate::server::db::{
+    DatabaseKind, DbPool, backfill_project_spec_md5_hashes, cancel_stale_e2e_queues,
+};
 use crate::server::execution::{SchedulerConfig, parse_runner_endpoints};
 use crate::server::mcp::models::McpConfig;
 use crate::server::state::{AppState, DB_SCHEMA_VERSION};
@@ -71,19 +71,23 @@ async fn main() {
     let context_name = std::env::var("PREVIA_CONTEXT").unwrap_or_else(|_| "default".to_owned());
     let bind_addr = format!("{}:{}", address, port);
 
-    let connect_options = SqliteConnectOptions::from_str(&database_url)
-        .expect("invalid ORCHESTRATOR_DATABASE_URL")
-        .create_if_missing(true)
-        .foreign_keys(true);
-    let db = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect_with(connect_options)
+    let db = DbPool::connect(&database_url, 5)
         .await
-        .expect("failed to connect orchestrator sqlite database");
-    sqlx::migrate!()
-        .run(&db)
-        .await
-        .expect("failed to run orchestrator database migrations");
+        .expect("failed to connect orchestrator database");
+    match db.kind() {
+        DatabaseKind::Sqlite => {
+            sqlx::migrate!("./migrations/sqlite")
+                .run(db.pool())
+                .await
+                .expect("failed to run sqlite orchestrator database migrations");
+        }
+        DatabaseKind::Postgres => {
+            sqlx::migrate!("./migrations/postgres")
+                .run(db.pool())
+                .await
+                .expect("failed to run postgres orchestrator database migrations");
+        }
+    }
     let backfilled_spec_hashes = backfill_project_spec_md5_hashes(&db)
         .await
         .expect("failed to backfill OpenAPI spec md5 hashes");
