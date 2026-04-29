@@ -52,6 +52,49 @@ previa --home ./.previa up -d
 previa --home ./.previa status
 ```
 
+For repository-local workflows, prefer the `local` command:
+
+```bash
+previa local up -d
+previa local status
+previa local open
+previa local down
+```
+
+`previa local ...` uses `./.previa` as the runtime home unless an explicit
+global `--home <PATH>` is provided.
+
+## `previa local`
+
+Runs common Previa commands with a project-local runtime home.
+
+```text
+previa local <COMMAND>
+```
+
+Supported commands:
+
+- `up`
+- `down`
+- `status`
+- `logs`
+- `open`
+
+Examples:
+
+```bash
+previa local up -d
+previa local status
+previa local open
+previa local logs
+previa local down
+```
+
+Notes:
+
+- `local up` keeps the same behavior as `up`; pass `-d` or `--detach` for detached mode.
+- `previa --home ./custom local status` uses `./custom`, because explicit `--home` wins.
+
 ## `previa init`
 
 Creates a starter `previa-compose.yaml` in the current directory.

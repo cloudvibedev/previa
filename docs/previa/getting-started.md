@@ -70,15 +70,18 @@ previa down
 
 ## Work Inside a Repo
 
-Use a project-local runtime home:
+Use the project-local workflow:
 
 ```bash
-previa --home ./.previa up --detach
-previa --home ./.previa status
-previa --home ./.previa down
+previa local up --detach
+previa local status
+previa local open
+previa local down
 ```
 
 This keeps runtime state, logs, and database files inside the repository.
+
+This is shorthand for passing `--home ./.previa` to the regular commands.
 
 ## Optional: Pull a Specific Image Tag
 
