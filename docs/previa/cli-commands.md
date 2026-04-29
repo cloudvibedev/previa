@@ -19,6 +19,7 @@ Current commands:
 - `init`
 - `up`
 - `mcp`
+- `runner`
 - `pull`
 - `down`
 - `restart`
@@ -76,6 +77,7 @@ Supported commands:
 
 - `up`
 - `push`
+- `runner`
 - `down`
 - `status`
 - `logs`
@@ -87,6 +89,8 @@ Examples:
 previa local up -d
 previa local push --project my_app --to https://previa.example.com
 previa local push --project my_app --to https://previa.example.com --overwrite
+previa local runner list
+previa local runner add 10.0.0.12:55880 --name staging-a
 previa local status
 previa local open
 previa local logs
@@ -97,6 +101,20 @@ Notes:
 
 - `local up` keeps the same behavior as `up`; pass `-d` or `--detach` for detached mode.
 - `previa --home ./custom local status` uses `./custom`, because explicit `--home` wins.
+
+### `previa local runner`
+
+Runs the same runner registry commands as `previa runner`, using the project-local runtime home `./.previa`.
+
+Examples:
+
+```bash
+previa local runner list
+previa local runner add 10.0.0.12:55880 --name staging-a
+previa local runner disable staging-a
+previa local runner enable staging-a
+previa local runner remove staging-a
+```
 
 ### `previa local push`
 
@@ -220,6 +238,48 @@ See also:
 - [Compose source](./compose.md)
 - [Pipeline import](./pipeline-import.md)
 - [Main and runner authentication](./main-runner-auth.md)
+
+## `previa runner`
+
+Manages the dynamic runner registry stored by `previa-main`.
+
+```text
+previa runner <COMMAND>
+```
+
+Supported commands:
+
+- `list`: list registered runners
+- `add <ENDPOINT>`: add or update a runner endpoint
+- `enable <ID_ENDPOINT_OR_NAME>`: enable a runner
+- `disable <ID_ENDPOINT_OR_NAME>`: disable a runner
+- `remove <ID_ENDPOINT_OR_NAME>`: remove a runner
+
+Important options:
+
+- `--context <CONTEXT>`: selects the detached context, default `default`
+- `--json`: available on `list`
+- `--name <NAME>`: available on `add`
+- `--disabled`: registers the runner disabled on `add`
+
+Examples:
+
+```bash
+previa runner list
+previa runner list --json
+previa runner add 10.0.0.12:55880 --name staging-a
+previa runner add http://10.0.0.13:55880 --disabled
+previa runner disable staging-a
+previa runner enable 10.0.0.12:55880
+previa runner remove staging-a
+```
+
+Behavior:
+
+- endpoints are normalized to include `http://` when no scheme is provided
+- selectors can match the runner ID, endpoint, or name
+- the command talks to the selected detached `previa-main`; start the context first with `previa up -d`
+- `previa local runner ...` uses the same registry commands with project-local home `./.previa`
 
 ## `previa mcp`
 
