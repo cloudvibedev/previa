@@ -33,6 +33,8 @@ Accepted attached runner formats:
 
 `previa-main` stores runners in its database. On startup, endpoints from `RUNNER_ENDPOINTS` are automatically inserted or updated in that registry and enabled.
 
+The registry has a persistent `enabled` flag. A disabled runner remains stored for later use, but `previa-main` ignores it before checking health.
+
 You can manage the registry without restarting the context:
 
 ```bash
@@ -50,7 +52,7 @@ previa local runner list
 previa local runner add 10.0.0.12:55880 --name staging-a
 ```
 
-Before each execution, `previa-main` reads enabled runners from the registry, checks `/health` and `/info`, marks failed runners as unhealthy, and runs only with runners that respond successfully.
+Before each execution, `previa-main` reads enabled runners from the registry, checks `/health` and `/info`, marks failed runners as unhealthy, and runs only with enabled runners whose `/health` responds successfully.
 
 ## Mixed Topologies
 

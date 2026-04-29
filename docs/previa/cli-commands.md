@@ -278,6 +278,9 @@ Behavior:
 
 - endpoints are normalized to include `http://` when no scheme is provided
 - selectors can match the runner ID, endpoint, or name
+- `enable` and `disable` update the persistent `enabled` flag stored in the `runners` table
+- disabled runners stay registered, but `previa-main` ignores them before probing `/health`
+- enabled runners are probed with `/health` before execution; only healthy runners are selected
 - the command talks to the selected detached `previa-main`; start the context first with `previa up -d`
 - `previa local runner ...` uses the same registry commands with project-local home `./.previa`
 
