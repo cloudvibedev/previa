@@ -2,7 +2,7 @@
 
 All notable changes to Previa are documented in this file.
 
-## [v1.0.0-alpha.14] - 2026-04-24
+## [v1.0.0-alpha.14] - 2026-04-29
 
 ### Features
 - Add MCP client install commands (433737b)
