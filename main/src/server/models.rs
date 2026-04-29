@@ -478,6 +478,37 @@ pub struct RunnerInfo {
     pub runtime_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunnerRecord {
+    pub id: String,
+    pub endpoint: String,
+    pub name: Option<String>,
+    pub source: String,
+    pub enabled: bool,
+    pub health_status: String,
+    pub last_seen_at: Option<String>,
+    pub last_error: Option<String>,
+    pub runtime: Option<RunnerRuntimeInfo>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunnerUpsertRequest {
+    pub endpoint: String,
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunnerUpdateRequest {
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OrchestratorInfoResponse {

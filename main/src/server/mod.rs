@@ -21,6 +21,9 @@ use crate::server::handlers::projects::{
     create_project, delete_project, get_project, list_projects, upsert_project,
 };
 use crate::server::handlers::proxy::proxy_request;
+use crate::server::handlers::runners::{
+    create_runner, delete_runner, get_runner, list_runners, update_runner,
+};
 use crate::server::handlers::specs::{
     create_project_spec, delete_project_spec, get_project_spec, list_project_specs,
     upsert_project_spec, validate_openapi_spec,
@@ -66,6 +69,11 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
         )
         .route("/api/v1/projects", get(list_projects))
         .route("/api/v1/projects", post(create_project))
+        .route("/api/v1/runners", get(list_runners).post(create_runner))
+        .route(
+            "/api/v1/runners/{runnerId}",
+            get(get_runner).patch(update_runner).delete(delete_runner),
+        )
         .route("/api/v1/projects/import", post(import_project))
         .route("/api/v1/projects/import/pipelines", post(import_pipelines))
         .route("/api/v1/specs/validate", post(validate_openapi_spec))
@@ -185,7 +193,6 @@ mod tests {
             client: Client::new(),
             db,
             context_name: "default".to_owned(),
-            runner_endpoints: Vec::new(),
             runner_auth_key: None,
             rps_per_node: 1000,
             scheduler: ExecutionScheduler::new(Default::default()),
@@ -277,6 +284,88 @@ mod tests {
                 .headers()
                 .contains_key("access-control-allow-origin")
         );
+    }
+
+    #[tokio::test]
+    async fn runner_crud_routes_manage_registered_runners() {
+        let app = test_app(false).await;
+
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/runners")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"endpoint":"runner-api:5590","name":"api-a","enabled":true}"#,
+                    ))
+                    .expect("runner create request"),
+            )
+            .await
+            .expect("runner create response");
+
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let body = to_bytes(created.into_body(), usize::MAX)
+            .await
+            .expect("read runner create body");
+        let runner: Value = serde_json::from_slice(&body).expect("parse runner create body");
+        assert_eq!(runner["endpoint"], "http://runner-api:5590");
+        assert_eq!(runner["name"], "api-a");
+        assert_eq!(runner["enabled"], true);
+        let runner_id = runner["id"].as_str().expect("runner id");
+
+        let updated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PATCH)
+                    .uri(format!("/api/v1/runners/{runner_id}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"enabled":false}"#))
+                    .expect("runner update request"),
+            )
+            .await
+            .expect("runner update response");
+
+        assert_eq!(updated.status(), StatusCode::OK);
+        let body = to_bytes(updated.into_body(), usize::MAX)
+            .await
+            .expect("read runner update body");
+        let runner: Value = serde_json::from_slice(&body).expect("parse runner update body");
+        assert_eq!(runner["enabled"], false);
+
+        let listed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/runners")
+                    .body(Body::empty())
+                    .expect("runner list request"),
+            )
+            .await
+            .expect("runner list response");
+
+        assert_eq!(listed.status(), StatusCode::OK);
+        let body = to_bytes(listed.into_body(), usize::MAX)
+            .await
+            .expect("read runner list body");
+        let runners: Value = serde_json::from_slice(&body).expect("parse runner list body");
+        assert_eq!(runners.as_array().expect("runner list array").len(), 1);
+
+        let deleted = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!("/api/v1/runners/{runner_id}"))
+                    .body(Body::empty())
+                    .expect("runner delete request"),
+            )
+            .await
+            .expect("runner delete response");
+
+        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]
@@ -427,7 +516,6 @@ mod tests {
                 client: Client::new(),
                 db,
                 context_name: "default".to_owned(),
-                runner_endpoints: Vec::new(),
                 runner_auth_key: None,
                 rps_per_node: 1000,
                 scheduler: ExecutionScheduler::new(Default::default()),

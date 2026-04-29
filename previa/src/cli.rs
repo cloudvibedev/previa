@@ -35,6 +35,8 @@ pub enum Commands {
     Up(UpArgs),
     #[command(about = "Install and inspect MCP client configuration")]
     Mcp(McpArgs),
+    #[command(about = "Manage registered runner endpoints")]
+    Runner(RunnerArgs),
     #[command(about = "Pull published runtime images")]
     Pull(PullArgs),
     #[command(about = "Stop a detached context or selected local runners")]
@@ -70,6 +72,8 @@ pub enum LocalCommands {
     Up(UpArgs),
     #[command(about = "Push a project-local Previa project to a remote Previa main")]
     Push(LocalPushArgs),
+    #[command(about = "Manage registered runner endpoints in a project-local context")]
+    Runner(RunnerArgs),
     #[command(about = "Stop a project-local detached context or selected local runners")]
     Down(DownArgs),
     #[command(about = "Show the current state of a project-local context")]
@@ -78,6 +82,70 @@ pub enum LocalCommands {
     Logs(LogsArgs),
     #[command(about = "Open the Previa IDE with the project-local context")]
     Open(OpenArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(about = "Manage registered runner endpoints")]
+pub struct RunnerArgs {
+    #[command(subcommand)]
+    pub command: RunnerCommands,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RunnerCommands {
+    #[command(about = "List registered runners")]
+    List(RunnerListArgs),
+    #[command(about = "Add or update a registered runner")]
+    Add(RunnerAddArgs),
+    #[command(about = "Enable a registered runner")]
+    Enable(RunnerSelectorArgs),
+    #[command(about = "Disable a registered runner")]
+    Disable(RunnerSelectorArgs),
+    #[command(about = "Remove a registered runner")]
+    Remove(RunnerSelectorArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct RunnerListArgs {
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
+    pub context: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RunnerAddArgs {
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
+    pub context: String,
+    #[arg(value_name = "ENDPOINT")]
+    pub endpoint: String,
+    #[arg(long = "name", value_name = "NAME")]
+    pub name: Option<String>,
+    #[arg(long = "disabled")]
+    pub disabled: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RunnerSelectorArgs {
+    #[arg(
+        long = "context",
+        value_name = "CONTEXT",
+        default_value = "default",
+        help = "Context name"
+    )]
+    pub context: String,
+    #[arg(value_name = "ID_ENDPOINT_OR_NAME")]
+    pub selector: String,
 }
 
 #[derive(Debug, Args)]
@@ -488,5 +556,29 @@ mod tests {
         assert_eq!(args.to, "https://remote.example");
         assert!(args.overwrite);
         assert!(args.include_history);
+    }
+
+    #[test]
+    fn parses_runner_add() {
+        let cli = Cli::try_parse_from([
+            "previa",
+            "runner",
+            "add",
+            "localhost:5590",
+            "--name",
+            "local-a",
+        ])
+        .expect("parse runner add");
+
+        let Commands::Runner(args) = cli.command else {
+            panic!("expected runner command");
+        };
+        let super::RunnerCommands::Add(args) = args.command else {
+            panic!("expected runner add");
+        };
+        assert_eq!(args.context, "default");
+        assert_eq!(args.endpoint, "localhost:5590");
+        assert_eq!(args.name.as_deref(), Some("local-a"));
+        assert!(!args.disabled);
     }
 }

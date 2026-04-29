@@ -15,6 +15,7 @@ mod paths;
 mod pipeline_import;
 mod process;
 mod pull;
+mod runner_cli;
 mod runtime;
 mod selectors;
 
@@ -59,6 +60,7 @@ use crate::process::{
     startup_binding_conflicts, validate_startup_bindings,
 };
 use crate::pull::pull_images;
+use crate::runner_cli::run_runner_cli;
 use crate::runtime::{
     DetachedRuntimeState, LocalRunnerRuntime, MainRuntime, RuntimeBackend, acquire_lock,
     read_runtime_state, remove_runtime_state, write_runtime_state,
@@ -79,6 +81,7 @@ pub async fn run() -> Result<()> {
         Commands::Local(args) => cmd_local(&paths, &http, args).await,
         Commands::Up(args) => cmd_up(&paths, &http, args).await,
         Commands::Mcp(args) => cmd_mcp(&paths, &http, args).await,
+        Commands::Runner(args) => run_runner_cli(&paths, &http, args).await,
         Commands::Pull(args) => cmd_pull(args).await,
         Commands::Down(args) => cmd_down(&paths, args).await,
         Commands::Restart(args) => cmd_restart(&paths, &http, args).await,
@@ -107,6 +110,7 @@ async fn cmd_local(paths: &PreviaPaths, http: &Client, args: LocalArgs) -> Resul
     match args.command {
         LocalCommands::Up(args) => cmd_up(paths, http, args).await,
         LocalCommands::Push(args) => cmd_local_push(paths, http, args).await,
+        LocalCommands::Runner(args) => run_runner_cli(paths, http, args).await,
         LocalCommands::Down(args) => cmd_down(paths, args).await,
         LocalCommands::Status(args) => cmd_status(paths, http, args).await,
         LocalCommands::Logs(args) => cmd_logs(paths, args).await,

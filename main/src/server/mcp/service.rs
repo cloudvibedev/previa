@@ -20,7 +20,6 @@ use crate::server::db::{
     upsert_project_with_pipelines,
 };
 use crate::server::docs::build_openapi_document;
-use crate::server::execution::collect_runner_statuses;
 use crate::server::execution::e2e_queue::{
     QueueError, cancel_e2e_queue, create_e2e_queue, get_current_e2e_queue_snapshot,
     get_e2e_queue_snapshot,
@@ -776,12 +775,14 @@ async fn execute_tool(state: &AppState, params: ToolCallParams) -> Result<ToolCa
     match params.name.as_str() {
         "health" => Ok(tool_success(json!({ "status": "ok" }))),
         "get_info" => {
-            let runners = collect_runner_statuses(
-                &state.client,
-                &state.runner_endpoints,
-                state.runner_auth_key.as_deref(),
-            )
-            .await;
+            let runners =
+                crate::server::services::runner_registry::collect_registered_runner_statuses(
+                    &state.db,
+                    &state.client,
+                    state.runner_auth_key.as_deref(),
+                )
+                .await
+                .map_err(|err| format!("failed to load runner registry: {err}"))?;
             let payload = OrchestratorInfoResponse {
                 context: state.context_name.clone(),
                 total_runners: runners.len(),
@@ -3634,7 +3635,6 @@ mod tests {
             client: reqwest::Client::new(),
             db,
             context_name: "test".to_owned(),
-            runner_endpoints: Vec::new(),
             runner_auth_key: None,
             rps_per_node: 1,
             scheduler: ExecutionScheduler::new(Default::default()),

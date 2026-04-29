@@ -1,5 +1,4 @@
 use crate::server::docs::build_openapi_document;
-use crate::server::execution::collect_runner_statuses;
 use crate::server::models::OrchestratorInfoResponse;
 use crate::server::state::AppState;
 use axum::Json;
@@ -25,12 +24,13 @@ pub async fn health() -> StatusCode {
     )
 )]
 pub async fn get_info(State(state): State<AppState>) -> Json<OrchestratorInfoResponse> {
-    let runners = collect_runner_statuses(
+    let runners = crate::server::services::runner_registry::collect_registered_runner_statuses(
+        &state.db,
         &state.client,
-        &state.runner_endpoints,
         state.runner_auth_key.as_deref(),
     )
-    .await;
+    .await
+    .unwrap_or_default();
     let active_runners = runners.iter().filter(|runner| runner.active).count();
 
     Json(OrchestratorInfoResponse {
@@ -67,7 +67,6 @@ mod tests {
             client: Client::new(),
             db,
             context_name: "other".to_owned(),
-            runner_endpoints: Vec::new(),
             runner_auth_key: None,
             rps_per_node: 1000,
             scheduler: ExecutionScheduler::new(Default::default()),
