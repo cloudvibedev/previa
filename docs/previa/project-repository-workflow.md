@@ -49,6 +49,27 @@ previa local open
 
 This keeps the detached stack for this repository under `./.previa` instead of mixing it with a shared global home.
 
+## Push a Local Project to Remote
+
+After creating or editing a project locally, push it to a remote Previa main:
+
+```bash
+previa local push --project my_app_smoke --to https://previa.example.com
+```
+
+If the project already exists on the remote, the command fails unless overwrite
+is explicit:
+
+```bash
+previa local push \
+  --project my_app_smoke \
+  --to https://previa.example.com \
+  --overwrite
+```
+
+`--overwrite` replaces the remote project with the local snapshot instead of
+merging. Execution history is not included unless `--include-history` is passed.
+
 ## 2. Choose One of Two Pipeline Styles
 
 There are two practical ways to keep pipelines in the repo.

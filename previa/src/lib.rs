@@ -7,6 +7,7 @@ mod envfile;
 mod export;
 mod health;
 mod init;
+mod local_push;
 mod logs;
 mod mcp_cli;
 mod output;
@@ -43,6 +44,7 @@ use crate::health::{
     DerivedState, probe_health, state_from_pid_and_health, state_from_running_and_health,
 };
 use crate::init::init_compose;
+use crate::local_push::push_project;
 use crate::logs::{follow_logs, print_logs};
 use crate::mcp_cli::run_mcp;
 use crate::output::{
@@ -104,11 +106,48 @@ fn effective_home(cli: &Cli) -> Option<PathBuf> {
 async fn cmd_local(paths: &PreviaPaths, http: &Client, args: LocalArgs) -> Result<()> {
     match args.command {
         LocalCommands::Up(args) => cmd_up(paths, http, args).await,
+        LocalCommands::Push(args) => cmd_local_push(paths, http, args).await,
         LocalCommands::Down(args) => cmd_down(paths, args).await,
         LocalCommands::Status(args) => cmd_status(paths, http, args).await,
         LocalCommands::Logs(args) => cmd_logs(paths, args).await,
         LocalCommands::Open(args) => cmd_open(paths, args).await,
     }
+}
+
+async fn cmd_local_push(
+    paths: &PreviaPaths,
+    _http: &Client,
+    args: crate::cli::LocalPushArgs,
+) -> Result<()> {
+    let stack_name = parse_stack_name(&args.context)?;
+    let stack_paths = paths.stack(&stack_name);
+    let state = read_required_state(&stack_paths)?;
+    let local_base_url = crate::browser::main_url(&state.main.address, state.main.port);
+    let http = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("failed to build HTTP client")?;
+    let outcome = push_project(&http, &local_base_url, &args).await?;
+
+    if let Some(replaced) = outcome.remote_project_replaced.as_deref() {
+        println!(
+            "replaced remote project '{}' with '{}' ({})",
+            replaced, outcome.project_name, outcome.project_id
+        );
+    } else {
+        println!(
+            "created remote project '{}' ({})",
+            outcome.project_name, outcome.project_id
+        );
+    }
+    println!(
+        "pushed {} pipeline(s), {} spec(s), {} e2e history record(s), {} load history record(s)",
+        outcome.pipelines_imported,
+        outcome.specs_imported,
+        outcome.e2e_history_imported,
+        outcome.load_history_imported
+    );
+    Ok(())
 }
 
 fn cmd_init(args: InitArgs) -> Result<()> {

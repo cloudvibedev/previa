@@ -75,6 +75,7 @@ previa local <COMMAND>
 Supported commands:
 
 - `up`
+- `push`
 - `down`
 - `status`
 - `logs`
@@ -84,6 +85,8 @@ Examples:
 
 ```bash
 previa local up -d
+previa local push --project my_app --to https://previa.example.com
+previa local push --project my_app --to https://previa.example.com --overwrite
 previa local status
 previa local open
 previa local logs
@@ -94,6 +97,38 @@ Notes:
 
 - `local up` keeps the same behavior as `up`; pass `-d` or `--detach` for detached mode.
 - `previa --home ./custom local status` uses `./custom`, because explicit `--home` wins.
+
+### `previa local push`
+
+Pushes a project from the project-local context to a remote `previa-main`.
+
+```text
+previa local push --project <ID_OR_NAME> --to <REMOTE_URL> [OPTIONS]
+```
+
+Important options:
+
+- `--project <ID_OR_NAME>`: local project selector, by ID or exact name
+- `--to <REMOTE_URL>`: remote `previa-main` base URL
+- `--overwrite`: replace an existing remote project instead of failing
+- `--include-history`: include E2E and load history in the pushed snapshot
+- `--remote-project-id <PROJECT_ID>`: select the remote project to replace explicitly
+
+Behavior:
+
+- without `--overwrite`, `push` creates the remote project only when no matching remote project exists
+- with `--overwrite`, `push` deletes the matched remote project and imports the local snapshot
+- matching checks the local project ID first, then exact project name
+- by default, execution history is not pushed
+
+Examples:
+
+```bash
+previa local push --project my_app --to https://previa.example.com
+previa local push --project my_app --to https://previa.example.com --overwrite
+previa local push --project my_app --to https://previa.example.com --overwrite --include-history
+previa local push --project my_app --to https://previa.example.com --remote-project-id prj_123 --overwrite
+```
 
 ## `previa init`
 
