@@ -1,0 +1,1146 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out forwards;
+  will-change: transform, opacity;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s ease-out forwards;
+  will-change: transform, opacity;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 220 14% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 14% 10%;
+
+    --popover: 240 6% 98%;
+    --popover-foreground: 220 14% 10%;
+
+    --primary: 214 100% 47%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 270 63% 47%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+
+    --accent: 240 5% 96%;
+    --accent-foreground: 220 14% 10%;
+
+    --destructive: 339 91% 51%;
+    --destructive-foreground: 220 14% 10%;
+
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 214 100% 47%;
+
+    --radius: 0.75rem;
+
+    --warning: 37 91% 55%;
+    --warning-foreground: 30 92% 10%;
+    --success: 145 65% 44%;
+    --success-foreground: 0 0% 100%;
+
+    --sidebar-background: 240 5% 96%;
+    --sidebar-foreground: 220 14% 10%;
+    --sidebar-primary: 214 100% 47%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 92%;
+    --sidebar-accent-foreground: 220 14% 10%;
+    --sidebar-border: 240 6% 90%;
+    --sidebar-ring: 214 100% 47%;
+
+    --status-pending: 215 16% 47%;
+    --status-running: 214 100% 47%;
+    --status-success: 145 65% 44%;
+    --status-error: 339 91% 51%;
+
+    --glass-bg: 0 0% 100% / 0.6;
+    --glass-border: 240 6% 90% / 0.5;
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.02);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.1);
+    --shadow-primary-glow: 0 4px 20px hsl(var(--primary) / 0.1);
+    --shadow-primary-button: 0 2px 10px hsl(var(--primary) / 0.25);
+    --shadow-ring-success: 0 0 0 1px hsl(145 65% 44% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(339 91% 51% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(var(--primary) / 0.2);
+  }
+
+  .dark {
+    --background: 230 15% 10%;
+    --foreground: 0 0% 100%;
+
+    --card: 230 15% 12%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 230 15% 12%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 214 100% 47%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 270 63% 47%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 230 10% 14%;
+    --muted-foreground: 240 4% 46%;
+
+    --accent: 230 10% 14%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 339 91% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 214 100% 47%;
+
+    --warning: 37 91% 55%;
+    --warning-foreground: 0 0% 100%;
+    --success: 145 65% 44%;
+    --success-foreground: 0 0% 100%;
+
+    --sidebar-background: 230 15% 6%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 214 100% 47%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 230 10% 12%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 240 4% 14%;
+    --sidebar-ring: 214 100% 47%;
+
+    --status-pending: 240 4% 46%;
+    --status-running: 214 100% 47%;
+    --status-success: 145 65% 44%;
+    --status-error: 339 91% 51%;
+
+    --glass-bg: 240 6% 10% / 0.4;
+    --glass-border: 240 4% 16% / 0.5;
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.15);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.2), 0 6px 24px rgba(0, 0, 0, 0.12);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
+    --shadow-primary-glow: 0 4px 20px hsl(var(--primary) / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(var(--primary) / 0.3);
+    --shadow-ring-success: 0 0 0 1px hsl(145 65% 44% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(339 91% 51% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(var(--primary) / 0.2);
+  }
+
+  /* ========== PALETTE: OCEAN ========== */
+  [data-palette="ocean"] {
+    --primary: 192 91% 36%;
+    --ring: 192 91% 36%;
+    --secondary: 170 72% 38%;
+    --sidebar-primary: 192 91% 36%;
+    --sidebar-ring: 192 91% 36%;
+    --status-running: 192 91% 36%;
+    --shadow-primary-glow: 0 4px 20px hsl(192 91% 36% / 0.1);
+    --shadow-primary-button: 0 2px 10px hsl(192 91% 36% / 0.25);
+    --shadow-ring-primary: 0 0 0 1px hsl(192 91% 36% / 0.2);
+  }
+
+  .dark[data-palette="ocean"] {
+    --shadow-primary-glow: 0 4px 20px hsl(192 91% 36% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(192 91% 36% / 0.3);
+  }
+
+  /* ========== PALETTE: FOREST ========== */
+  [data-palette="forest"] {
+    --primary: 142 72% 35%;
+    --ring: 142 72% 35%;
+    --secondary: 84 65% 38%;
+    --sidebar-primary: 142 72% 35%;
+    --sidebar-ring: 142 72% 35%;
+    --status-running: 142 72% 35%;
+    --shadow-primary-glow: 0 4px 20px hsl(142 72% 35% / 0.1);
+    --shadow-primary-button: 0 2px 10px hsl(142 72% 35% / 0.25);
+    --shadow-ring-primary: 0 0 0 1px hsl(142 72% 35% / 0.2);
+  }
+
+  .dark[data-palette="forest"] {
+    --shadow-primary-glow: 0 4px 20px hsl(142 72% 35% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(142 72% 35% / 0.3);
+  }
+
+  /* ========== PALETTE: SUNSET ========== */
+  [data-palette="sunset"] {
+    --primary: 25 95% 53%;
+    --ring: 25 95% 53%;
+    --secondary: 339 91% 51%;
+    --sidebar-primary: 25 95% 53%;
+    --sidebar-ring: 25 95% 53%;
+    --status-running: 25 95% 53%;
+    --shadow-primary-glow: 0 4px 20px hsl(25 95% 53% / 0.1);
+    --shadow-primary-button: 0 2px 10px hsl(25 95% 53% / 0.25);
+    --shadow-ring-primary: 0 0 0 1px hsl(25 95% 53% / 0.2);
+  }
+
+  .dark[data-palette="sunset"] {
+    --shadow-primary-glow: 0 4px 20px hsl(25 95% 53% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(25 95% 53% / 0.3);
+  }
+
+  /* ========== PALETTE: ROSE ========== */
+  [data-palette="rose"] {
+    --primary: 346 77% 50%;
+    --ring: 346 77% 50%;
+    --secondary: 262 83% 58%;
+    --sidebar-primary: 346 77% 50%;
+    --sidebar-ring: 346 77% 50%;
+    --status-running: 346 77% 50%;
+    --shadow-primary-glow: 0 4px 20px hsl(346 77% 50% / 0.1);
+    --shadow-primary-button: 0 2px 10px hsl(346 77% 50% / 0.25);
+    --shadow-ring-primary: 0 0 0 1px hsl(346 77% 50% / 0.2);
+  }
+
+  .dark[data-palette="rose"] {
+    --shadow-primary-glow: 0 4px 20px hsl(346 77% 50% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(346 77% 50% / 0.3);
+  }
+
+  /* ========== THEME: ONE DARK PRO ========== */
+  [data-palette="one-dark"] {
+    --background: 220 13% 18%;
+    --foreground: 219 14% 71%;
+    --card: 220 17% 14%;
+    --card-foreground: 219 14% 71%;
+    --popover: 220 17% 14%;
+    --popover-foreground: 219 14% 71%;
+    --primary: 207 82% 66%;
+    --primary-foreground: 220 13% 10%;
+    --secondary: 286 60% 67%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 12% 22%;
+    --muted-foreground: 219 10% 52%;
+    --accent: 220 12% 22%;
+    --accent-foreground: 219 14% 71%;
+    --destructive: 355 65% 65%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 10% 26%;
+    --input: 220 10% 26%;
+    --ring: 207 82% 66%;
+    --warning: 39 67% 69%;
+    --warning-foreground: 220 13% 10%;
+    --success: 95 38% 62%;
+    --success-foreground: 220 13% 10%;
+    --sidebar-background: 220 17% 14%;
+    --sidebar-foreground: 219 14% 71%;
+    --sidebar-primary: 207 82% 66%;
+    --sidebar-primary-foreground: 220 13% 10%;
+    --sidebar-accent: 220 12% 19%;
+    --sidebar-accent-foreground: 219 14% 71%;
+    --sidebar-border: 220 10% 22%;
+    --sidebar-ring: 207 82% 66%;
+    --status-pending: 219 10% 52%;
+    --status-running: 207 82% 66%;
+    --status-success: 95 38% 62%;
+    --status-error: 355 65% 65%;
+    --glass-bg: 220 13% 16% / 0.5;
+    --glass-border: 220 10% 26% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.25), 0 6px 24px rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.35);
+    --shadow-primary-glow: 0 4px 20px hsl(207 82% 66% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(207 82% 66% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(207 82% 66% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(95 38% 62% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(355 65% 65% / 0.3);
+  }
+
+  /* ========== THEME: DRACULA ========== */
+  [data-palette="dracula"] {
+    --background: 231 15% 18%;
+    --foreground: 60 30% 96%;
+    --card: 232 14% 15%;
+    --card-foreground: 60 30% 96%;
+    --popover: 232 14% 15%;
+    --popover-foreground: 60 30% 96%;
+    --primary: 265 89% 78%;
+    --primary-foreground: 231 15% 12%;
+    --secondary: 326 100% 74%;
+    --secondary-foreground: 231 15% 12%;
+    --muted: 232 14% 21%;
+    --muted-foreground: 228 8% 52%;
+    --accent: 232 14% 21%;
+    --accent-foreground: 60 30% 96%;
+    --destructive: 0 100% 67%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 232 14% 31%;
+    --input: 232 14% 31%;
+    --ring: 265 89% 78%;
+    --warning: 65 92% 76%;
+    --warning-foreground: 231 15% 12%;
+    --success: 135 94% 65%;
+    --success-foreground: 231 15% 12%;
+    --sidebar-background: 232 14% 15%;
+    --sidebar-foreground: 60 30% 96%;
+    --sidebar-primary: 265 89% 78%;
+    --sidebar-primary-foreground: 231 15% 12%;
+    --sidebar-accent: 232 14% 19%;
+    --sidebar-accent-foreground: 60 30% 96%;
+    --sidebar-border: 232 14% 26%;
+    --sidebar-ring: 265 89% 78%;
+    --status-pending: 228 8% 52%;
+    --status-running: 265 89% 78%;
+    --status-success: 135 94% 65%;
+    --status-error: 0 100% 67%;
+    --glass-bg: 231 15% 16% / 0.5;
+    --glass-border: 232 14% 31% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.25), 0 6px 24px rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.35);
+    --shadow-primary-glow: 0 4px 20px hsl(265 89% 78% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(265 89% 78% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(265 89% 78% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(135 94% 65% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(0 100% 67% / 0.3);
+  }
+
+  /* ========== THEME: MONOKAI PRO ========== */
+  [data-palette="monokai"] {
+    --background: 300 7% 17%;
+    --foreground: 60 6% 97%;
+    --card: 300 10% 13%;
+    --card-foreground: 60 6% 97%;
+    --popover: 300 10% 13%;
+    --popover-foreground: 60 6% 97%;
+    --primary: 44 100% 70%;
+    --primary-foreground: 300 7% 12%;
+    --secondary: 261 86% 78%;
+    --secondary-foreground: 300 7% 12%;
+    --muted: 300 5% 23%;
+    --muted-foreground: 300 3% 52%;
+    --accent: 300 5% 23%;
+    --accent-foreground: 60 6% 97%;
+    --destructive: 1 90% 64%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 300 4% 30%;
+    --input: 300 4% 30%;
+    --ring: 44 100% 70%;
+    --warning: 44 100% 70%;
+    --warning-foreground: 300 7% 12%;
+    --success: 95 38% 62%;
+    --success-foreground: 300 7% 12%;
+    --sidebar-background: 300 10% 13%;
+    --sidebar-foreground: 60 6% 97%;
+    --sidebar-primary: 44 100% 70%;
+    --sidebar-primary-foreground: 300 7% 12%;
+    --sidebar-accent: 300 6% 18%;
+    --sidebar-accent-foreground: 60 6% 97%;
+    --sidebar-border: 300 4% 25%;
+    --sidebar-ring: 44 100% 70%;
+    --status-pending: 300 3% 52%;
+    --status-running: 44 100% 70%;
+    --status-success: 95 38% 62%;
+    --status-error: 1 90% 64%;
+    --glass-bg: 300 7% 15% / 0.5;
+    --glass-border: 300 4% 30% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.25), 0 6px 24px rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.35);
+    --shadow-primary-glow: 0 4px 20px hsl(44 100% 70% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(44 100% 70% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(44 100% 70% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(95 38% 62% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(1 90% 64% / 0.3);
+  }
+
+  /* ========== THEME: MATERIAL THEME ========== */
+  [data-palette="material"] {
+    --background: 200 18% 18%;
+    --foreground: 180 100% 94%;
+    --card: 200 20% 15%;
+    --card-foreground: 180 100% 94%;
+    --popover: 200 20% 15%;
+    --popover-foreground: 180 100% 94%;
+    --primary: 199 92% 76%;
+    --primary-foreground: 200 18% 12%;
+    --secondary: 276 68% 75%;
+    --secondary-foreground: 200 18% 12%;
+    --muted: 200 14% 22%;
+    --muted-foreground: 200 10% 52%;
+    --accent: 200 14% 22%;
+    --accent-foreground: 180 100% 94%;
+    --destructive: 1 77% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 200 15% 27%;
+    --input: 200 15% 27%;
+    --ring: 199 92% 76%;
+    --warning: 36 100% 70%;
+    --warning-foreground: 200 18% 12%;
+    --success: 162 73% 60%;
+    --success-foreground: 200 18% 12%;
+    --sidebar-background: 200 20% 15%;
+    --sidebar-foreground: 180 100% 94%;
+    --sidebar-primary: 199 92% 76%;
+    --sidebar-primary-foreground: 200 18% 12%;
+    --sidebar-accent: 200 16% 19%;
+    --sidebar-accent-foreground: 180 100% 94%;
+    --sidebar-border: 200 15% 23%;
+    --sidebar-ring: 199 92% 76%;
+    --status-pending: 200 10% 52%;
+    --status-running: 199 92% 76%;
+    --status-success: 162 73% 60%;
+    --status-error: 1 77% 55%;
+    --glass-bg: 200 18% 16% / 0.5;
+    --glass-border: 200 15% 27% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.25), 0 6px 24px rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.35);
+    --shadow-primary-glow: 0 4px 20px hsl(199 92% 76% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(199 92% 76% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(199 92% 76% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(162 73% 60% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(1 77% 55% / 0.3);
+  }
+
+  /* ========== THEME: NIGHT OWL ========== */
+  [data-palette="night-owl"] {
+    --background: 207 97% 8%;
+    --foreground: 220 28% 88%;
+    --card: 207 65% 16%;
+    --card-foreground: 220 28% 88%;
+    --popover: 207 65% 16%;
+    --popover-foreground: 220 28% 88%;
+    --primary: 224 100% 75%;
+    --primary-foreground: 207 97% 6%;
+    --secondary: 276 68% 75%;
+    --secondary-foreground: 207 97% 6%;
+    --muted: 207 60% 15%;
+    --muted-foreground: 207 20% 50%;
+    --accent: 207 60% 15%;
+    --accent-foreground: 220 28% 88%;
+    --destructive: 357 91% 67%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 207 50% 22%;
+    --input: 207 50% 22%;
+    --ring: 224 100% 75%;
+    --warning: 31 100% 71%;
+    --warning-foreground: 207 97% 6%;
+    --success: 162 72% 65%;
+    --success-foreground: 207 97% 6%;
+    --sidebar-background: 207 65% 16%;
+    --sidebar-foreground: 220 28% 88%;
+    --sidebar-primary: 224 100% 75%;
+    --sidebar-primary-foreground: 207 97% 6%;
+    --sidebar-accent: 207 55% 19%;
+    --sidebar-accent-foreground: 220 28% 88%;
+    --sidebar-border: 207 45% 19%;
+    --sidebar-ring: 224 100% 75%;
+    --status-pending: 207 20% 50%;
+    --status-running: 224 100% 75%;
+    --status-success: 162 72% 65%;
+    --status-error: 357 91% 67%;
+    --glass-bg: 207 97% 7% / 0.5;
+    --glass-border: 207 50% 22% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.18);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-primary-glow: 0 4px 20px hsl(224 100% 75% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(224 100% 75% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(224 100% 75% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(162 72% 65% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(357 91% 67% / 0.3);
+  }
+
+  /* ========== THEME: GITHUB DARK ========== */
+  [data-palette="github"] {
+    --background: 220 13% 7%;
+    --foreground: 212 18% 82%;
+    --card: 220 16% 11%;
+    --card-foreground: 212 18% 82%;
+    --popover: 220 16% 11%;
+    --popover-foreground: 212 18% 82%;
+    --primary: 212 100% 67%;
+    --primary-foreground: 220 13% 7%;
+    --secondary: 262 65% 70%;
+    --secondary-foreground: 220 13% 7%;
+    --muted: 220 14% 15%;
+    --muted-foreground: 215 14% 56%;
+    --accent: 220 14% 15%;
+    --accent-foreground: 212 18% 82%;
+    --destructive: 0 69% 67%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 14% 21%;
+    --input: 220 14% 21%;
+    --ring: 212 100% 67%;
+    --warning: 40 100% 71%;
+    --warning-foreground: 220 13% 7%;
+    --success: 137 55% 62%;
+    --success-foreground: 220 13% 7%;
+    --sidebar-background: 220 16% 11%;
+    --sidebar-foreground: 212 18% 82%;
+    --sidebar-primary: 212 100% 67%;
+    --sidebar-primary-foreground: 220 13% 7%;
+    --sidebar-accent: 220 12% 17%;
+    --sidebar-accent-foreground: 212 18% 82%;
+    --sidebar-border: 220 14% 18%;
+    --sidebar-ring: 212 100% 67%;
+    --status-pending: 215 14% 56%;
+    --status-running: 212 100% 67%;
+    --status-success: 137 55% 62%;
+    --status-error: 0 69% 67%;
+    --glass-bg: 220 13% 7% / 0.5;
+    --glass-border: 220 14% 21% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.18);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-primary-glow: 0 4px 20px hsl(212 100% 67% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(212 100% 67% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(212 100% 67% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(137 55% 62% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(0 69% 67% / 0.3);
+  }
+
+  /* ========== THEME: NORD ========== */
+  [data-palette="nord"] {
+    --background: 222 16% 22%;
+    --foreground: 218 27% 86%;
+    --card: 220 16% 27%;
+    --card-foreground: 218 27% 86%;
+    --popover: 220 16% 27%;
+    --popover-foreground: 218 27% 86%;
+    --primary: 193 43% 67%;
+    --primary-foreground: 222 16% 22%;
+    --secondary: 213 22% 63%;
+    --secondary-foreground: 222 16% 22%;
+    --muted: 220 17% 32%;
+    --muted-foreground: 218 17% 55%;
+    --accent: 220 17% 32%;
+    --accent-foreground: 218 27% 86%;
+    --destructive: 354 42% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 16% 36%;
+    --input: 220 16% 36%;
+    --ring: 193 43% 67%;
+    --warning: 40 61% 74%;
+    --warning-foreground: 222 16% 22%;
+    --success: 92 28% 65%;
+    --success-foreground: 222 16% 22%;
+    --sidebar-background: 220 16% 27%;
+    --sidebar-foreground: 218 27% 86%;
+    --sidebar-primary: 193 43% 67%;
+    --sidebar-primary-foreground: 222 16% 22%;
+    --sidebar-accent: 220 15% 30%;
+    --sidebar-accent-foreground: 218 27% 86%;
+    --sidebar-border: 220 16% 33%;
+    --sidebar-ring: 193 43% 67%;
+    --status-pending: 218 17% 55%;
+    --status-running: 193 43% 67%;
+    --status-success: 92 28% 65%;
+    --status-error: 354 42% 56%;
+    --glass-bg: 222 16% 22% / 0.5;
+    --glass-border: 220 16% 36% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.18);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-primary-glow: 0 4px 20px hsl(193 43% 67% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(193 43% 67% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(193 43% 67% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(92 28% 65% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(354 42% 56% / 0.3);
+  }
+
+  /* ========== THEME: CATPPUCCIN MOCHA ========== */
+  [data-palette="catppuccin"] {
+    --background: 240 21% 15%;
+    --foreground: 226 64% 88%;
+    --card: 240 21% 12%;
+    --card-foreground: 226 64% 88%;
+    --popover: 240 21% 12%;
+    --popover-foreground: 226 64% 88%;
+    --primary: 217 92% 76%;
+    --primary-foreground: 240 21% 12%;
+    --secondary: 267 84% 81%;
+    --secondary-foreground: 240 21% 12%;
+    --muted: 237 16% 23%;
+    --muted-foreground: 228 24% 57%;
+    --accent: 237 16% 23%;
+    --accent-foreground: 226 64% 88%;
+    --destructive: 343 81% 75%;
+    --destructive-foreground: 240 21% 12%;
+    --border: 237 16% 27%;
+    --input: 237 16% 27%;
+    --ring: 217 92% 76%;
+    --warning: 41 86% 83%;
+    --warning-foreground: 240 21% 12%;
+    --success: 115 54% 76%;
+    --success-foreground: 240 21% 12%;
+    --sidebar-background: 240 21% 12%;
+    --sidebar-foreground: 226 64% 88%;
+    --sidebar-primary: 217 92% 76%;
+    --sidebar-primary-foreground: 240 21% 12%;
+    --sidebar-accent: 237 16% 20%;
+    --sidebar-accent-foreground: 226 64% 88%;
+    --sidebar-border: 237 16% 24%;
+    --sidebar-ring: 217 92% 76%;
+    --status-pending: 228 24% 57%;
+    --status-running: 217 92% 76%;
+    --status-success: 115 54% 76%;
+    --status-error: 343 81% 75%;
+    --glass-bg: 240 21% 14% / 0.5;
+    --glass-border: 237 16% 27% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.18);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-primary-glow: 0 4px 20px hsl(217 92% 76% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(217 92% 76% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(217 92% 76% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(115 54% 76% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(343 81% 75% / 0.3);
+  }
+
+  /* ========== THEME: HIGH CONTRAST DARK ========== */
+  [data-palette="high-contrast-dark"] {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 5%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 48 100% 50%;
+    --secondary-foreground: 0 0% 0%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 70%;
+    --accent: 0 0% 10%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 100% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 30%;
+    --input: 0 0% 30%;
+    --ring: 0 0% 100%;
+    --warning: 48 100% 50%;
+    --warning-foreground: 0 0% 0%;
+    --success: 120 100% 50%;
+    --success-foreground: 0 0% 0%;
+    --sidebar-background: 0 0% 5%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 0 0% 100%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 0 0% 12%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 0% 25%;
+    --sidebar-ring: 0 0% 100%;
+    --status-pending: 0 0% 70%;
+    --status-running: 210 100% 60%;
+    --status-success: 120 100% 50%;
+    --status-error: 0 100% 60%;
+    --glass-bg: 0 0% 3% / 0.6;
+    --glass-border: 0 0% 30% / 0.6;
+    --shadow-xs: 0 1px 2px rgba(255, 255, 255, 0.05);
+    --shadow-sm: 0 1px 4px rgba(255, 255, 255, 0.08);
+    --shadow-md: 0 4px 20px rgba(255, 255, 255, 0.06);
+    --shadow-lg: 0 8px 32px rgba(255, 255, 255, 0.08);
+    --shadow-primary-glow: 0 4px 20px hsl(0 0% 100% / 0.1);
+    --shadow-primary-button: 0 2px 10px hsl(0 0% 100% / 0.2);
+    --shadow-ring-primary: 0 0 0 2px hsl(0 0% 100% / 0.5);
+    --shadow-ring-success: 0 0 0 2px hsl(120 100% 50% / 0.5);
+    --shadow-ring-error: 0 0 0 2px hsl(0 100% 60% / 0.5);
+  }
+
+  /* ========== THEME: HIGH CONTRAST LIGHT ========== */
+  [data-palette="high-contrast-light"] {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
+    --card: 0 0% 97%;
+    --card-foreground: 0 0% 0%;
+    --popover: 0 0% 97%;
+    --popover-foreground: 0 0% 0%;
+    --primary: 240 100% 40%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 270 100% 35%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 93%;
+    --muted-foreground: 0 0% 35%;
+    --accent: 0 0% 93%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 100% 40%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 60%;
+    --input: 0 0% 60%;
+    --ring: 240 100% 40%;
+    --warning: 40 100% 40%;
+    --warning-foreground: 0 0% 100%;
+    --success: 140 100% 28%;
+    --success-foreground: 0 0% 100%;
+    --sidebar-background: 0 0% 97%;
+    --sidebar-foreground: 0 0% 0%;
+    --sidebar-primary: 240 100% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 90%;
+    --sidebar-accent-foreground: 0 0% 0%;
+    --sidebar-border: 0 0% 65%;
+    --sidebar-ring: 240 100% 40%;
+    --status-pending: 0 0% 35%;
+    --status-running: 240 100% 40%;
+    --status-success: 140 100% 28%;
+    --status-error: 0 100% 40%;
+    --glass-bg: 0 0% 100% / 0.7;
+    --glass-border: 0 0% 60% / 0.6;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.08);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.12);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.15);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.2);
+    --shadow-primary-glow: 0 4px 20px hsl(240 100% 40% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(240 100% 40% / 0.3);
+    --shadow-ring-primary: 0 0 0 2px hsl(240 100% 40% / 0.4);
+    --shadow-ring-success: 0 0 0 2px hsl(140 100% 28% / 0.4);
+    --shadow-ring-error: 0 0 0 2px hsl(0 100% 40% / 0.4);
+  }
+
+  /* ========== THEME: GRUVBOX ========== */
+  [data-palette="gruvbox"] {
+    --background: 0 0% 16%;
+    --foreground: 40 14% 82%;
+    --card: 20 6% 12%;
+    --card-foreground: 40 14% 82%;
+    --popover: 20 6% 12%;
+    --popover-foreground: 40 14% 82%;
+    --primary: 24 100% 55%;
+    --primary-foreground: 0 0% 10%;
+    --secondary: 42 96% 56%;
+    --secondary-foreground: 0 0% 10%;
+    --muted: 0 0% 20%;
+    --muted-foreground: 40 9% 55%;
+    --accent: 0 0% 20%;
+    --accent-foreground: 40 14% 82%;
+    --destructive: 6 96% 59%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 5% 28%;
+    --input: 30 5% 28%;
+    --ring: 24 100% 55%;
+    --warning: 42 96% 56%;
+    --warning-foreground: 0 0% 10%;
+    --success: 61 66% 44%;
+    --success-foreground: 0 0% 10%;
+    --sidebar-background: 20 6% 12%;
+    --sidebar-foreground: 40 14% 82%;
+    --sidebar-primary: 24 100% 55%;
+    --sidebar-primary-foreground: 0 0% 10%;
+    --sidebar-accent: 20 5% 17%;
+    --sidebar-accent-foreground: 40 14% 82%;
+    --sidebar-border: 30 5% 24%;
+    --sidebar-ring: 24 100% 55%;
+    --status-pending: 40 9% 55%;
+    --status-running: 24 100% 55%;
+    --status-success: 61 66% 44%;
+    --status-error: 6 96% 59%;
+    --glass-bg: 0 0% 14% / 0.5;
+    --glass-border: 30 5% 28% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.18);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-primary-glow: 0 4px 20px hsl(24 100% 55% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(24 100% 55% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(24 100% 55% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(61 66% 44% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(6 96% 59% / 0.3);
+  }
+
+  /* ========== THEME: SOLARIZED DARK ========== */
+  [data-palette="solarized"] {
+    --background: 192 100% 11%;
+    --foreground: 44 87% 94%;
+    --card: 192 81% 14%;
+    --card-foreground: 44 87% 94%;
+    --popover: 192 81% 14%;
+    --popover-foreground: 44 87% 94%;
+    --primary: 205 82% 49%;
+    --primary-foreground: 44 87% 94%;
+    --secondary: 175 74% 40%;
+    --secondary-foreground: 44 87% 94%;
+    --muted: 192 44% 17%;
+    --muted-foreground: 186 13% 59%;
+    --accent: 192 44% 17%;
+    --accent-foreground: 44 87% 94%;
+    --destructive: 1 71% 52%;
+    --destructive-foreground: 44 87% 94%;
+    --border: 194 35% 22%;
+    --input: 194 35% 22%;
+    --ring: 205 82% 49%;
+    --warning: 45 100% 50%;
+    --warning-foreground: 192 100% 11%;
+    --success: 68 100% 30%;
+    --success-foreground: 44 87% 94%;
+    --sidebar-background: 192 81% 14%;
+    --sidebar-foreground: 44 87% 94%;
+    --sidebar-primary: 205 82% 49%;
+    --sidebar-primary-foreground: 44 87% 94%;
+    --sidebar-accent: 192 50% 16%;
+    --sidebar-accent-foreground: 44 87% 94%;
+    --sidebar-border: 194 35% 19%;
+    --sidebar-ring: 205 82% 49%;
+    --status-pending: 186 13% 59%;
+    --status-running: 205 82% 49%;
+    --status-success: 68 100% 30%;
+    --status-error: 1 71% 52%;
+    --glass-bg: 192 100% 10% / 0.5;
+    --glass-border: 194 35% 22% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.18);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-primary-glow: 0 4px 20px hsl(205 82% 49% / 0.15);
+    --shadow-primary-button: 0 2px 10px hsl(205 82% 49% / 0.3);
+    --shadow-ring-primary: 0 0 0 1px hsl(205 82% 49% / 0.2);
+    --shadow-ring-success: 0 0 0 1px hsl(68 100% 30% / 0.3);
+    --shadow-ring-error: 0 0 0 1px hsl(1 71% 52% / 0.3);
+  }
+
+  /* ========== THEME: MONOCHROME ========== */
+  [data-palette="monochrome"] {
+    --background: 0 0% 8%;
+    --foreground: 0 0% 88%;
+    --card: 0 0% 11%;
+    --card-foreground: 0 0% 88%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 88%;
+    --primary: 0 0% 75%;
+    --primary-foreground: 0 0% 8%;
+    --secondary: 0 0% 20%;
+    --secondary-foreground: 0 0% 88%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 55%;
+    --accent: 0 0% 18%;
+    --accent-foreground: 0 0% 88%;
+    --destructive: 0 50% 50%;
+    --destructive-foreground: 0 0% 95%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 0 0% 65%;
+    --warning: 0 0% 70%;
+    --warning-foreground: 0 0% 8%;
+    --success: 0 0% 60%;
+    --success-foreground: 0 0% 8%;
+    --sidebar-background: 0 0% 10%;
+    --sidebar-foreground: 0 0% 85%;
+    --sidebar-primary: 0 0% 75%;
+    --sidebar-primary-foreground: 0 0% 8%;
+    --sidebar-accent: 0 0% 15%;
+    --sidebar-accent-foreground: 0 0% 88%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 0 0% 65%;
+    --status-pending: 0 0% 45%;
+    --status-running: 0 0% 75%;
+    --status-success: 0 0% 65%;
+    --status-error: 0 30% 50%;
+    --glass-bg: 0 0% 10% / 0.6;
+    --glass-border: 0 0% 22% / 0.5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.35), 0 6px 24px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.45);
+    --shadow-primary-glow: 0 4px 20px hsl(0 0% 75% / 0.08);
+    --shadow-primary-button: 0 2px 10px hsl(0 0% 75% / 0.15);
+    --shadow-ring-primary: 0 0 0 1px hsl(0 0% 75% / 0.15);
+    --shadow-ring-success: 0 0 0 1px hsl(0 0% 60% / 0.2);
+    --shadow-ring-error: 0 0 0 1px hsl(0 30% 50% / 0.25);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, sans-serif;
+    position: relative;
+    background-attachment: fixed;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: var(--mesh-opacity, 1);
+    transition: opacity 0.3s ease;
+    background:
+      radial-gradient(at 20% 20%, hsl(var(--primary) / 0.05) 0%, transparent 50%),
+      radial-gradient(at 80% 80%, hsl(var(--secondary) / 0.04) 0%, transparent 50%),
+      radial-gradient(at 50% 50%, hsl(var(--success) / 0.02) 0%, transparent 50%),
+      radial-gradient(ellipse 120% 80% at 10% 15%, rgba(0, 104, 240, 0.18), transparent 70%),
+      radial-gradient(ellipse 100% 90% at 90% 80%, rgba(180, 0, 234, 0.14), transparent 65%),
+      radial-gradient(ellipse 90% 100% at 50% 40%, rgba(80, 40, 200, 0.08), transparent 60%),
+      radial-gradient(ellipse 80% 60% at 80% 15%, rgba(120, 0, 234, 0.10), transparent 55%),
+      radial-gradient(ellipse 70% 80% at 20% 85%, rgba(0, 80, 200, 0.12), transparent 60%),
+      radial-gradient(ellipse 60% 50% at 55% 70%, rgba(200, 0, 180, 0.06), transparent 50%);
+  }
+
+  .dark body::before {
+    background:
+      radial-gradient(at 15% 15%, hsl(var(--primary) / 0.12) 0%, transparent 45%),
+      radial-gradient(at 85% 75%, hsl(var(--secondary) / 0.08) 0%, transparent 45%),
+      radial-gradient(at 50% 90%, hsl(var(--primary) / 0.06) 0%, transparent 40%);
+  }
+
+  /* Glass level controls mesh gradient opacity: 0=full, 5=none */
+  [data-glass-level="1"] body::before {
+    --mesh-opacity: 0.8;
+  }
+
+  [data-glass-level="2"] body::before {
+    --mesh-opacity: 0.6;
+  }
+
+  [data-glass-level="3"] body::before {
+    --mesh-opacity: 0.4;
+  }
+
+  [data-glass-level="4"] body::before {
+    --mesh-opacity: 0.2;
+  }
+
+  [data-glass-level="5"] body::before {
+    --mesh-opacity: 0;
+  }
+
+  /* Level 5: solid theme background color */
+  [data-glass-level="5"] body {
+    background-color: hsl(var(--background)) !important;
+  }
+
+  body>#root {
+    position: relative;
+    z-index: 1;
+  }
+
+  code,
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer components {
+  .glass {
+    backdrop-filter: blur(var(--glass-blur, 24px));
+    -webkit-backdrop-filter: blur(var(--glass-blur, 24px));
+    background: hsl(var(--card) / var(--glass-opacity, 0.4));
+    border: none;
+  }
+
+  .glass-subtle {
+    backdrop-filter: blur(var(--glass-blur-subtle, 12px));
+    -webkit-backdrop-filter: blur(var(--glass-blur-subtle, 12px));
+    background: hsl(var(--card) / var(--glass-opacity-subtle, 0.2));
+    border: none;
+  }
+}
+
+/* Glass level 0 = default glass, 5 = fully opaque, no blur */
+[data-glass-level="1"] {
+  --glass-opacity: 0.52;
+  --glass-opacity-subtle: 0.32;
+  --glass-blur: 20px;
+  --glass-blur-subtle: 10px;
+}
+
+[data-glass-level="2"] {
+  --glass-opacity: 0.64;
+  --glass-opacity-subtle: 0.44;
+  --glass-blur: 14px;
+  --glass-blur-subtle: 7px;
+}
+
+[data-glass-level="3"] {
+  --glass-opacity: 0.76;
+  --glass-opacity-subtle: 0.56;
+  --glass-blur: 8px;
+  --glass-blur-subtle: 4px;
+}
+
+[data-glass-level="4"] {
+  --glass-opacity: 0.88;
+  --glass-opacity-subtle: 0.72;
+  --glass-blur: 3px;
+  --glass-blur-subtle: 2px;
+}
+
+[data-glass-level="5"] {
+  --glass-opacity: 1;
+  --glass-opacity-subtle: 0.95;
+  --glass-blur: 0px;
+  --glass-blur-subtle: 0px;
+}
+
+@layer utilities {
+  .bg-background:not(body) {
+    background-color: transparent !important;
+  }
+
+  .bg-card {
+    background-color: transparent !important;
+  }
+
+  .bg-popover {
+    background-color: transparent !important;
+  }
+
+  .bg-muted {
+    background-color: transparent !important;
+  }
+
+  .bg-accent {
+    background-color: transparent !important;
+  }
+
+  .bg-sidebar {
+    background-color: transparent !important;
+  }
+}
+
+@layer components {
+  .hover-lift {
+    @apply transition-all duration-200;
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+  }
+
+  /* DotsLoader */
+  @keyframes dots-pulse {
+
+    0%,
+    80%,
+    100% {
+      opacity: 0.3;
+      transform: scale(0.8);
+    }
+
+    40% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .dots-loader {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .dots-loader span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: dots-pulse 1.4s infinite ease-in-out both;
+  }
+
+  .dots-loader span:nth-child(1) {
+    animation-delay: -0.32s;
+  }
+
+  .dots-loader span:nth-child(2) {
+    animation-delay: -0.16s;
+  }
+
+  .dots-loader span:nth-child(3) {
+    animation-delay: 0s;
+  }
+}
+
+@keyframes marquee {
+
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+
+  50%,
+  65% {
+    transform: translateX(var(--marquee-distance, -100px));
+  }
+
+  100% {
+    transform: translateX(0);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(220 14% 20%);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(220 14% 28%);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(220 14% 20%) transparent;
+}

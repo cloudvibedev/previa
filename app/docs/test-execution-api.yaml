@@ -1,0 +1,1596 @@
+openapi: 3.1.0
+info:
+  title: previa-main
+  description: >-
+    API orquestradora para distribuicao de carga entre runners.
+
+    Authors: Previa Labs <previa@previa.dev>
+  contact:
+    name: Previa Labs
+    email: previa@previa.dev
+  license:
+    name: ''
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3100
+    description: Orchestrator local
+
+paths:
+  /api/v1/projects:
+    get:
+      operationId: list_projects
+      parameters:
+        - name: limit
+          in: query
+          description: Limite de registros retornados (default 100, max 500)
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - name: offset
+          in: query
+          description: Deslocamento da paginação (default 0)
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - name: order
+          in: query
+          description: 'Ordem por atualização: asc | desc (default desc)'
+          required: false
+          schema:
+            $ref: '#/components/schemas/HistoryOrder'
+      responses:
+        '200':
+          description: Lista de projetos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectRecord'
+        '500':
+          description: Erro ao consultar projetos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: create_project
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpsertRequest'
+        required: true
+      responses:
+        '201':
+          description: Projeto criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectRecord'
+        '400':
+          description: Payload inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}:
+    get:
+      operationId: get_project
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Projeto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectRecord'
+        '404':
+          description: Projeto não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      operationId: upsert_project
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMetadataUpsertRequest'
+        required: true
+      responses:
+        '200':
+          description: Projeto atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectRecord'
+        '400':
+          description: Payload inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      operationId: delete_project
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Projeto removido
+        '404':
+          description: Projeto não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/pipelines:
+    get:
+      operationId: list_project_pipelines
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de pipelines do projeto
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pipeline'
+        '404':
+          description: Projeto não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: create_project_pipeline
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelineInput'
+        required: true
+      responses:
+        '201':
+          description: Pipeline criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pipeline'
+        '400':
+          description: Payload inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Projeto não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/pipelines/{pipelineId}:
+    get:
+      operationId: get_project_pipeline
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: pipelineId
+          in: path
+          description: ID da pipeline
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pipeline do projeto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pipeline'
+        '404':
+          description: Projeto ou pipeline não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      operationId: upsert_project_pipeline
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: pipelineId
+          in: path
+          description: ID da pipeline
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelineInput'
+        required: true
+      responses:
+        '200':
+          description: Pipeline atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pipeline'
+        '400':
+          description: Payload inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Projeto ou pipeline não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      operationId: delete_project_pipeline
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: pipelineId
+          in: path
+          description: ID da pipeline
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Pipeline removida
+        '404':
+          description: Projeto ou pipeline não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/specs:
+    get:
+      operationId: list_project_specs
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista de specs OpenAPI do projeto
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectSpecRecord'
+        '404':
+          description: Projeto não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: create_project_spec
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectSpecUpsertRequest'
+        required: true
+      responses:
+        '201':
+          description: Spec OpenAPI criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSpecRecord'
+        '404':
+          description: Projeto não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/specs/{specId}:
+    get:
+      operationId: get_project_spec
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: specId
+          in: path
+          description: ID do spec
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Spec OpenAPI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSpecRecord'
+        '404':
+          description: Projeto ou spec não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      operationId: upsert_project_spec
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: specId
+          in: path
+          description: ID do spec
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectSpecUpsertRequest'
+        required: true
+      responses:
+        '200':
+          description: Spec OpenAPI atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSpecRecord'
+        '404':
+          description: Projeto ou spec não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      operationId: delete_project_spec
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: specId
+          in: path
+          description: ID do spec
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Spec OpenAPI removida
+        '404':
+          description: Projeto ou spec não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/tests/e2e:
+    get:
+      operationId: list_integration_history
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: pipelineIndex
+          in: query
+          description: Filtra por índice da pipeline
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          description: Limite de registros retornados (default 100, max 500)
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - name: offset
+          in: query
+          description: Deslocamento da paginação (default 0)
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - name: order
+          in: query
+          description: 'Ordem por finishedAtMs: asc | desc (default desc)'
+          required: false
+          schema:
+            $ref: '#/components/schemas/HistoryOrder'
+      responses:
+        '200':
+          description: Histórico de execuções de integração
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IntegrationHistoryRecord'
+        '500':
+          description: Erro ao consultar histórico
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: run_integration_test_for_project
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: x-transaction-id
+          in: header
+          description: ID de transação para rastreamento
+          required: false
+          schema:
+            type:
+              - string
+              - 'null'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectIntegrationTestRequest'
+        required: true
+      responses:
+        '200':
+          description: Stream SSE unificado para teste de integração (project-scoped).
+          headers:
+            x-transaction-id:
+              schema:
+                type:
+                  - string
+                  - 'null'
+              description: Eco do x-transaction-id recebido
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/OrchestratorSseEventData'
+        '400':
+          description: Request inválido
+          headers:
+            x-transaction-id:
+              schema:
+                type:
+                  - string
+                  - 'null'
+              description: Eco do x-transaction-id recebido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Sem runners disponíveis
+          headers:
+            x-transaction-id:
+              schema:
+                type:
+                  - string
+                  - 'null'
+              description: Eco do x-transaction-id recebido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/tests/e2e/{test_id}:
+    get:
+      operationId: get_integration_test_by_id
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: test_id
+          in: path
+          description: ID do teste (id do histórico ou execution_id)
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execução individual de integração
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrationHistoryRecord'
+        '404':
+          description: Teste não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/tests/load:
+    get:
+      operationId: list_load_history
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: pipelineIndex
+          in: query
+          description: Filtra por índice da pipeline
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          description: Limite de registros retornados (default 100, max 500)
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - name: offset
+          in: query
+          description: Deslocamento da paginação (default 0)
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - name: order
+          in: query
+          description: 'Ordem por finishedAtMs: asc | desc (default desc)'
+          required: false
+          schema:
+            $ref: '#/components/schemas/HistoryOrder'
+      responses:
+        '200':
+          description: Histórico de execuções de load test
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LoadHistoryRecord'
+        '500':
+          description: Erro ao consultar histórico
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: run_load_test_for_project
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: x-transaction-id
+          in: header
+          description: ID de transação para rastreamento
+          required: false
+          schema:
+            type:
+              - string
+              - 'null'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectLoadTestRequest'
+        required: true
+      responses:
+        '200':
+          description: Stream SSE unificado de load test (project-scoped).
+          headers:
+            x-transaction-id:
+              schema:
+                type:
+                  - string
+                  - 'null'
+              description: Eco do x-transaction-id recebido
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/OrchestratorSseEventData'
+        '400':
+          description: Request inválido
+          headers:
+            x-transaction-id:
+              schema:
+                type:
+                  - string
+                  - 'null'
+              description: Eco do x-transaction-id recebido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Sem runners disponíveis
+          headers:
+            x-transaction-id:
+              schema:
+                type:
+                  - string
+                  - 'null'
+              description: Eco do x-transaction-id recebido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/tests/load/{test_id}:
+    get:
+      operationId: get_load_test_by_id
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: test_id
+          in: path
+          description: ID do teste (id do histórico ou execution_id)
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execução individual de load test
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadHistoryRecord'
+        '404':
+          description: Teste não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/projects/{projectId}/executions/{executionId}:
+    get:
+      operationId: stream_execution
+      parameters:
+        - name: projectId
+          in: path
+          description: ID do projeto
+          required: true
+          schema:
+            type: string
+        - name: executionId
+          in: path
+          description: ID da execução retornado no evento SSE execution:init
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stream SSE da execução ativa ou stream SSE finito de execução já finalizada.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/OrchestratorSseEventData'
+        '400':
+          description: Parâmetro inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Execução não encontrada para o projeto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Erro interno ao recuperar execução
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Orchestrator saudável
+
+  /info:
+    get:
+      operationId: get_info
+      responses:
+        '200':
+          description: Runners cadastrados e status de atividade
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestratorInfoResponse'
+
+components:
+  schemas:
+    BaseUrl:
+      oneOf:
+        - type: string
+        - type: object
+          additionalProperties:
+            type: string
+          propertyNames:
+            type: string
+
+    ConsolidatedLoadMetrics:
+      type: object
+      required:
+        - totalSent
+        - totalSuccess
+        - totalError
+        - rps
+        - avgLatency
+        - p95
+        - p99
+        - startTime
+        - elapsedMs
+        - nodesReporting
+      properties:
+        avgLatency:
+          type: integer
+          format: int64
+          minimum: 0
+        elapsedMs:
+          type: integer
+          format: int64
+          minimum: 0
+        nodesReporting:
+          type: integer
+          minimum: 0
+        p95:
+          type: integer
+          format: int64
+          minimum: 0
+        p99:
+          type: integer
+          format: int64
+          minimum: 0
+        rps:
+          type: number
+          format: double
+        startTime:
+          type: integer
+          format: int64
+          minimum: 0
+        totalError:
+          type: integer
+          minimum: 0
+        totalSent:
+          type: integer
+          minimum: 0
+        totalSuccess:
+          type: integer
+          minimum: 0
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+    HistoryOrder:
+      type: string
+      enum:
+        - asc
+        - desc
+
+    HistoryQuery:
+      type: object
+      properties:
+        limit:
+          type:
+            - integer
+            - 'null'
+          format: int32
+          minimum: 0
+        offset:
+          type:
+            - integer
+            - 'null'
+          format: int32
+          minimum: 0
+        order:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/HistoryOrder'
+        pipelineIndex:
+          type:
+            - integer
+            - 'null'
+          format: int64
+      additionalProperties: false
+
+    IntegrationHistoryRecord:
+      type: object
+      required:
+        - id
+        - executionId
+        - pipelineName
+        - status
+        - startedAtMs
+        - finishedAtMs
+        - durationMs
+        - summary
+        - steps
+        - errors
+        - request
+      properties:
+        durationMs:
+          type: integer
+          format: int64
+        errors:
+          type: array
+          items:
+            type: string
+        executionId:
+          type: string
+        finishedAtMs:
+          type: integer
+          format: int64
+        id:
+          type: string
+        pipelineId:
+          type:
+            - string
+            - 'null'
+        pipelineIndex:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        pipelineName:
+          type: string
+        projectId:
+          type:
+            - string
+            - 'null'
+        request:
+          type: object
+        selectedBaseUrlKey:
+          type:
+            - string
+            - 'null'
+        startedAtMs:
+          type: integer
+          format: int64
+        status:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+        summary:
+          type:
+            - object
+            - 'null'
+        transactionId:
+          type:
+            - string
+            - 'null'
+
+    LoadHistoryRecord:
+      type: object
+      required:
+        - id
+        - executionId
+        - pipelineName
+        - status
+        - startedAtMs
+        - finishedAtMs
+        - durationMs
+        - requestedConfig
+        - finalConsolidated
+        - finalLines
+        - errors
+        - request
+        - context
+      properties:
+        context:
+          type: object
+        durationMs:
+          type: integer
+          format: int64
+        errors:
+          type: array
+          items:
+            type: string
+        executionId:
+          type: string
+        finalConsolidated:
+          type:
+            - object
+            - 'null'
+        finalLines:
+          type: array
+          items:
+            type: object
+        finishedAtMs:
+          type: integer
+          format: int64
+        id:
+          type: string
+        pipelineId:
+          type:
+            - string
+            - 'null'
+        pipelineIndex:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        pipelineName:
+          type: string
+        projectId:
+          type:
+            - string
+            - 'null'
+        request:
+          type: object
+        requestedConfig:
+          type: object
+        selectedBaseUrlKey:
+          type:
+            - string
+            - 'null'
+        startedAtMs:
+          type: integer
+          format: int64
+        status:
+          type: string
+        transactionId:
+          type:
+            - string
+            - 'null'
+
+    LoadTestConfig:
+      type: object
+      required:
+        - totalRequests
+        - concurrency
+        - rampUpSeconds
+      properties:
+        concurrency:
+          type: integer
+          minimum: 0
+        rampUpSeconds:
+          type: number
+          format: double
+        totalRequests:
+          type: integer
+          minimum: 0
+
+    OrchestratorInfoResponse:
+      type: object
+      required:
+        - totalRunners
+        - activeRunners
+        - runners
+      properties:
+        activeRunners:
+          type: integer
+          minimum: 0
+        runners:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunnerInfo'
+        totalRunners:
+          type: integer
+          minimum: 0
+
+    OrchestratorSseEventData:
+      type: object
+      required:
+        - payload
+      properties:
+        activeNodes:
+          type:
+            - array
+            - 'null'
+          items:
+            type: string
+        activeNodesTotal:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        batchWindowMs:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          minimum: 0
+        consolidated:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/ConsolidatedLoadMetrics'
+        executionId:
+          type:
+            - string
+            - 'null'
+        lines:
+          type:
+            - array
+            - 'null'
+          items:
+            $ref: '#/components/schemas/RunnerLoadLine'
+        message:
+          type:
+            - string
+            - 'null'
+        nodesFound:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        nodesUsed:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        payload:
+          type: object
+        registeredNodes:
+          type:
+            - array
+            - 'null'
+          items:
+            type: string
+        registeredNodesTotal:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        requestedNodes:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        runners:
+          type:
+            - array
+            - 'null'
+          items:
+            type: string
+        status:
+          type:
+            - string
+            - 'null'
+        stepId:
+          type:
+            - string
+            - 'null'
+        usedNodes:
+          type:
+            - array
+            - 'null'
+          items:
+            type: string
+        usedNodesTotal:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        warning:
+          type:
+            - string
+            - 'null'
+
+    Pipeline:
+      type: object
+      required:
+        - name
+        - base_url
+        - steps
+      properties:
+        base_url:
+          $ref: '#/components/schemas/BaseUrl'
+        description:
+          type:
+            - string
+            - 'null'
+        id:
+          type:
+            - string
+            - 'null'
+        name:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineStep'
+          minItems: 1
+
+    PipelineInput:
+      type: object
+      required:
+        - name
+        - baseUrl
+        - steps
+      properties:
+        baseUrl:
+          $ref: '#/components/schemas/BaseUrl'
+        description:
+          type:
+            - string
+            - 'null'
+        name:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineStep'
+      additionalProperties: false
+
+    PipelineStep:
+      type: object
+      required:
+        - id
+        - name
+        - method
+        - url
+      properties:
+        asserts:
+          type: array
+          items:
+            $ref: '#/components/schemas/StepAssertion'
+        body:
+          type:
+            - object
+            - 'null'
+        delay:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          minimum: 0
+        description:
+          type:
+            - string
+            - 'null'
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          propertyNames:
+            type: string
+        id:
+          type: string
+        method:
+          type: string
+        name:
+          type: string
+        operationId:
+          type:
+            - string
+            - 'null'
+        retry:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+        url:
+          type: string
+
+    ProjectIntegrationTestRequest:
+      type: object
+      required:
+        - pipeline
+      properties:
+        pipeline:
+          $ref: '#/components/schemas/Pipeline'
+        pipelineIndex:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        selectedBaseUrlKey:
+          type:
+            - string
+            - 'null'
+        specs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeSpec'
+      additionalProperties: false
+
+    ProjectListQuery:
+      type: object
+      properties:
+        limit:
+          type:
+            - integer
+            - 'null'
+          format: int32
+          minimum: 0
+        offset:
+          type:
+            - integer
+            - 'null'
+          format: int32
+          minimum: 0
+        order:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/HistoryOrder'
+
+    ProjectLoadTestRequest:
+      type: object
+      required:
+        - pipeline
+        - config
+      properties:
+        config:
+          $ref: '#/components/schemas/LoadTestConfig'
+        pipeline:
+          $ref: '#/components/schemas/Pipeline'
+        pipelineIndex:
+          type:
+            - integer
+            - 'null'
+          format: int64
+        selectedBaseUrlKey:
+          type:
+            - string
+            - 'null'
+        specs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeSpec'
+      additionalProperties: false
+
+    ProjectMetadataUpsertRequest:
+      type: object
+      required:
+        - name
+      properties:
+        description:
+          type:
+            - string
+            - 'null'
+        name:
+          type: string
+      additionalProperties: false
+
+    ProjectRecord:
+      type: object
+      required:
+        - id
+        - name
+        - createdAt
+        - updatedAt
+      properties:
+        createdAt:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        executionBackendUrl:
+          type:
+            - string
+            - 'null'
+        id:
+          type: string
+        name:
+          type: string
+        updatedAt:
+          type: string
+
+    ProjectSpecRecord:
+      type: object
+      required:
+        - id
+        - projectId
+        - spec
+        - urls
+        - servers
+        - sync
+        - createdAt
+        - updatedAt
+      properties:
+        createdAt:
+          type: string
+        id:
+          type: string
+        projectId:
+          type: string
+        servers:
+          type: object
+          additionalProperties:
+            type: string
+          propertyNames:
+            type: string
+        slug:
+          type:
+            - string
+            - 'null'
+        spec:
+          type: object
+        sync:
+          type: boolean
+        updatedAt:
+          type: string
+        url:
+          type:
+            - string
+            - 'null'
+        urls:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecUrlEntry'
+
+    ProjectSpecUpsertRequest:
+      type: object
+      required:
+        - spec
+      properties:
+        servers:
+          type: object
+          additionalProperties:
+            type: string
+          propertyNames:
+            type: string
+        slug:
+          type:
+            - string
+            - 'null'
+        spec:
+          type: object
+        sync:
+          type: boolean
+        url:
+          type:
+            - string
+            - 'null'
+        urls:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecUrlEntry'
+      additionalProperties: false
+
+    ProjectUpsertRequest:
+      type: object
+      required:
+        - name
+        - spec
+      properties:
+        createdAt:
+          type:
+            - string
+            - 'null'
+        description:
+          type:
+            - string
+            - 'null'
+        executionBackendUrl:
+          type:
+            - string
+            - 'null'
+        name:
+          type: string
+        pipelines:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineInput'
+        spec:
+          type:
+            - object
+            - 'null'
+        updatedAt:
+          type:
+            - string
+            - 'null'
+      additionalProperties: false
+
+    RunnerInfo:
+      type: object
+      required:
+        - endpoint
+        - active
+      properties:
+        active:
+          type: boolean
+        endpoint:
+          type: string
+        runtime:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/RunnerRuntimeInfo'
+        runtimeError:
+          type:
+            - string
+            - 'null'
+
+    RunnerLoadLine:
+      type: object
+      required:
+        - node
+        - runnerEvent
+        - receivedAt
+        - payload
+      properties:
+        node:
+          type: string
+        payload:
+          type: object
+        receivedAt:
+          type: integer
+          format: int64
+          minimum: 0
+        runnerEvent:
+          type: string
+
+    RunnerRuntimeInfo:
+      type: object
+      required:
+        - pid
+        - memoryBytes
+        - virtualMemoryBytes
+        - cpuUsagePercent
+      properties:
+        cpuUsagePercent:
+          type: number
+          format: float
+        memoryBytes:
+          type: integer
+          format: int64
+          minimum: 0
+        pid:
+          type: integer
+          format: int32
+          minimum: 0
+        virtualMemoryBytes:
+          type: integer
+          format: int64
+          minimum: 0
+
+    RuntimeSpec:
+      type: object
+      required:
+        - slug
+      properties:
+        servers:
+          type: object
+          additionalProperties:
+            type: string
+          propertyNames:
+            type: string
+        slug:
+          type: string
+
+    SpecUrlEntry:
+      type: object
+      required:
+        - name
+        - url
+      properties:
+        description:
+          type:
+            - string
+            - 'null'
+        name:
+          type: string
+        url:
+          type: string
+      additionalProperties: false
+
+    StepAssertion:
+      type: object
+      required:
+        - field
+        - operator
+      properties:
+        expected:
+          type:
+            - string
+            - 'null'
+        field:
+          type: string
+        operator:
+          type: string
