@@ -88,6 +88,10 @@ RUNNER_ENDPOINTS=http://127.0.0.1:55880
 RUST_LOG=info
 ```
 
+By default each context uses its own SQLite database file. Advanced deployments
+can point `ORCHESTRATOR_DATABASE_URL` at Postgres instead, using either
+`postgres://...` or `postgresql://...`.
+
 `runner.env`
 
 ```dotenv

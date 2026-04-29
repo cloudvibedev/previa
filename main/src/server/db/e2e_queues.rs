@@ -1,5 +1,6 @@
+use crate::server::db::DbPool;
 use serde_json::{Value, json};
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 
 use crate::server::models::{E2eQueuePipelineRecord, E2eQueueRecord, E2eQueueStatus};
 use crate::server::utils::new_uuid_v7;
@@ -16,7 +17,7 @@ fn parse_queue_status(raw: &str) -> E2eQueueStatus {
 }
 
 pub async fn insert_e2e_queue(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     queue_id: &str,
     selected_base_url_key: Option<&str>,
@@ -26,7 +27,7 @@ pub async fn insert_e2e_queue(
 ) -> Result<E2eQueueRecord, sqlx::Error> {
     let mut tx = db.begin().await?;
 
-    sqlx::query(
+    db.query(
         "INSERT INTO e2e_queues (
             id, project_id, status, selected_base_url_key, request_json, active_execution_id, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -43,7 +44,7 @@ pub async fn insert_e2e_queue(
     .await?;
 
     for (position, pipeline_id) in pipeline_ids.iter().enumerate() {
-        sqlx::query(
+        db.query(
             "INSERT INTO e2e_queue_items (
                 id, queue_id, project_id, position, pipeline_id, status, updated_at, execution_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -78,32 +79,34 @@ pub async fn insert_e2e_queue(
 }
 
 pub async fn load_e2e_queue_record(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     queue_id: &str,
 ) -> Result<Option<E2eQueueRecord>, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT id, status, updated_at FROM e2e_queues WHERE project_id = ? AND id = ? LIMIT 1",
-    )
-    .bind(project_id)
-    .bind(queue_id)
-    .fetch_optional(db)
-    .await?;
+    let row = db
+        .query(
+            "SELECT id, status, updated_at FROM e2e_queues WHERE project_id = ? AND id = ? LIMIT 1",
+        )
+        .bind(project_id)
+        .bind(queue_id)
+        .fetch_optional(db)
+        .await?;
 
     let Some(row) = row else {
         return Ok(None);
     };
 
-    let item_rows = sqlx::query(
-        "SELECT pipeline_id, status, updated_at
+    let item_rows = db
+        .query(
+            "SELECT pipeline_id, status, updated_at
         FROM e2e_queue_items
         WHERE project_id = ? AND queue_id = ?
         ORDER BY position ASC",
-    )
-    .bind(project_id)
-    .bind(queue_id)
-    .fetch_all(db)
-    .await?;
+        )
+        .bind(project_id)
+        .bind(queue_id)
+        .fetch_all(db)
+        .await?;
 
     Ok(Some(E2eQueueRecord {
         id: row.try_get("id").unwrap_or_else(|_| queue_id.to_owned()),
@@ -128,13 +131,13 @@ pub async fn load_e2e_queue_record(
 }
 
 pub async fn update_e2e_queue_status(
-    db: &SqlitePool,
+    db: &DbPool,
     queue_id: &str,
     status: E2eQueueStatus,
     updated_at: &str,
     active_execution_id: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    db.query(
         "UPDATE e2e_queues
         SET status = ?, updated_at = ?, active_execution_id = ?
         WHERE id = ?",
@@ -149,14 +152,14 @@ pub async fn update_e2e_queue_status(
 }
 
 pub async fn update_e2e_queue_item_status(
-    db: &SqlitePool,
+    db: &DbPool,
     queue_id: &str,
     position: usize,
     status: E2eQueueStatus,
     updated_at: &str,
     execution_id: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    db.query(
         "UPDATE e2e_queue_items
         SET status = ?, updated_at = ?, execution_id = COALESCE(?, execution_id)
         WHERE queue_id = ? AND position = ?",
@@ -172,12 +175,12 @@ pub async fn update_e2e_queue_item_status(
 }
 
 pub async fn cancel_non_terminal_e2e_queue(
-    db: &SqlitePool,
+    db: &DbPool,
     queue_id: &str,
     updated_at: &str,
 ) -> Result<(), sqlx::Error> {
     let mut tx = db.begin().await?;
-    sqlx::query(
+    db.query(
         "UPDATE e2e_queues
         SET status = ?, updated_at = ?, active_execution_id = NULL
         WHERE id = ? AND status IN ('pending', 'running')",
@@ -188,7 +191,7 @@ pub async fn cancel_non_terminal_e2e_queue(
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query(
+    db.query(
         "UPDATE e2e_queue_items
         SET status = ?, updated_at = ?
         WHERE queue_id = ? AND status IN ('pending', 'running')",
@@ -203,22 +206,20 @@ pub async fn cancel_non_terminal_e2e_queue(
     Ok(())
 }
 
-pub async fn cancel_stale_e2e_queues(
-    db: &SqlitePool,
-    updated_at: &str,
-) -> Result<u64, sqlx::Error> {
+pub async fn cancel_stale_e2e_queues(db: &DbPool, updated_at: &str) -> Result<u64, sqlx::Error> {
     let mut tx = db.begin().await?;
-    let result = sqlx::query(
-        "UPDATE e2e_queues
+    let result = db
+        .query(
+            "UPDATE e2e_queues
         SET status = ?, updated_at = ?, active_execution_id = NULL
         WHERE status IN ('pending', 'running')",
-    )
-    .bind(E2eQueueStatus::Cancelled.as_str())
-    .bind(updated_at)
-    .execute(&mut *tx)
-    .await?;
+        )
+        .bind(E2eQueueStatus::Cancelled.as_str())
+        .bind(updated_at)
+        .execute(&mut *tx)
+        .await?;
 
-    sqlx::query(
+    db.query(
         "UPDATE e2e_queue_items
         SET status = ?, updated_at = ?
         WHERE status IN ('pending', 'running')",
@@ -246,22 +247,19 @@ pub fn queue_request_json(
 
 #[cfg(test)]
 mod tests {
-    use sqlx::sqlite::SqlitePoolOptions;
 
     use super::{cancel_stale_e2e_queues, insert_e2e_queue, load_e2e_queue_record};
     use crate::server::models::E2eQueueStatus;
 
-    async fn db() -> sqlx::SqlitePool {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+    async fn db() -> crate::server::db::DbPool {
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
-        sqlx::migrate!("./migrations")
-            .run(&db)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
             .await
             .expect("migrations");
-        sqlx::query(
+        db.query(
             "INSERT INTO projects (
                 id, name, description, created_at, updated_at, created_at_ms, updated_at_ms, spec_json, execution_backend_url
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

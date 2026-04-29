@@ -430,7 +430,6 @@ mod tests {
     use axum::{Router, response::IntoResponse};
     use previa_runner::{Pipeline, PipelineStep};
     use serde_json::{Value, json};
-    use sqlx::sqlite::SqlitePoolOptions;
     use tokio::net::TcpListener;
     use tokio::sync::{RwLock, mpsc};
     use tokio_stream::wrappers::ReceiverStream;
@@ -442,13 +441,11 @@ mod tests {
     #[tokio::test]
     async fn second_e2e_execution_is_marked_queued_when_slot_is_busy() {
         let runner = spawn_busy_runner().await;
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
-        sqlx::migrate!("./migrations")
-            .run(&db)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
             .await
             .expect("migrations");
 

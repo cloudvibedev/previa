@@ -1,5 +1,6 @@
+use crate::server::db::DbPool;
 use serde_json::Value;
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{QueryBuilder, Row};
 
 use crate::server::db::{clamp_history_limit, clamp_history_offset, history_order_to_sql};
 use crate::server::models::{
@@ -7,14 +8,14 @@ use crate::server::models::{
 };
 
 pub async fn list_e2e_history_records(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     query: HistoryQuery,
 ) -> Result<Vec<E2eHistoryRecord>, sqlx::Error> {
     let limit = clamp_history_limit(query.limit);
     let offset = clamp_history_offset(query.offset);
     let order_sql = history_order_to_sql(query.order);
-    let mut qb = QueryBuilder::<Sqlite>::new(
+    let mut qb = QueryBuilder::<sqlx::Any>::new(
         "SELECT id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id, pipeline_name, selected_base_url_key, status, started_at_ms, finished_at_ms, duration_ms, summary_json, steps_json, errors_json, request_json
         FROM integration_history
         WHERE project_id = ",
@@ -36,11 +37,11 @@ pub async fn list_e2e_history_records(
 }
 
 pub async fn load_e2e_history_record_by_id(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     test_id: &str,
 ) -> Result<Option<E2eHistoryRecord>, sqlx::Error> {
-    let row = sqlx::query(
+    let row = db.query(
         "SELECT id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id, pipeline_name, selected_base_url_key, status, started_at_ms, finished_at_ms, duration_ms, summary_json, steps_json, errors_json, request_json
         FROM integration_history
         WHERE project_id = ? AND (id = ? OR execution_id = ?)
@@ -57,14 +58,14 @@ pub async fn load_e2e_history_record_by_id(
 }
 
 pub async fn list_load_history_records(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     query: HistoryQuery,
 ) -> Result<Vec<LoadHistoryRecord>, sqlx::Error> {
     let limit = clamp_history_limit(query.limit);
     let offset = clamp_history_offset(query.offset);
     let order_sql = history_order_to_sql(query.order);
-    let mut qb = QueryBuilder::<Sqlite>::new(
+    let mut qb = QueryBuilder::<sqlx::Any>::new(
         "SELECT id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id, pipeline_name, selected_base_url_key, status, started_at_ms, finished_at_ms, duration_ms, requested_config_json, final_consolidated_json, final_lines_json, errors_json, request_json, context_json
         FROM load_history
         WHERE project_id = ",
@@ -86,11 +87,11 @@ pub async fn list_load_history_records(
 }
 
 pub async fn load_load_history_record_by_id(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     test_id: &str,
 ) -> Result<Option<LoadHistoryRecord>, sqlx::Error> {
-    let row = sqlx::query(
+    let row = db.query(
         "SELECT id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id, pipeline_name, selected_base_url_key, status, started_at_ms, finished_at_ms, duration_ms, requested_config_json, final_consolidated_json, final_lines_json, errors_json, request_json, context_json
         FROM load_history
         WHERE project_id = ? AND (id = ? OR execution_id = ?)
@@ -106,8 +107,8 @@ pub async fn load_load_history_record_by_id(
     Ok(row.as_ref().map(load_history_record_from_row))
 }
 
-pub async fn save_e2e_history(db: &SqlitePool, write: E2eHistoryWrite) -> Result<(), sqlx::Error> {
-    sqlx::query(
+pub async fn save_e2e_history(db: &DbPool, write: E2eHistoryWrite) -> Result<(), sqlx::Error> {
+    db.query(
         "INSERT INTO integration_history (
             id,
             execution_id, transaction_id, project_id, pipeline_index, pipeline_id, pipeline_name,
@@ -137,7 +138,7 @@ pub async fn save_e2e_history(db: &SqlitePool, write: E2eHistoryWrite) -> Result
     Ok(())
 }
 
-fn e2e_history_record_from_row(row: &sqlx::sqlite::SqliteRow) -> E2eHistoryRecord {
+fn e2e_history_record_from_row(row: &sqlx::any::AnyRow) -> E2eHistoryRecord {
     let summary_json = row
         .try_get::<Option<String>, _>("summary_json")
         .ok()
@@ -174,7 +175,7 @@ fn e2e_history_record_from_row(row: &sqlx::sqlite::SqliteRow) -> E2eHistoryRecor
     }
 }
 
-fn load_history_record_from_row(row: &sqlx::sqlite::SqliteRow) -> LoadHistoryRecord {
+fn load_history_record_from_row(row: &sqlx::any::AnyRow) -> LoadHistoryRecord {
     let requested_config_json = row
         .try_get::<String, _>("requested_config_json")
         .unwrap_or_else(|_| "{}".to_owned());
@@ -220,11 +221,8 @@ fn load_history_record_from_row(row: &sqlx::sqlite::SqliteRow) -> LoadHistoryRec
     }
 }
 
-pub async fn save_load_history(
-    db: &SqlitePool,
-    write: LoadHistoryWrite,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
+pub async fn save_load_history(db: &DbPool, write: LoadHistoryWrite) -> Result<(), sqlx::Error> {
+    db.query(
         "INSERT INTO load_history (
             id,
             execution_id, transaction_id, project_id, pipeline_index, pipeline_id, pipeline_name,
@@ -257,12 +255,10 @@ pub async fn save_load_history(
     Ok(())
 }
 
-pub async fn upsert_e2e_history(
-    db: &SqlitePool,
-    write: E2eHistoryWrite,
-) -> Result<(), sqlx::Error> {
-    let rows_affected = sqlx::query(
-        "UPDATE integration_history SET
+pub async fn upsert_e2e_history(db: &DbPool, write: E2eHistoryWrite) -> Result<(), sqlx::Error> {
+    let rows_affected = db
+        .query(
+            "UPDATE integration_history SET
             transaction_id = ?,
             project_id = ?,
             pipeline_index = ?,
@@ -278,25 +274,25 @@ pub async fn upsert_e2e_history(
             errors_json = ?,
             request_json = ?
         WHERE execution_id = ?",
-    )
-    .bind(write.transaction_id.clone())
-    .bind(write.metadata.project_id.clone())
-    .bind(write.metadata.pipeline_index)
-    .bind(write.pipeline_id.clone())
-    .bind(write.pipeline_name.clone())
-    .bind(write.selected_base_url_key.clone())
-    .bind(write.status.clone())
-    .bind(write.started_at_ms)
-    .bind(write.finished_at_ms)
-    .bind(write.duration_ms)
-    .bind(write.summary.clone().map(|value| value.to_string()))
-    .bind(serde_json::to_string(&write.steps).unwrap_or_else(|_| "[]".to_owned()))
-    .bind(serde_json::to_string(&write.errors).unwrap_or_else(|_| "[]".to_owned()))
-    .bind(write.request.to_string())
-    .bind(write.execution_id.clone())
-    .execute(db)
-    .await?
-    .rows_affected();
+        )
+        .bind(write.transaction_id.clone())
+        .bind(write.metadata.project_id.clone())
+        .bind(write.metadata.pipeline_index)
+        .bind(write.pipeline_id.clone())
+        .bind(write.pipeline_name.clone())
+        .bind(write.selected_base_url_key.clone())
+        .bind(write.status.clone())
+        .bind(write.started_at_ms)
+        .bind(write.finished_at_ms)
+        .bind(write.duration_ms)
+        .bind(write.summary.clone().map(|value| value.to_string()))
+        .bind(serde_json::to_string(&write.steps).unwrap_or_else(|_| "[]".to_owned()))
+        .bind(serde_json::to_string(&write.errors).unwrap_or_else(|_| "[]".to_owned()))
+        .bind(write.request.to_string())
+        .bind(write.execution_id.clone())
+        .execute(db)
+        .await?
+        .rows_affected();
 
     if rows_affected == 0 {
         save_e2e_history(db, write).await?;
@@ -305,12 +301,10 @@ pub async fn upsert_e2e_history(
     Ok(())
 }
 
-pub async fn upsert_load_history(
-    db: &SqlitePool,
-    write: LoadHistoryWrite,
-) -> Result<(), sqlx::Error> {
-    let rows_affected = sqlx::query(
-        "UPDATE load_history SET
+pub async fn upsert_load_history(db: &DbPool, write: LoadHistoryWrite) -> Result<(), sqlx::Error> {
+    let rows_affected = db
+        .query(
+            "UPDATE load_history SET
             transaction_id = ?,
             project_id = ?,
             pipeline_index = ?,
@@ -328,32 +322,32 @@ pub async fn upsert_load_history(
             request_json = ?,
             context_json = ?
         WHERE execution_id = ?",
-    )
-    .bind(write.transaction_id.clone())
-    .bind(write.metadata.project_id.clone())
-    .bind(write.metadata.pipeline_index)
-    .bind(write.pipeline_id.clone())
-    .bind(write.pipeline_name.clone())
-    .bind(write.selected_base_url_key.clone())
-    .bind(write.status.clone())
-    .bind(write.started_at_ms)
-    .bind(write.finished_at_ms)
-    .bind(write.duration_ms)
-    .bind(write.requested_config.to_string())
-    .bind(
-        write
-            .final_consolidated
-            .clone()
-            .map(|value| value.to_string()),
-    )
-    .bind(serde_json::to_string(&write.final_lines).unwrap_or_else(|_| "[]".to_owned()))
-    .bind(serde_json::to_string(&write.errors).unwrap_or_else(|_| "[]".to_owned()))
-    .bind(write.request.to_string())
-    .bind(write.context.to_string())
-    .bind(write.execution_id.clone())
-    .execute(db)
-    .await?
-    .rows_affected();
+        )
+        .bind(write.transaction_id.clone())
+        .bind(write.metadata.project_id.clone())
+        .bind(write.metadata.pipeline_index)
+        .bind(write.pipeline_id.clone())
+        .bind(write.pipeline_name.clone())
+        .bind(write.selected_base_url_key.clone())
+        .bind(write.status.clone())
+        .bind(write.started_at_ms)
+        .bind(write.finished_at_ms)
+        .bind(write.duration_ms)
+        .bind(write.requested_config.to_string())
+        .bind(
+            write
+                .final_consolidated
+                .clone()
+                .map(|value| value.to_string()),
+        )
+        .bind(serde_json::to_string(&write.final_lines).unwrap_or_else(|_| "[]".to_owned()))
+        .bind(serde_json::to_string(&write.errors).unwrap_or_else(|_| "[]".to_owned()))
+        .bind(write.request.to_string())
+        .bind(write.context.to_string())
+        .bind(write.execution_id.clone())
+        .execute(db)
+        .await?
+        .rows_affected();
 
     if rows_affected == 0 {
         save_load_history(db, write).await?;

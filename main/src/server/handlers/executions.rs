@@ -1,9 +1,10 @@
+use crate::server::db::DbPool;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::{Map, Value, json};
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 use tokio::sync::mpsc;
 
 use crate::server::errors::{
@@ -39,7 +40,7 @@ fn value_to_object(value: Value) -> Map<String, Value> {
 }
 
 async fn load_finished_e2e_snapshot(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     execution_id: &str,
 ) -> Result<Option<FinishedExecutionSnapshot>, sqlx::Error> {
@@ -101,7 +102,7 @@ async fn load_finished_e2e_snapshot(
 }
 
 async fn load_finished_load_snapshot(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     execution_id: &str,
 ) -> Result<Option<FinishedExecutionSnapshot>, sqlx::Error> {
@@ -187,7 +188,7 @@ async fn load_finished_load_snapshot(
 }
 
 async fn load_finished_execution_snapshot(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
     execution_id: &str,
 ) -> Result<Option<FinishedExecutionSnapshot>, sqlx::Error> {
@@ -381,7 +382,6 @@ mod tests {
     use axum::http::{Method, Request, StatusCode};
     use axum::response::Response;
     use serde_json::json;
-    use sqlx::sqlite::SqlitePoolOptions;
     use tokio::sync::{RwLock, broadcast};
     use tokio_stream::StreamExt;
     use tokio_util::sync::CancellationToken;
@@ -643,13 +643,11 @@ mod tests {
     }
 
     async fn test_state() -> AppState {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
-        sqlx::migrate!("./migrations")
-            .run(&db)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
             .await
             .expect("migrations");
 

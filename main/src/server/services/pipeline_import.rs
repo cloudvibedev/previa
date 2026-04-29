@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
+use crate::server::db::DbPool;
 use previa_runner::Pipeline;
-use sqlx::SqlitePool;
 
 use crate::server::db::{
     create_project_with_pipelines, load_existing_pipeline_ids, project_name_exists,
@@ -28,7 +28,7 @@ impl From<sqlx::Error> for PipelineImportError {
 }
 
 pub async fn import_pipelines_as_project(
-    db: &SqlitePool,
+    db: &DbPool,
     stack_name: String,
     pipelines: Vec<Pipeline>,
 ) -> Result<PipelineImportResponse, PipelineImportError> {
@@ -100,7 +100,6 @@ mod tests {
     use std::collections::HashMap;
 
     use previa_runner::Pipeline;
-    use sqlx::sqlite::SqlitePoolOptions;
 
     use super::{PipelineImportError, import_pipelines_as_project};
     use crate::server::db::{create_project_with_pipelines, load_pipelines_for_project};
@@ -126,14 +125,12 @@ mod tests {
         }
     }
 
-    async fn db() -> sqlx::SqlitePool {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+    async fn db() -> crate::server::db::DbPool {
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
-        sqlx::migrate!("./migrations")
-            .run(&db)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
             .await
             .expect("migrations");
         db

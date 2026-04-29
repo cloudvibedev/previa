@@ -698,7 +698,6 @@ mod tests {
     use axum::{Json, Router};
     use previa_runner::{Pipeline, PipelineStep};
     use serde_json::{Value, json};
-    use sqlx::sqlite::SqlitePoolOptions;
     use tokio::net::TcpListener;
     use tokio::sync::{RwLock, mpsc};
     use tokio_stream::wrappers::ReceiverStream;
@@ -711,13 +710,11 @@ mod tests {
     #[tokio::test]
     async fn second_load_execution_is_marked_queued_when_runner_capacity_is_busy() {
         let runner = spawn_busy_runner().await;
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
-        sqlx::migrate!("./migrations")
-            .run(&db)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
             .await
             .expect("migrations");
 
@@ -796,13 +793,11 @@ mod tests {
     async fn second_load_execution_for_same_pipeline_is_queued_even_with_free_runner_capacity() {
         let first_runner = spawn_busy_runner().await;
         let second_runner = spawn_busy_runner().await;
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
-        sqlx::migrate!("./migrations")
-            .run(&db)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
             .await
             .expect("migrations");
 

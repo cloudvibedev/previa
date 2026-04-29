@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::server::db::DbPool;
 use reqwest::Client;
 use serde_json::Value;
-use sqlx::SqlitePool;
 use tokio::sync::{RwLock, broadcast};
 use tokio_util::sync::CancellationToken;
 
@@ -14,7 +14,7 @@ use crate::server::models::{E2eQueueRecord, SseMessage};
 #[derive(Clone)]
 pub struct AppState {
     pub client: Client,
-    pub db: SqlitePool,
+    pub db: DbPool,
     pub context_name: String,
     pub runner_endpoints: Vec<String>,
     pub runner_auth_key: Option<String>,

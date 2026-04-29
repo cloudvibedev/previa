@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
+use crate::server::db::DbPool;
 use previa_runner::RuntimeSpec;
-use sqlx::SqlitePool;
 
 use crate::server::db::list_project_spec_records;
 use crate::server::models::ProjectSpecRecord;
 
 pub async fn load_runtime_specs_for_project(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
 ) -> Result<Vec<RuntimeSpec>, sqlx::Error> {
     let records = list_project_spec_records(db, project_id).await?;
@@ -19,7 +19,7 @@ pub async fn load_runtime_specs_for_project(
 }
 
 pub async fn resolve_runtime_specs_for_execution(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: Option<&str>,
     payload_specs: &[RuntimeSpec],
 ) -> Result<Option<Vec<RuntimeSpec>>, sqlx::Error> {

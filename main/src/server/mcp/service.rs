@@ -10,7 +10,7 @@ use tokio_stream::StreamExt;
 use tracing::info;
 
 use crate::server::db::{
-    delete_pipeline_record, delete_project_spec_record, import_project_bundle,
+    DbPool, delete_pipeline_record, delete_project_spec_record, import_project_bundle,
     insert_project_pipeline, insert_project_spec_record, list_e2e_history_records,
     list_load_history_records, list_project_records, list_project_spec_records,
     load_e2e_history_for_export, load_e2e_history_record_by_id, load_load_history_for_export,
@@ -2442,7 +2442,7 @@ async fn cancel_execution_payload(
 }
 
 async fn delete_history_rows(
-    db: &sqlx::SqlitePool,
+    db: &DbPool,
     table: &str,
     project_id: &str,
     pipeline_index: Option<i64>,
@@ -3104,7 +3104,6 @@ mod tests {
 
     use previa_runner::{Pipeline, PipelineStep};
     use serde_json::json;
-    use sqlx::sqlite::SqlitePoolOptions;
     use tokio::sync::RwLock;
 
     use super::{
@@ -3623,13 +3622,11 @@ mod tests {
     }
 
     async fn test_state() -> AppState {
-        let db = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
             .await
             .expect("sqlite memory db");
-        sqlx::migrate!("./migrations")
-            .run(&db)
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
             .await
             .expect("migrations");
 

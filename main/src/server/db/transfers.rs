@@ -1,6 +1,7 @@
+use crate::server::db::DbPool;
 use chrono::DateTime;
 use serde_json::Value;
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 
 use super::pipelines::load_pipelines_for_project;
 use super::specs::list_project_spec_records;
@@ -11,17 +12,18 @@ use crate::server::models::{
 use crate::server::utils::{new_uuid_v7, now_ms};
 
 pub async fn load_project_export(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
 ) -> Result<Option<ProjectExportProject>, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT id, name, description, created_at, updated_at, spec_json
+    let row = db
+        .query(
+            "SELECT id, name, description, created_at, updated_at, spec_json
         FROM projects
         WHERE id = ?",
-    )
-    .bind(project_id)
-    .fetch_optional(db)
-    .await?;
+        )
+        .bind(project_id)
+        .fetch_optional(db)
+        .await?;
 
     let Some(row) = row else {
         return Ok(None);
@@ -49,20 +51,21 @@ pub async fn load_project_export(
 }
 
 pub async fn load_e2e_history_for_export(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
 ) -> Result<Vec<E2eHistoryRecord>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id,
+    let rows = db
+        .query(
+            "SELECT id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id,
             pipeline_name, selected_base_url_key, status, started_at_ms, finished_at_ms,
             duration_ms, summary_json, steps_json, errors_json, request_json
         FROM integration_history
         WHERE project_id = ?
         ORDER BY finished_at_ms DESC",
-    )
-    .bind(project_id)
-    .fetch_all(db)
-    .await?;
+        )
+        .bind(project_id)
+        .fetch_all(db)
+        .await?;
 
     let mut records = Vec::with_capacity(rows.len());
     for row in rows {
@@ -104,21 +107,22 @@ pub async fn load_e2e_history_for_export(
 }
 
 pub async fn load_load_history_for_export(
-    db: &SqlitePool,
+    db: &DbPool,
     project_id: &str,
 ) -> Result<Vec<LoadHistoryRecord>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id,
+    let rows = db
+        .query(
+            "SELECT id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id,
             pipeline_name, selected_base_url_key, status, started_at_ms, finished_at_ms,
             duration_ms, requested_config_json, final_consolidated_json, final_lines_json,
             errors_json, request_json, context_json
         FROM load_history
         WHERE project_id = ?
         ORDER BY finished_at_ms DESC",
-    )
-    .bind(project_id)
-    .fetch_all(db)
-    .await?;
+        )
+        .bind(project_id)
+        .fetch_all(db)
+        .await?;
 
     let mut records = Vec::with_capacity(rows.len());
     for row in rows {
@@ -170,7 +174,7 @@ pub async fn load_load_history_for_export(
 }
 
 pub async fn import_project_bundle(
-    db: &SqlitePool,
+    db: &DbPool,
     project: &ProjectExportProject,
     include_history: bool,
 ) -> Result<ProjectImportResponse, sqlx::Error> {
@@ -179,7 +183,7 @@ pub async fn import_project_bundle(
     let created_at_ms = parse_iso_to_ms(&project.created_at).unwrap_or(now_ms_i64);
     let updated_at_ms = parse_iso_to_ms(&project.updated_at).unwrap_or(now_ms_i64);
 
-    sqlx::query(
+    db.query(
         "INSERT INTO projects (
             id, name, description, created_at, updated_at, created_at_ms, updated_at_ms, spec_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -208,7 +212,7 @@ pub async fn import_project_bundle(
         }
         let pipeline_id = pipeline_to_store.id.clone().unwrap_or_else(new_uuid_v7);
 
-        sqlx::query(
+        db.query(
             "INSERT INTO pipelines (
                 id, project_id, position, name, description, created_at, updated_at, pipeline_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -237,7 +241,7 @@ pub async fn import_project_bundle(
         let spec_created_at_ms = parse_iso_to_ms(&spec.created_at).unwrap_or(now_ms_i64);
         let spec_updated_at_ms = parse_iso_to_ms(&spec.updated_at).unwrap_or(now_ms_i64);
 
-        sqlx::query(
+        db.query(
             "INSERT INTO project_openapi_specs (
                 id, project_id, spec_json, spec_md5, url, slug, urls_json, sync, live, created_at,
                 updated_at, created_at_ms, updated_at_ms
@@ -270,7 +274,7 @@ pub async fn import_project_bundle(
             } else {
                 record.id.clone()
             };
-            sqlx::query(
+            db.query(
                 "INSERT INTO integration_history (
                     id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id, pipeline_name,
                     selected_base_url_key, status, started_at_ms, finished_at_ms, duration_ms,
@@ -304,7 +308,7 @@ pub async fn import_project_bundle(
             } else {
                 record.id.clone()
             };
-            sqlx::query(
+            db.query(
                 "INSERT INTO load_history (
                     id, execution_id, transaction_id, project_id, pipeline_index, pipeline_id, pipeline_name,
                     selected_base_url_key, status, started_at_ms, finished_at_ms, duration_ms,
