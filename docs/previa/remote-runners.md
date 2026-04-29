@@ -29,6 +29,31 @@ Accepted attached runner formats:
 - `10.0.0.12:55880` -> `http://10.0.0.12:55880`
 - `10.0.0.12` -> `http://10.0.0.12:55880`
 
+## Dynamic Runner Registry
+
+`previa-main` stores runners in its database. On startup, endpoints from `RUNNER_ENDPOINTS` are automatically inserted or updated in that registry and enabled.
+
+The registry has a persistent `enabled` flag. A disabled runner remains stored for later use, but `previa-main` ignores it before checking health.
+
+You can manage the registry without restarting the context:
+
+```bash
+previa runner list
+previa runner add 10.0.0.12:55880 --name staging-a
+previa runner disable staging-a
+previa runner enable staging-a
+previa runner remove staging-a
+```
+
+For project-local contexts, use:
+
+```bash
+previa local runner list
+previa local runner add 10.0.0.12:55880 --name staging-a
+```
+
+Before each execution, `previa-main` reads enabled runners from the registry, checks `/health` and `/info`, marks failed runners as unhealthy, and runs only with enabled runners whose `/health` responds successfully.
+
 ## Mixed Topologies
 
 You can combine local and attached runners:
@@ -40,7 +65,7 @@ RUNNER_AUTH_KEY=shared-secret previa up -d --runners 1 --attach-runner 10.0.0.12
 In that case:
 
 - local runners inherit the same `RUNNER_AUTH_KEY`
-- `previa-main` sends that key to all runners in `RUNNER_ENDPOINTS`
+- `previa-main` sends that key to all enabled registered runners
 
 ## Important Rule
 

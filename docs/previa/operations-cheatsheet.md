@@ -79,6 +79,23 @@ previa up -d -i ./tests/e2e -r -s app_e2e
 RUNNER_AUTH_KEY=shared-secret previa up -d --attach-runner 10.0.0.12:55880
 ```
 
+## Manage Runners Dynamically
+
+```bash
+previa runner list
+previa runner add 10.0.0.12:55880 --name staging-a
+previa runner disable staging-a
+previa runner enable staging-a
+previa runner remove staging-a
+```
+
+Project-local home:
+
+```bash
+previa local runner list
+previa local runner add 10.0.0.12:55880 --name staging-a
+```
+
 ## MCP
 
 Enable MCP on `previa-main` and connect your assistant to:
