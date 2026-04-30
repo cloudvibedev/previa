@@ -2,6 +2,14 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.19] - 2026-04-30
+
+### Maintenance
+- Publish docker images under repository owner (d91b707)
+- Update release metadata for v1.0.0-alpha.18 (8f5fcc8)
+
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.18...v1.0.0-alpha.19
+
 ## [v1.0.0-alpha.18] - 2026-04-30
 
 ### Maintenance
