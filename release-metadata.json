@@ -1,14 +1,14 @@
 {
   "links": {
-    "previa_linux_amd64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.18/previa-linux-amd64",
-    "previa_linux_arm64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.18/previa-linux-arm64",
-    "previa_main_linux_amd64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.18/previa-main-linux-amd64",
-    "previa_main_linux_arm64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.18/previa-main-linux-arm64",
-    "previa_runner_linux_amd64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.18/previa-runner-linux-amd64",
-    "previa_runner_linux_arm64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.18/previa-runner-linux-arm64"
+    "previa_linux_amd64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.19/previa-linux-amd64",
+    "previa_linux_arm64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.19/previa-linux-arm64",
+    "previa_main_linux_amd64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.19/previa-main-linux-amd64",
+    "previa_main_linux_arm64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.19/previa-main-linux-arm64",
+    "previa_runner_linux_amd64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.19/previa-runner-linux-amd64",
+    "previa_runner_linux_arm64": "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.19/previa-runner-linux-arm64"
   },
   "name": "previa",
-  "published_at": "2026-04-30T14:01:53Z",
-  "tag": "v1.0.0-alpha.18",
-  "version": "1.0.0-alpha.18"
+  "published_at": "2026-04-30T14:15:02Z",
+  "tag": "v1.0.0-alpha.19",
+  "version": "1.0.0-alpha.19"
 }
