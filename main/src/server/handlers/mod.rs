@@ -1,3 +1,4 @@
+pub mod app;
 pub mod executions;
 pub mod health;
 pub mod history_e2e;

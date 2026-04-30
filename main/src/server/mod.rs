@@ -5,6 +5,7 @@ use axum::middleware::from_fn;
 use axum::routing::{get, post, put};
 use tower_http::cors::{Any, CorsLayer};
 
+use crate::server::handlers::app::app_fallback;
 use crate::server::handlers::executions::{cancel_execution, stream_execution};
 use crate::server::handlers::health::{get_info, health, openapi_json};
 use crate::server::handlers::history_e2e::{
@@ -40,6 +41,22 @@ use crate::server::mcp::models::McpConfig;
 use crate::server::middleware::transaction::propagate_transaction_header;
 use crate::server::state::AppState;
 
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    pub enabled: bool,
+    pub mcp_path: Option<String>,
+}
+
+impl AppConfig {
+    #[cfg(test)]
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            mcp_path: None,
+        }
+    }
+}
+
 pub mod db;
 pub mod docs;
 pub mod errors;
@@ -53,7 +70,17 @@ pub mod state;
 pub mod utils;
 pub mod validation;
 
+#[cfg(test)]
 pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
+    build_app_with_config(state, mcp_config, AppConfig::disabled())
+}
+
+pub fn build_app_with_config(
+    state: AppState,
+    mcp_config: &McpConfig,
+    app_config: AppConfig,
+) -> Router {
+    let fallback_config = app_config.clone();
     let mut app = Router::new()
         .route("/health", get(health))
         .route("/info", get(get_info))
@@ -153,6 +180,7 @@ pub fn build_app(state: AppState, mcp_config: &McpConfig) -> Router {
             .max_age(Duration::from_secs(60 * 60)),
     )
     .layer(from_fn(propagate_transaction_header))
+    .fallback(move |method, uri| app_fallback(method, uri, fallback_config.clone()))
     .with_state(state)
 }
 
@@ -180,6 +208,7 @@ mod tests {
     use crate::server::state::AppState;
 
     use super::build_app;
+    use super::{AppConfig, build_app_with_config};
 
     async fn test_app(mcp_enabled: bool) -> axum::Router {
         let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
@@ -207,6 +236,36 @@ mod tests {
                 enabled: mcp_enabled,
                 path: "/mcp".to_owned(),
             },
+        )
+    }
+
+    async fn test_app_with_config(app_config: AppConfig) -> axum::Router {
+        let db = crate::server::db::DbPool::connect("sqlite::memory:", 1)
+            .await
+            .expect("sqlite memory db");
+        sqlx::migrate!("./migrations/sqlite")
+            .run(db.pool())
+            .await
+            .expect("migrations");
+        let state = AppState {
+            client: Client::new(),
+            db,
+            context_name: "default".to_owned(),
+            runner_auth_key: None,
+            rps_per_node: 1000,
+            scheduler: ExecutionScheduler::new(Default::default()),
+            executions: Arc::new(RwLock::new(HashMap::new())),
+            e2e_queues: Arc::new(RwLock::new(HashMap::new())),
+            mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
+        };
+
+        build_app_with_config(
+            state,
+            &McpConfig {
+                enabled: false,
+                path: "/mcp".to_owned(),
+            },
+            app_config,
         )
     }
 
@@ -366,6 +425,97 @@ mod tests {
             .expect("runner delete response");
 
         assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn app_routes_do_not_render_when_disabled() {
+        let app = test_app_with_config(AppConfig::disabled()).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/")
+                    .body(Body::empty())
+                    .expect("root request"),
+            )
+            .await
+            .expect("root response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn app_routes_render_index_and_spa_fallback_when_enabled() {
+        let app = test_app_with_config(AppConfig {
+            enabled: true,
+            mcp_path: Some("/mcp".to_owned()),
+        })
+        .await;
+
+        for uri in ["/", "/index", "/projects/demo/flows"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::GET)
+                        .uri(uri)
+                        .body(Body::empty())
+                        .expect("app request"),
+                )
+                .await
+                .expect("app response");
+
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            let content_type = response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_owned();
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("read app body");
+            let body = String::from_utf8(body.to_vec()).expect("app body utf8");
+            assert!(content_type.starts_with("text/html"), "{uri}");
+            assert!(body.contains("<!doctype html>") || body.contains("<!DOCTYPE html>"));
+            assert!(body.contains("id=\"root\""));
+        }
+    }
+
+    #[tokio::test]
+    async fn api_not_found_returns_json_when_app_is_enabled() {
+        let app = test_app_with_config(AppConfig {
+            enabled: true,
+            mcp_path: Some("/mcp".to_owned()),
+        })
+        .await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v1/not-a-real-route")
+                    .body(Body::empty())
+                    .expect("api request"),
+            )
+            .await
+            .expect("api response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read api body");
+        let payload: Value = serde_json::from_slice(&body).expect("api error json");
+
+        assert!(content_type.starts_with("application/json"));
+        assert_eq!(payload["error"], "not_found");
     }
 
     #[tokio::test]

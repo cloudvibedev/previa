@@ -22,6 +22,7 @@ You can also download prebuilt binaries at: **https://previa.dev/downloads**
 ORCHESTRATOR_DATABASE_URL="sqlite://orchestrator.db" \
 RUNNER_ENDPOINTS="http://127.0.0.1:55880" \
 MCP_ENABLED=true \
+PREVIA_APP_ENABLED=true \
 ADDRESS=0.0.0.0 PORT=5588 \
 cargo run -p previa-main
 ```
@@ -52,13 +53,19 @@ http://127.0.0.1:5588
 | `RUNNER_RPS_PER_NODE` | `1000` | Per-node capacity hint for load planning |
 | `RUNNER_ENDPOINTS` | empty | Runner endpoints CSV |
 | `ADDRESS` | `0.0.0.0` | Bind address |
-| `PORT` | `8383` | Bind port |
+| `PORT` | `5588` | Bind port |
+| `PREVIA_APP_ENABLED` | `false` | Enables the embedded React app on `/`, `/index`, and SPA routes outside reserved API/system paths |
 | `MCP_ENABLED` | `false` | Habilita o endpoint MCP HTTP no `main` |
 | `MCP_PATH` | `/mcp` | Caminho HTTP do servidor MCP quando habilitado |
 | `RUST_LOG` | unset | Tracing filter |
 
 Quando `MCP_ENABLED=true`, o `main` expõe um servidor MCP HTTP em `POST /mcp` por padrão.
 Se precisar alterar o caminho, defina `MCP_PATH`.
+
+Quando `PREVIA_APP_ENABLED=true`, o `main` serve o app React embutido em `/` e `/index`.
+Rotas desconhecidas fora de `/api`, `/health`, `/info`, `/openapi.json`, `/proxy` e do caminho MCP
+retornam `index.html` para o React Router resolver. Rotas `/api/...` continuam respondendo como API,
+incluindo 404 em JSON.
 
 ## HTTP API Surface
 
@@ -71,6 +78,12 @@ Pipeline rule: every `step.url` must be an absolute URL (`http://` or `https://`
 - `GET /health`
 - `GET /info`
 - `GET /openapi.json`
+
+### Embedded App
+
+- `GET /` when `PREVIA_APP_ENABLED=true`
+- `GET /index` when `PREVIA_APP_ENABLED=true`
+- `GET /<client-route>` when `PREVIA_APP_ENABLED=true` and the path is not reserved by the API/system routes
 
 ### Proxy
 

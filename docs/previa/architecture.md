@@ -3,7 +3,7 @@
 Previa is made of four main parts:
 
 - `previa`: the local CLI used to start and operate a stack
-- `previa-main`: the orchestrator API for projects, specs, pipelines, history, proxying, queues, and MCP
+- `previa-main`: the orchestrator API for projects, specs, pipelines, history, proxying, queues, MCP, and the optional embedded app
 - `previa-runner`: the execution API for E2E and load requests
 - `previa-engine`: the execution core that resolves templates, performs HTTP steps, and evaluates assertions
 
@@ -28,6 +28,7 @@ By default:
 - `previa-main` listens on `0.0.0.0:5588`
 - local `previa-runner` instances start at `127.0.0.1:55880`
 - the MCP endpoint is `http://localhost:5588/mcp` when enabled
+- the embedded app is served by `previa-main` on `/` and `/index` when `PREVIA_APP_ENABLED=true`
 - `previa open` opens `https://ide.previa.dev?add_context=<main-url>`
 
 ## Feature Map
@@ -42,6 +43,7 @@ IDE:
 
 - connect to a local `previa-main`
 - manage projects, specs, pipelines, and executions visually
+- can be served directly by `previa-main` when the embedded app is enabled
 
 HTTP API:
 

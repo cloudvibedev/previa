@@ -8,7 +8,6 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::server::build_app;
 use crate::server::db::{
     DatabaseKind, DbPool, backfill_project_spec_md5_hashes, cancel_stale_e2e_queues,
     seed_env_runner_records,
@@ -17,6 +16,7 @@ use crate::server::execution::{SchedulerConfig, parse_runner_endpoints};
 use crate::server::mcp::models::McpConfig;
 use crate::server::state::{AppState, DB_SCHEMA_VERSION};
 use crate::server::utils::now_iso;
+use crate::server::{AppConfig, build_app_with_config};
 
 fn should_print_version(args: impl IntoIterator<Item = String>) -> bool {
     args.into_iter()
@@ -29,6 +29,17 @@ fn optional_env(key: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
+}
+
+fn truthy_env(key: &str) -> bool {
+    optional_env(key)
+        .map(|value| {
+            matches!(
+                value.as_str(),
+                "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+            )
+        })
+        .unwrap_or(false)
 }
 
 #[tokio::main]
@@ -47,6 +58,10 @@ async fn main() {
     let runner_endpoints = parse_runner_endpoints();
     let runner_auth_key = optional_env("RUNNER_AUTH_KEY");
     let mcp_config = McpConfig::from_env();
+    let app_config = AppConfig {
+        enabled: truthy_env("PREVIA_APP_ENABLED"),
+        mcp_path: mcp_config.enabled.then(|| mcp_config.path.clone()),
+    };
     let database_url = std::env::var("ORCHESTRATOR_DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://orchestrator.db".to_owned());
     let rps_per_node = std::env::var("RUNNER_RPS_PER_NODE")
@@ -114,7 +129,7 @@ async fn main() {
         mcp_sessions: Arc::new(RwLock::new(HashMap::new())),
     };
 
-    let app = build_app(state, &mcp_config);
+    let app = build_app_with_config(state, &mcp_config, app_config);
 
     let listener = TcpListener::bind(&bind_addr)
         .await

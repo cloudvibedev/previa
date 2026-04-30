@@ -251,8 +251,27 @@ jobs:
         shell: bash
         run: cargo install cross --locked
 
+      - name: Build embedded app
+        if: matrix.build_main == true
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Prepare embedded app assets
+        if: matrix.build_main == true
+        shell: bash
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
       - name: Build selected binaries
         shell: bash
+        env:
+          PREVIA_MAIN_SKIP_APP_BUILD: "1"
         run: |
           set -euo pipefail
           if [ "${{ matrix.use_cross }}" = "true" ]; then

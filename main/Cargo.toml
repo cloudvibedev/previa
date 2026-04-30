@@ -16,6 +16,7 @@ dotenvy = { workspace = true }
 either = "1"
 futures-core = "0.3"
 futures-util = "0.3"
+include_dir = "0.7"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
