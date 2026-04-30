@@ -79,17 +79,6 @@ export function AppShell() {
         <CircleHelp className="h-4 w-4" />
       </Button>
       <InstallAppButton />
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-9 w-9 rounded-full"
-        onClick={() => navigate("/runners")}
-        aria-label="Gerenciar runners"
-        title="Runners"
-      >
-        <Server className="h-4 w-4" />
-      </Button>
       <Button asChild variant="ghost" size="icon" className="h-9 w-9 rounded-full">
         <a
           href={GITHUB_REPOSITORY_URL}
@@ -100,6 +89,17 @@ export function AppShell() {
         >
           <Github className="h-4 w-4" />
         </a>
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-9 w-9 rounded-full"
+        onClick={() => navigate("/runners")}
+        aria-label="Gerenciar runners"
+        title="Runners"
+      >
+        <Server className="h-4 w-4" />
       </Button>
       {headerConfig.headerActions}
     </>
@@ -140,6 +140,20 @@ export function AppShell() {
           <MobileHeaderActionRow label="Download">
             <InstallAppButton />
           </MobileHeaderActionRow>
+          <MobileHeaderActionRow label="GitHub">
+            <Button asChild variant="ghost" size="icon" className="h-9 w-9 rounded-full">
+              <a
+                href={GITHUB_REPOSITORY_URL}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Abrir repositório no GitHub"
+                title="GitHub"
+                onClick={() => setIsMobileActionsOpen(false)}
+              >
+                <Github className="h-4 w-4" />
+              </a>
+            </Button>
+          </MobileHeaderActionRow>
           <MobileHeaderActionRow label="Runners">
             <Button
               type="button"
@@ -154,20 +168,6 @@ export function AppShell() {
               title="Runners"
             >
               <Server className="h-4 w-4" />
-            </Button>
-          </MobileHeaderActionRow>
-          <MobileHeaderActionRow label="GitHub">
-            <Button asChild variant="ghost" size="icon" className="h-9 w-9 rounded-full">
-              <a
-                href={GITHUB_REPOSITORY_URL}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Abrir repositório no GitHub"
-                title="GitHub"
-                onClick={() => setIsMobileActionsOpen(false)}
-              >
-                <Github className="h-4 w-4" />
-              </a>
             </Button>
           </MobileHeaderActionRow>
           <MobileHeaderActionRow label="Eventos">
