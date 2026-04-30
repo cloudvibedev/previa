@@ -2,6 +2,25 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.17] - 2026-04-30
+
+### Features
+- Serve embedded app from previa-main (484a64d)
+
+### Documentation
+- Clarify runner enabled flag (5cd2614)
+- Document dynamic runner registry (05e4b4b)
+
+### Maintenance
+- Bump version to 1.0.0-alpha.17 (d8a8d1f)
+- Ignore container build target (ceb23db)
+- Vendor app snapshot (41ee7c0)
+- Ignore app subrepo (c48061a)
+- Ignore embedded app git metadata (f829fd1)
+- Update release metadata for v1.0.0-alpha.16 (1d32b67)
+
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.16...v1.0.0-alpha.17
+
 ## [v1.0.0-alpha.16] - 2026-04-29
 
 ### Features
