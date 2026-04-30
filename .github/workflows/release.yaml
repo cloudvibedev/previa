@@ -457,16 +457,16 @@ jobs:
       matrix:
         include:
           - service: previa-runner
-            image: ghcr.io/cloudvibedev/runner
+            image_name: runner
             arch: amd64
           - service: previa-runner
-            image: ghcr.io/cloudvibedev/runner
+            image_name: runner
             arch: arm64
           - service: previa-main
-            image: ghcr.io/cloudvibedev/main
+            image_name: main
             arch: amd64
           - service: previa-main
-            image: ghcr.io/cloudvibedev/main
+            image_name: main
             arch: arm64
     steps:
       - name: Checkout
@@ -511,14 +511,14 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: true
           tags: |
-            ${{ matrix.image }}:latest-${{ matrix.arch }}
-            ${{ matrix.image }}:${{ needs.version_check.outputs.version }}-${{ matrix.arch }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:latest-${{ matrix.arch }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}:${{ needs.version_check.outputs.version }}-${{ matrix.arch }}
           build-args: |
             BIN_NAME=${{ matrix.service }}
             TARGETARCH=${{ matrix.arch }}
             ARTIFACT_ROOT=artifacts
-          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.image_name }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}-${{ matrix.arch }}
 
   docker_manifest:
     name: Create Docker manifests
@@ -529,8 +529,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: ghcr.io/cloudvibedev/main
-          - image: ghcr.io/cloudvibedev/runner
+          - image_name: main
+          - image_name: runner
     steps:
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -545,7 +545,7 @@ jobs:
           VERSION: ${{ needs.version_check.outputs.version }}
         run: |
           set -euo pipefail
-          image="${{ matrix.image }}"
+          image="ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}"
 
           docker buildx imagetools create \
             -t "${image}:latest" \
