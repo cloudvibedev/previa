@@ -2,6 +2,14 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.18] - 2026-04-30
+
+### Maintenance
+- Bump version to 1.0.0-alpha.18 (054e6ba)
+- Pass app build skip env to cross (8da7946)
+
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.17...v1.0.0-alpha.18
+
 ## [v1.0.0-alpha.17] - 2026-04-30
 
 ### Features
