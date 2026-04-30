@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { useAppHeader } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ProjectSettingsDialog } from "@/components/ProjectSettingsDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -65,10 +66,12 @@ export default function RunnersPage() {
   const [name, setName] = useState("");
   const [editingNames, setEditingNames] = useState<Record<string, string>>({});
   const [runnerToDelete, setRunnerToDelete] = useState<RunnerRecord | null>(null);
+  const headerActions = useMemo(() => <ProjectSettingsDialog />, []);
 
   const headerConfig = useMemo(() => ({
+    headerActions,
     onBackToProjects: () => navigate("/"),
-  }), [navigate]);
+  }), [headerActions, navigate]);
   useAppHeader(headerConfig);
 
   const apiUrl = getApiUrl();
