@@ -1,0 +1,4 @@
+[build.env]
+passthrough = [
+    "PREVIA_MAIN_SKIP_APP_BUILD",
+]
