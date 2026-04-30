@@ -25,7 +25,7 @@ export interface AppHeaderConfig {
 }
 
 const AppHeaderContext = createContext<((config: AppHeaderConfig) => void) | null>(null);
-const GITHUB_REPOSITORY_URL = "https://github.com/cloudvibedev/previa";
+const GITHUB_REPOSITORY_URL = "https://github.com/runvibe/previa";
 
 function isSameHeaderConfig(current: AppHeaderConfig, next: AppHeaderConfig) {
   return (

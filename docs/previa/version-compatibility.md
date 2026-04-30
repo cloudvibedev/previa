@@ -26,8 +26,8 @@ previa up -d
 
 the CLI uses its own version as the default image tag for:
 
-- `ghcr.io/cloudvibedev/main`
-- `ghcr.io/cloudvibedev/runner`
+- `ghcr.io/runvibe/main`
+- `ghcr.io/runvibe/runner`
 
 You can override that explicitly:
 

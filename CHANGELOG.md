@@ -60,7 +60,7 @@ Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.16...v1.0
 - Publish native macos arm64 cli (d6faa07)
 - Update release metadata for v1.0.0-alpha.14 (8f40110)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.14...v1.0.0-alpha.16
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.14...v1.0.0-alpha.16
 
 ## [v1.0.0-alpha.14] - 2026-04-29
 
@@ -77,7 +77,7 @@ Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.14..
 - Move release metadata into repo (baf5f50)
 - Bump version to 1.0.0-alpha.13 in Cargo.lock and Cargo.toml (06d65b0)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.12...v1.0.0-alpha.14
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.12...v1.0.0-alpha.14
 
 ## [v1.0.0-alpha.12] - 2026-03-30
 
@@ -99,7 +99,7 @@ Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.12..
 ### Other Changes
 - Enable MCP in default local compose config (85e03a5)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.11...v1.0.0-alpha.12
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.11...v1.0.0-alpha.12
 
 ## [v1.0.0-alpha.11] - 2026-03-24
 
@@ -113,7 +113,7 @@ Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.11..
 - Add MCP guide for local pipeline workflows (8a8c96e)
 - Fix Windows process handle check (70e1d86)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.10...v1.0.0-alpha.11
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.10...v1.0.0-alpha.11
 
 ## [v1.0.0-alpha.10] - 2026-03-24
 
@@ -135,7 +135,7 @@ Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.10..
 - Add release scope selector to release workflow (808ac5d)
 - Hide --bin outside Linux (4ee7dd2)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.9...v1.0.0-alpha.10
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.9...v1.0.0-alpha.10
 
 ## [v1.0.0-alpha.9] - 2026-03-19
 
@@ -146,14 +146,14 @@ Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.9...
 - Atualiza versão para 1.0.0-alpha.9 no Cargo.lock e Cargo.toml (c70f6ed)
 - Print manual URL when browser launch fails (babede7)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.8...v1.0.0-alpha.9
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.8...v1.0.0-alpha.9
 
 ## [v1.0.0-alpha.8] - 2026-03-19
 
 ### Other Changes
 - Atualiza versão para 1.0.0-alpha.8 no Cargo.lock e Cargo.toml (b668f2e)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.7...v1.0.0-alpha.8
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.7...v1.0.0-alpha.8
 
 ## [v1.0.0-alpha.7] - 2026-03-19
 
@@ -162,7 +162,7 @@ Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.7...
 - Use legacy-compatible compose port syntax (6b9a918)
 - Refresh README badge URLs (e688c15)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.6...v1.0.0-alpha.7
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.6...v1.0.0-alpha.7
 
 ## [v1.0.0-alpha.6] - 2026-03-19
 
@@ -181,4 +181,4 @@ Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.6...
 - Add walkthrough and reference docs (ebb93bf)
 - Clarify onboarding and version alignment docs (3c2018a)
 
-Full Changelog: https://github.com/cloudvibedev/previa/compare/v1.0.0-alpha.5...v1.0.0-alpha.6
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.5...v1.0.0-alpha.6

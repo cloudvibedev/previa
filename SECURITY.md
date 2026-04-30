@@ -7,7 +7,7 @@ public GitHub issue with exploit details.
 
 Instead, report it privately to:
 
-- `previa@cloudvibe.dev`
+- `previa@runvibe.dev`
 
 Please include:
 

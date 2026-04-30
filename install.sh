@@ -2,8 +2,8 @@
 
 set -eu
 
-MANIFEST_URL="${MANIFEST_URL:-https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json}"
-PREVIA_RELEASE_BASE_URL="${PREVIA_RELEASE_BASE_URL:-https://github.com/cloudvibedev/previa/releases/download}"
+MANIFEST_URL="${MANIFEST_URL:-https://raw.githubusercontent.com/runvibe/previa/main/release-metadata.json}"
+PREVIA_RELEASE_BASE_URL="${PREVIA_RELEASE_BASE_URL:-https://github.com/runvibe/previa/releases/download}"
 PREVIA_HOME_DEFAULT="${HOME}/.previa"
 PREVIA_BIN_DIR="${PREVIA_HOME_DEFAULT}/bin"
 RC_BEGIN="# >>> Previa installer >>>"

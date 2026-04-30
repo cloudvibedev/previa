@@ -6,10 +6,10 @@ members = ['engine', 'main', 'previa', 'runner']
 version = "1.0.0-alpha.19"
 edition = "2024"
 rust-version = "1.90.0"
-authors = ["Previa Labs <previa@cloudvibe.dev>"]
+authors = ["Previa Labs <previa@runvibe.dev>"]
 license = "MIT"
-repository = "https://github.com/cloudvibedev/previa"
-homepage = "https://github.com/cloudvibedev/previa"
+repository = "https://github.com/runvibe/previa"
+homepage = "https://github.com/runvibe/previa"
 
 [workspace.dependencies]
 # internal

@@ -4,10 +4,10 @@
 
 # Previa
 
-[![Release](https://img.shields.io/github/v/release/cloudvibedev/previa?display_name=tag&cacheSeconds=300)](https://github.com/cloudvibedev/previa/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/cloudvibedev/previa/release.yaml?branch=main&label=build&cacheSeconds=300)](https://github.com/cloudvibedev/previa/actions/workflows/release.yaml)
-[![License](https://img.shields.io/github/license/cloudvibedev/previa?cacheSeconds=300)](https://github.com/cloudvibedev/previa/blob/main/LICENSE)
-[![Stars](https://img.shields.io/github/stars/cloudvibedev/previa?style=social&cacheSeconds=300)](https://github.com/cloudvibedev/previa/stargazers)
+[![Release](https://img.shields.io/github/v/release/runvibe/previa?display_name=tag&cacheSeconds=300)](https://github.com/runvibe/previa/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/runvibe/previa/release.yaml?branch=main&label=build&cacheSeconds=300)](https://github.com/runvibe/previa/actions/workflows/release.yaml)
+[![License](https://img.shields.io/github/license/runvibe/previa?cacheSeconds=300)](https://github.com/runvibe/previa/blob/main/LICENSE)
+[![Stars](https://img.shields.io/github/stars/runvibe/previa?style=social&cacheSeconds=300)](https://github.com/runvibe/previa/stargazers)
 
 **The first AI-First IDE for QA. Test, design, and validate APIs with AI assistance from your desktop, CI/CD, or your favorite AI assistant.**
 
@@ -19,7 +19,7 @@ The `previa` CLI is the local entry point for running a Previa stack on your mac
 
 - [Website](https://previa.dev)
 - [Documentation](docs/previa/README.md)
-- [Releases](https://github.com/cloudvibedev/previa/releases)
+- [Releases](https://github.com/runvibe/previa/releases)
 - [Security policy](SECURITY.md)
 
 ## What Is Previa?
@@ -63,13 +63,13 @@ The main idea is simple: your assistant should not have to guess whether a workf
 Install the CLI with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloudvibedev/previa/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/runvibe/previa/main/install.sh | sh
 ```
 
 On Windows, use:
 
 ```powershell
-irm https://raw.githubusercontent.com/cloudvibedev/previa/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/runvibe/previa/main/install.ps1 | iex
 ```
 
 The installers detect Linux, macOS, or Windows, install the matching `previa` control binary under the default user home, and configure `PREVIA_HOME`. macOS releases publish native `amd64` and Apple Silicon `arm64` control binaries.

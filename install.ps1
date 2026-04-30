@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
-$ManifestUrl = if ($env:MANIFEST_URL) { $env:MANIFEST_URL } else { "https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json" }
-$PreviaReleaseBaseUrl = if ($env:PREVIA_RELEASE_BASE_URL) { $env:PREVIA_RELEASE_BASE_URL } else { "https://github.com/cloudvibedev/previa/releases/download" }
+$ManifestUrl = if ($env:MANIFEST_URL) { $env:MANIFEST_URL } else { "https://raw.githubusercontent.com/runvibe/previa/main/release-metadata.json" }
+$PreviaReleaseBaseUrl = if ($env:PREVIA_RELEASE_BASE_URL) { $env:PREVIA_RELEASE_BASE_URL } else { "https://github.com/runvibe/previa/releases/download" }
 $PreviaHome = Join-Path $HOME ".previa"
 $PreviaBinDir = Join-Path $PreviaHome "bin"
 $TargetBinary = Join-Path $PreviaBinDir "previa.exe"

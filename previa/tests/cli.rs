@@ -1372,11 +1372,11 @@ fn pull_defaults_to_all_current_cli_version_without_local_binaries() {
 
     let output = fs::read_to_string(&docker_log).expect("docker log");
     assert!(output.contains(&format!(
-        "pull ghcr.io/cloudvibedev/main:{}",
+        "pull ghcr.io/runvibe/main:{}",
         env!("CARGO_PKG_VERSION")
     )));
     assert!(output.contains(&format!(
-        "pull ghcr.io/cloudvibedev/runner:{}",
+        "pull ghcr.io/runvibe/runner:{}",
         env!("CARGO_PKG_VERSION")
     )));
 }
@@ -1397,7 +1397,7 @@ fn pull_accepts_explicit_version_for_single_target() {
     let output = fs::read_to_string(&docker_log).expect("docker log");
     assert_eq!(
         output.lines().collect::<Vec<_>>(),
-        vec!["pull ghcr.io/cloudvibedev/runner:0.0.7"]
+        vec!["pull ghcr.io/runvibe/runner:0.0.7"]
     );
 }
 
@@ -3393,7 +3393,7 @@ fn restart_allows_overriding_image_tag() {
             .join("run/docker-compose.generated.yaml"),
     )
     .expect("compose file");
-    assert!(compose_file.contains("ghcr.io/cloudvibedev/main:0.0.8"));
+    assert!(compose_file.contains("ghcr.io/runvibe/main:0.0.8"));
 }
 
 #[test]

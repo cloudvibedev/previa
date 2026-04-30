@@ -5,8 +5,8 @@ use tokio::process::Command;
 
 use crate::cli::PullTarget;
 
-pub const MAIN_IMAGE_REPOSITORY: &str = "ghcr.io/cloudvibedev/main";
-pub const RUNNER_IMAGE_REPOSITORY: &str = "ghcr.io/cloudvibedev/runner";
+pub const MAIN_IMAGE_REPOSITORY: &str = "ghcr.io/runvibe/main";
+pub const RUNNER_IMAGE_REPOSITORY: &str = "ghcr.io/runvibe/runner";
 
 pub fn normalize_image_tag(version: &str) -> Result<String> {
     let version = version.trim();
@@ -76,8 +76,8 @@ mod tests {
         assert_eq!(
             refs,
             vec![
-                "ghcr.io/cloudvibedev/main:latest",
-                "ghcr.io/cloudvibedev/runner:latest",
+                "ghcr.io/runvibe/main:latest",
+                "ghcr.io/runvibe/runner:latest",
             ]
         );
     }
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn resolves_specific_version_for_single_target() {
         let refs = resolve_image_refs(PullTarget::Runner, "0.0.7").expect("refs");
-        assert_eq!(refs, vec!["ghcr.io/cloudvibedev/runner:0.0.7"]);
+        assert_eq!(refs, vec!["ghcr.io/runvibe/runner:0.0.7"]);
     }
 
     #[test]

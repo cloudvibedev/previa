@@ -7,18 +7,18 @@ This guide explains how Previa binaries and Docker images are published, and how
 The public installer is:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloudvibedev/previa/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/runvibe/previa/main/install.sh | sh
 ```
 
 For Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/cloudvibedev/previa/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/runvibe/previa/main/install.ps1 | iex
 ```
 
 It currently:
 
-- downloads `release-metadata.json` from `https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json`
+- downloads `release-metadata.json` from `https://raw.githubusercontent.com/runvibe/previa/main/release-metadata.json`
 - resolves the latest published version and links
 - detects Linux, macOS, or Windows before choosing the `previa` control binary to install
 - installs the native macOS `arm64` control binary on Apple Silicon
@@ -102,7 +102,7 @@ On Windows, remove the user-scoped `PREVIA_HOME` environment variable and remove
 The release workflow publishes a manifest at:
 
 ```text
-https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json
+https://raw.githubusercontent.com/runvibe/previa/main/release-metadata.json
 ```
 
 That manifest contains:
@@ -121,8 +121,8 @@ Example link keys include:
 
 The release workflow also publishes Docker images to GHCR:
 
-- `ghcr.io/cloudvibedev/main`
-- `ghcr.io/cloudvibedev/runner`
+- `ghcr.io/runvibe/main`
+- `ghcr.io/runvibe/runner`
 
 These are the images used by compose-backed runtime flows.
 

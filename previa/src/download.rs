@@ -12,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::paths::PreviaPaths;
 
-const DEFAULT_DOWNLOAD_BASE_URL: &str = "https://github.com/cloudvibedev/previa/releases/download";
+const DEFAULT_DOWNLOAD_BASE_URL: &str = "https://github.com/runvibe/previa/releases/download";
 const DOWNLOAD_BASE_URL_ENV: &str = "PREVIA_DOWNLOAD_BASE_URL";
 const LEGACY_MANIFEST_URL_ENV: &str = "PREVIA_DOWNLOAD_MANIFEST_URL";
 #[cfg(test)]
@@ -756,16 +756,16 @@ exit 1
     fn download_base_url_supports_raw_github_manifest_override() {
         assert_eq!(
             legacy_manifest_base_url(
-                "https://raw.githubusercontent.com/cloudvibedev/previa/main/release-metadata.json"
+                "https://raw.githubusercontent.com/runvibe/previa/main/release-metadata.json"
             ),
-            Some("https://github.com/cloudvibedev/previa/releases/download".to_owned())
+            Some("https://github.com/runvibe/previa/releases/download".to_owned())
         );
     }
 
     #[test]
     fn github_release_layout_is_detected() {
         assert!(uses_github_release_layout(
-            "https://github.com/cloudvibedev/previa/releases/download"
+            "https://github.com/runvibe/previa/releases/download"
         ));
         assert!(!uses_github_release_layout("http://downloads.test"));
     }

@@ -219,7 +219,7 @@ export function OnboardingModal({ open: controlledOpen, onOpenChange }: Onboardi
 
             <div className="space-y-3">
               <a
-                href="https://github.com/cloudvibedev/previa"
+                href="https://github.com/runvibe/previa"
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center justify-between rounded-2xl border border-border/70 bg-muted/40 px-4 py-3 text-sm text-foreground transition-colors hover:bg-accent"

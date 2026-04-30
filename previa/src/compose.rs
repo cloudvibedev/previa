@@ -521,8 +521,8 @@ mod tests {
             .expect("compose contents");
         assert!(contents.contains(MAIN_SERVICE_NAME));
         assert!(contents.contains("runner-55880"));
-        assert!(contents.contains("ghcr.io/cloudvibedev/main:latest"));
-        assert!(contents.contains("ghcr.io/cloudvibedev/runner:latest"));
+        assert!(contents.contains("ghcr.io/runvibe/main:latest"));
+        assert!(contents.contains("ghcr.io/runvibe/runner:latest"));
         assert!(contents.contains("\"127.0.0.1:5588:5588\""));
         assert!(contents.contains("\"127.0.0.1:55880:55880\""));
     }

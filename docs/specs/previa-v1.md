@@ -206,8 +206,8 @@ No additional v1 commands are required beyond the surface listed above.
 - Accepts `--version <version>` to override the image tag.
 - When omitted, `--version` defaults to `latest`.
 - Resolves repositories exactly as:
-  - `main` -> `ghcr.io/cloudvibedev/main`
-  - `runner` -> `ghcr.io/cloudvibedev/runner`
+  - `main` -> `ghcr.io/runvibe/main`
+  - `runner` -> `ghcr.io/runvibe/runner`
 - `all` must pull both repositories sequentially using the same resolved tag.
 - Must fail with a clear error when the Docker CLI is unavailable in `PATH`.
 - Must not require local `previa-main` or `previa-runner` binaries to exist.

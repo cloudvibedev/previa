@@ -21,7 +21,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 {
                     "PUBLISHED_AT": "2026-04-24T00:00:00Z",
                     "RELEASE_SCOPE": release_scope,
-                    "REPOSITORY": "cloudvibedev/previa",
+                    "REPOSITORY": "runvibe/previa",
                     "VERSION": "1.2.3",
                 }
             )
@@ -42,8 +42,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(
             metadata["links"],
             {
-                "previa_macos_amd64": "https://github.com/cloudvibedev/previa/releases/download/v1.2.3/previa-macos-amd64",
-                "previa_macos_arm64": "https://github.com/cloudvibedev/previa/releases/download/v1.2.3/previa-macos-arm64",
+                "previa_macos_amd64": "https://github.com/runvibe/previa/releases/download/v1.2.3/previa-macos-amd64",
+                "previa_macos_arm64": "https://github.com/runvibe/previa/releases/download/v1.2.3/previa-macos-arm64",
             },
         )
 
