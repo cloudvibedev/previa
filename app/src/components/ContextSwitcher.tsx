@@ -26,6 +26,7 @@ import { toast } from "sonner";
 
 const LOCAL_ORCHESTRATOR_URL = "http://localhost:5588";
 const LOCAL_PERMISSION_ERROR = "local_permission_blocked";
+const SOLID_CARD_BACKGROUND = "hsl(var(--card))";
 
 interface DetectedPreviaApi {
   url: string;
@@ -495,14 +496,14 @@ export function ContextSwitcher() {
         <div
           className="fixed z-[9999] w-[320px] max-w-[calc(100vw-24px)] rounded-xl border border-border p-4 shadow-lg"
           style={{
-            backgroundColor: "hsl(var(--card))",
+            backgroundColor: SOLID_CARD_BACKGROUND,
             top: localPromptPosition.top,
             right: localPromptPosition.right,
           }}
         >
           <div
             className="absolute -top-2 right-6 h-4 w-4 rotate-45 border-l border-t border-border"
-            style={{ backgroundColor: "hsl(var(--card))" }}
+            style={{ backgroundColor: SOLID_CARD_BACKGROUND }}
           />
           <div className="flex items-start gap-3">
             <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">

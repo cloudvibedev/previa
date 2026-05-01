@@ -10,9 +10,13 @@ export default defineConfig(({ mode }) => {
     react(),
     VitePWA({
       injectRegister: "auto",
+      registerType: "autoUpdate",
       manifest: false,
       workbox: {
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         navigateFallbackDenylist: [/^\/~oauth/],
+        skipWaiting: true,
       },
       devOptions: {
         enabled: true,

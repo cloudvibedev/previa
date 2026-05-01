@@ -23,6 +23,10 @@ fn main() {
         "cargo:rerun-if-changed={}",
         app_dir.join("index.html").display()
     );
+    println!(
+        "cargo:rerun-if-changed={}",
+        app_dir.join("vite.config.ts").display()
+    );
     println!("cargo:rerun-if-changed={}", app_dir.join("src").display());
     println!(
         "cargo:rerun-if-changed={}",
