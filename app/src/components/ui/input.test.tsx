@@ -1,0 +1,16 @@
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import { Input } from "./input";
+
+describe("Input", () => {
+  it("keeps visible boundaries on matching card backgrounds", () => {
+    render(<Input aria-label="API URL" />);
+
+    const input = screen.getByLabelText("API URL");
+
+    expect(input).toHaveClass("border");
+    expect(input).toHaveClass("border-input");
+    expect(input).toHaveClass("bg-background/60");
+  });
+});
