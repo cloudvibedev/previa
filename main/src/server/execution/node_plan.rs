@@ -240,6 +240,9 @@ mod tests {
             memory_bytes: 1024,
             virtual_memory_bytes: 2048,
             cpu_usage_percent: 1.5,
+            network_tx_bytes: 0,
+            network_rx_bytes: 0,
+            network_total_bytes: 0,
         })
         .into_response()
     }

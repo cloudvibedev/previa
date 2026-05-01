@@ -33,6 +33,10 @@ describe("LoadTestResultsPanel", () => {
           cpuUsagePercent: 12.5,
           memoryBytes: 104_857_600,
           memoryMb: 100,
+          networkTxBytes: 2_048,
+          networkRxBytes: 4_096,
+          networkTotalBytes: 6_144,
+          networkTotalKb: 6,
         },
       ],
       startTime: 750,
@@ -43,6 +47,7 @@ describe("LoadTestResultsPanel", () => {
 
     expect(screen.getByText("Runner CPU")).toBeInTheDocument();
     expect(screen.getByText("Runner memory")).toBeInTheDocument();
+    expect(screen.getByText("Runner network")).toBeInTheDocument();
     expect(screen.getAllByText("runner-a").length).toBeGreaterThan(0);
   });
 });
