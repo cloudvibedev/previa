@@ -37,7 +37,6 @@ import { RunHistoryItem } from "@/components/RunHistoryItem";
 import { RunHistoryPanel } from "@/components/RunHistoryPanel";
 import { BatchControls } from "@/components/BatchControls";
 import { PipelineMiniChart } from "@/components/PipelineMiniChart";
-import { LoadTestMiniChart } from "@/components/LoadTestMiniChart";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 
@@ -289,13 +288,9 @@ export default function TestExecutionPage({ pipelines, spec, specs, projectId, o
   const loadTestResetRef = useRef<(() => void) | null>(null);
   const loadTestCancelRef = useRef<(() => void) | null>(null);
   const loadTestStartRef = useRef<(() => void) | null>(null);
-  const [loadTestChartRefreshKey, setLoadTestChartRefreshKey] = useState(0);
 
   const handleLoadTestStateChange = useCallback((s: string) => {
     setLoadTestState(s);
-    if (s === "completed" || s === "cancelled") {
-      setLoadTestChartRefreshKey(prev => prev + 1);
-    }
   }, []);
 
   const [batchState, setBatchState] = useState<BatchState>("idle");
@@ -1288,16 +1283,6 @@ export default function TestExecutionPage({ pipelines, spec, specs, projectId, o
                   />
                 ) : (
                   <>
-                    <div>
-                      {selectedIndex !== null && !isMobile && (
-                        <LoadTestMiniChart
-                          projectId={projectId}
-                          pipelineIndex={selectedIndex}
-                          refreshKey={loadTestChartRefreshKey}
-                          executionBackendUrl={executionBackendUrl}
-                        />
-                      )}
-                    </div>
                     <LoadTestTab
                       pipeline={selectedPipeline}
                       projectId={projectId}
