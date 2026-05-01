@@ -1104,7 +1104,7 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
                   <SelectTrigger className="h-8 w-[140px] shrink-0 text-xs">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent viewportClassName="!h-auto max-h-[6.5rem] overflow-y-auto">
                     {envGroups.map((group) => (
                       <SelectItem key={group.id} value={group.slug}>
                         {group.name}
