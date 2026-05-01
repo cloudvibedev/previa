@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CheckCircle2, XCircle, Pencil, X, Copy, GripVertical, Clock3 } from "lucide-react";
 import { DotsLoader } from "@/components/DotsLoader";
+import { SidebarItemActionBar } from "@/components/SidebarItemActionBar";
 import type { Pipeline } from "@/types/pipeline";
 
 interface PipelineListItemProps {
@@ -74,26 +74,14 @@ export function PipelineListItem({ pipeline, index, isSelected, status, onSelect
         </div>
       )}
 
-      {/* Action buttons - absolute overlay */}
-      <div
-        className="glass absolute right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100  z-10 p-2 gap-1 border-border/20 rounded-md transition-opacity"
-      >
-        {onEdit && (
-          <Button variant="ghost" size="icon" className="h-5 w-5 min-w-5 shrink-0"
-            onClick={(e) => { e.stopPropagation(); onEdit(index); }}
-            title={t("pipeline.editPipeline")}
-          ><Pencil className="h-3 w-3" /></Button>
-        )}
-        {onDuplicate && (
-          <Button variant="ghost" size="icon" className="h-5 w-5 min-w-5 shrink-0"
-            onClick={(e) => { e.stopPropagation(); onDuplicate(index); }}
-            title={t("pipeline.duplicatePipeline")}
-          ><Copy className="h-3 w-3" /></Button>
-        )}
-        <Button variant="ghost" size="icon" className="h-5 w-5 min-w-5 shrink-0"
-          onClick={(e) => { e.stopPropagation(); onDelete(index); }}
-        ><X className="h-3 w-3" /></Button>
-      </div>
+      <SidebarItemActionBar
+        label={`${pipeline.name} actions`}
+        actions={[
+          ...(onEdit ? [{ label: t("pipeline.editPipeline"), icon: <Pencil className="h-3 w-3" />, onClick: () => onEdit(index) }] : []),
+          ...(onDuplicate ? [{ label: t("pipeline.duplicatePipeline"), icon: <Copy className="h-3 w-3" />, onClick: () => onDuplicate(index) }] : []),
+          { label: t("common.delete"), icon: <X className="h-3 w-3" />, onClick: () => onDelete(index) },
+        ]}
+      />
 
       {/* Content */}
       <div className="min-w-0 flex-1">

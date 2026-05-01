@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SectionHeader } from "@/components/SectionHeader";
+import { SidebarItemActionBar } from "@/components/SidebarItemActionBar";
 import type { ProjectEnvEntry, ProjectEnvGroup } from "@/types/project";
 import type { ProjectEnvGroupUpsertRequest } from "@/lib/api-client";
 
@@ -114,18 +115,19 @@ export function ProjectEnvGroupsPanel({ envGroups, onCreate, onUpdate, onDelete 
         {envGroups.length === 0 ? (
           <p className="px-1.5 py-1 text-xs text-muted-foreground">Nenhum env group</p>
         ) : envGroups.map((group) => (
-          <div key={group.id} className="group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50">
+          <div key={group.id} className="group relative flex items-center gap-1.5 rounded-md px-1.5 py-1 pr-16 text-xs hover:bg-accent/50">
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{group.name}</div>
               <div className="truncate font-mono text-[10px] text-muted-foreground">{group.slug}</div>
             </div>
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{group.entries.length}</span>
-            <Button variant="ghost" size="icon" className="h-6 w-6 opacity-70 hover:opacity-100" onClick={() => openEdit(group)} title="Edit env group">
-              <Pencil className="h-3 w-3" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-6 w-6 opacity-70 hover:opacity-100" onClick={() => onDelete(group.id)} title="Delete env group">
-              <Trash2 className="h-3 w-3" />
-            </Button>
+            <SidebarItemActionBar
+              label={`${group.name} actions`}
+              actions={[
+                { label: "Edit env group", icon: <Pencil className="h-3 w-3" />, onClick: () => openEdit(group) },
+                { label: "Delete env group", icon: <Trash2 className="h-3 w-3" />, onClick: () => onDelete(group.id) },
+              ]}
+            />
           </div>
         ))}
       </div>

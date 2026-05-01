@@ -29,4 +29,23 @@ describe("ProjectEnvGroupsPanel", () => {
 
     expect(screen.getByLabelText("Env groups list")).toHaveClass("max-h-36", "overflow-y-auto");
   });
+
+  it("uses a floating action bar for each env group", () => {
+    render(
+      <ProjectEnvGroupsPanel
+        envGroups={[makeEnvGroup(1)]}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("Env 1 actions")).toHaveClass(
+      "glass",
+      "absolute",
+      "right-2",
+      "opacity-0",
+      "group-hover:opacity-100",
+    );
+  });
 });
