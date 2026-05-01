@@ -51,7 +51,39 @@ function getFetchErrorType(error: unknown) {
 }
 
 function normalizeContextUrl(url: string) {
-  return url.replace(/\/api\/v1\/?$/, "").replace(/\/+$/, "");
+  return url.trim().replace(/\/api\/v1\/?$/, "").replace(/\/+$/, "");
+}
+
+function normalizeLocalHostname(hostname: string) {
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") {
+    return "localhost";
+  }
+  return hostname;
+}
+
+function getDefaultPort(protocol: string) {
+  if (protocol === "http:") return "80";
+  if (protocol === "https:") return "443";
+  return "";
+}
+
+function getComparableContextUrl(url: string) {
+  const normalized = normalizeContextUrl(url);
+
+  try {
+    const parsed = new URL(normalized);
+    const hostname = normalizeLocalHostname(parsed.hostname);
+    const port = parsed.port || getDefaultPort(parsed.protocol);
+    const path = parsed.pathname.replace(/\/+$/, "");
+
+    return `${parsed.protocol}//${hostname}:${port}${path}`;
+  } catch {
+    return normalized;
+  }
+}
+
+function areContextUrlsEquivalent(left: string, right: string) {
+  return getComparableContextUrl(left) === getComparableContextUrl(right);
 }
 
 function parsePreviaInfo(payload: unknown): DetectedPreviaApi["info"] | null {
@@ -113,7 +145,7 @@ export function ContextSwitcher() {
   const hasCheckedStartupContextsRef = useRef(false);
 
   const hasLocalContext = useMemo(
-    () => contexts.some((ctx) => normalizeContextUrl(ctx.url) === LOCAL_ORCHESTRATOR_URL),
+    () => contexts.some((ctx) => areContextUrlsEquivalent(ctx.url, LOCAL_ORCHESTRATOR_URL)),
     [contexts],
   );
   const showDetectedLocalPrompt = !!detectedLocalContext && !hasLocalContext && !open;
@@ -167,7 +199,7 @@ export function ContextSwitcher() {
 
   const activateDetectedApi = (detected: DetectedPreviaApi) => {
     const store = useOrchestratorStore.getState();
-    const existing = store.contexts.find((ctx) => normalizeContextUrl(ctx.url) === detected.url);
+    const existing = store.contexts.find((ctx) => areContextUrlsEquivalent(ctx.url, detected.url));
     if (existing) {
       if (existing.name !== detected.name) {
         updateContext(existing.id, {
@@ -220,9 +252,9 @@ export function ContextSwitcher() {
 
         const store = useOrchestratorStore.getState();
         const localAlreadySaved = store.contexts.some(
-          (ctx) => normalizeContextUrl(ctx.url) === LOCAL_ORCHESTRATOR_URL,
+          (ctx) => areContextUrlsEquivalent(ctx.url, LOCAL_ORCHESTRATOR_URL),
         );
-        if (currentOrigin !== LOCAL_ORCHESTRATOR_URL && !localAlreadySaved && !dismissedLocalPrompt) {
+        if (!areContextUrlsEquivalent(currentOrigin, LOCAL_ORCHESTRATOR_URL) && !localAlreadySaved && !dismissedLocalPrompt) {
           try {
             const localApi = await detectPreviaApi(LOCAL_ORCHESTRATOR_URL);
             if (cancelled) return;
@@ -298,7 +330,7 @@ export function ContextSwitcher() {
 
     setIsActivatingLocalContext(true);
     try {
-      const existing = contexts.find((ctx) => normalizeContextUrl(ctx.url) === detectedLocalContext.url);
+      const existing = contexts.find((ctx) => areContextUrlsEquivalent(ctx.url, detectedLocalContext.url));
       if (existing) {
         const resolvedName = detectedLocalContext.name ?? await resolveContextName(detectedLocalContext.url);
         if (resolvedName && existing.name === existing.url) {

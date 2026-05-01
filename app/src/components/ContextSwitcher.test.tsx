@@ -107,4 +107,49 @@ describe("ContextSwitcher", () => {
     expect(promptCard?.parentElement).toBe(document.body);
     expect(useOrchestratorStore.getState().contexts).toEqual([]);
   });
+
+  it("does not prompt when the local default context is already saved with 127.0.0.1", async () => {
+    const defaultContext = {
+      id: "default",
+      name: "default",
+      url: "http://127.0.0.1:5588",
+    };
+    useOrchestratorStore.setState({
+      contexts: [defaultContext],
+      activeContextId: defaultContext.id,
+      activeContext: defaultContext,
+      url: defaultContext.url,
+      info: null,
+    });
+
+    const origin = window.location.origin.replace(/\/+$/, "");
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === `${origin}/health`) return { ok: false };
+      if (url === "http://localhost:5588/health") return { ok: true };
+      if (url === "http://localhost:5588/info") {
+        return {
+          ok: true,
+          json: async () => ({
+            context: "default",
+            totalRunners: 1,
+            activeRunners: 1,
+          }),
+        };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ContextSwitcher />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${origin}/health`,
+        expect.any(Object),
+      );
+    });
+
+    expect(screen.queryByText("Contexto local encontrado")).not.toBeInTheDocument();
+    expect(useOrchestratorStore.getState().contexts).toEqual([defaultContext]);
+  });
 });
