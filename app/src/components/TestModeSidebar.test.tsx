@@ -45,4 +45,16 @@ describe("TestModeSidebar", () => {
     expect(screen.queryByText("End-to-End Test")).not.toBeInTheDocument();
     expect(screen.queryByText("Load Test")).not.toBeInTheDocument();
   });
+
+  it("shows button names as tooltips when collapsed", async () => {
+    render(
+      <Tabs defaultValue="integration">
+        <TestModeSidebar collapsed onCollapsedChange={vi.fn()} />
+      </Tabs>,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("tab", { name: "Load Test" }));
+
+    expect(await screen.findByText("Load Test")).toBeInTheDocument();
+  });
 });
