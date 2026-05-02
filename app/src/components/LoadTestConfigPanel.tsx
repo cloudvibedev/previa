@@ -169,6 +169,7 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
         <WaveEditor
           points={sortedPoints}
           durationMs={durationMs}
+          interpolation={interpolation}
           selectedPointIndex={selectedPointIndex}
           onPointsChange={setPoints}
           onSelectedPointIndex={setSelectedPointIndex}
@@ -280,12 +281,14 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
 function WaveEditor({
   points,
   durationMs,
+  interpolation,
   selectedPointIndex,
   onPointsChange,
   onSelectedPointIndex,
 }: {
   points: LoadPoint[];
   durationMs: number;
+  interpolation: LoadInterpolation;
   selectedPointIndex: number;
   onPointsChange: (points: LoadPoint[]) => void;
   onSelectedPointIndex: (index: number) => void;
@@ -297,7 +300,7 @@ function WaveEditor({
   const plotHeight = 48;
   const markerRadius = 2.3;
   const graphPoints = points.map((point) => pointToGraph(point, durationMs, plotWidth, plotHeight));
-  const pathPoints = graphPoints.map((point) => `${point.x},${point.y}`).join(" ");
+  const pathData = buildWavePath(graphPoints, interpolation);
 
   const pointFromEvent = (event: MouseEvent<SVGSVGElement> | PointerEvent<SVGSVGElement>): LoadPoint => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -399,7 +402,7 @@ function WaveEditor({
               strokeWidth="0.5"
             />
           ))}
-          <polyline fill="none" stroke="currentColor" strokeWidth="1.8" points={pathPoints} />
+          <path data-testid="wave-editor-path" d={pathData} fill="none" stroke="currentColor" strokeWidth="1.8" />
           {graphPoints.map((point, index) => (
             <circle
               key={`${points[index].atMs}-${points[index].intensity}-${index}`}
@@ -477,6 +480,29 @@ function pointToGraph(point: LoadPoint, durationMs: number, width: number, heigh
     x: (point.atMs / Math.max(durationMs, 1)) * width,
     y: height - (point.intensity / 100) * height,
   };
+}
+
+function buildWavePath(points: Array<{ x: number; y: number }>, interpolation: LoadInterpolation): string {
+  if (points.length === 0) return "";
+
+  const [first, ...rest] = points;
+  const start = `M ${first.x},${first.y}`;
+
+  if (interpolation === "step") {
+    return rest.reduce((path, point) => `${path} H ${point.x} V ${point.y}`, start);
+  }
+
+  if (interpolation === "smooth") {
+    return rest.reduce((path, point, index) => {
+      const previous = points[index];
+      const controlOffset = (point.x - previous.x) / 2;
+      const controlA = `${previous.x + controlOffset},${previous.y}`;
+      const controlB = `${point.x - controlOffset},${point.y}`;
+      return `${path} C ${controlA} ${controlB} ${point.x},${point.y}`;
+    }, start);
+  }
+
+  return rest.reduce((path, point) => `${path} L ${point.x},${point.y}`, start);
 }
 
 function snapMs(ms: number): number {

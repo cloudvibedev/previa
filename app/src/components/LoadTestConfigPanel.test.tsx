@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LoadTestConfigPanel } from "@/components/LoadTestConfigPanel";
@@ -55,12 +55,13 @@ const pipeline: Pipeline = {
   ],
 };
 
-function renderPanel(onConfigChange = vi.fn()) {
+function renderPanel(onConfigChange = vi.fn(), initialConfig?: WaveLoadConfig) {
   render(
     <LoadTestConfigPanel
       pipeline={pipeline}
       onStart={vi.fn()}
       onConfigChange={onConfigChange}
+      initialConfig={initialConfig}
     />,
   );
   return onConfigChange;
@@ -121,5 +122,39 @@ describe("LoadTestConfigPanel", () => {
       const latest = onConfigChange.mock.calls.at(-1)?.[0] as WaveLoadConfig;
       expect(latest.points).toContainEqual({ atMs: 90_000, intensity: 50 });
     });
+  });
+
+  it("renders a different graph line shape for each interpolation", () => {
+    const config: WaveLoadConfig = {
+      points: [
+        { atMs: 0, intensity: 10 },
+        { atMs: 60_000, intensity: 80 },
+        { atMs: 120_000, intensity: 30 },
+      ],
+      interpolation: "smooth",
+      maxInFlight: 200,
+      gracePeriodMs: 30_000,
+    };
+
+    renderPanel(vi.fn(), config);
+
+    const path = screen.getByTestId("wave-editor-path");
+    expect(path).toHaveAttribute("d", expect.stringContaining("C"));
+
+    cleanup();
+    renderPanel(vi.fn(), { ...config, interpolation: "step" });
+
+    const stepPath = screen.getByTestId("wave-editor-path");
+    expect(stepPath).toHaveAttribute("d", expect.stringContaining("H"));
+    expect(stepPath).toHaveAttribute("d", expect.stringContaining("V"));
+    expect(stepPath).not.toHaveAttribute("d", expect.stringContaining("C"));
+
+    cleanup();
+    renderPanel(vi.fn(), { ...config, interpolation: "linear" });
+
+    const linearPath = screen.getByTestId("wave-editor-path");
+    expect(linearPath).toHaveAttribute("d", expect.stringContaining("L"));
+    expect(linearPath).not.toHaveAttribute("d", expect.stringContaining("C"));
+    expect(linearPath).not.toHaveAttribute("d", expect.stringContaining("H"));
   });
 });
