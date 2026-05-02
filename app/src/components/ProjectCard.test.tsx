@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ProjectCard } from "@/components/ProjectCard";
@@ -30,25 +31,57 @@ const project: Project = {
 };
 
 describe("ProjectCard", () => {
-  it("opens the project dashboard from the card menu", async () => {
-    const onDashboard = vi.fn();
+  function renderProjectCard(overrides: Partial<ComponentProps<typeof ProjectCard>> = {}) {
+    const props = {
+      project,
+      onOpen: vi.fn(),
+      onDashboard: vi.fn(),
+      onDuplicate: vi.fn(),
+      onDelete: vi.fn(),
+      onExport: vi.fn(),
+      ...overrides,
+    };
 
-    render(
-      <ProjectCard
-        project={project}
-        onOpen={vi.fn()}
-        onDashboard={onDashboard}
-        onDuplicate={vi.fn()}
-        onDelete={vi.fn()}
-        onExport={vi.fn()}
-      />,
-    );
+    render(<ProjectCard {...props} />);
+    return props;
+  }
 
+  async function openCardMenu() {
     const menuButton = screen.getByRole("button", { name: "Stack 1 actions" });
     fireEvent.pointerDown(menuButton);
     fireEvent.keyDown(menuButton, { key: "Enter" });
+  }
+
+  it("opens the project dashboard from the card menu", async () => {
+    const onDashboard = vi.fn();
+
+    renderProjectCard({ onDashboard });
+
+    await openCardMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Dashboard" }));
 
     expect(onDashboard).toHaveBeenCalledWith("project-1");
+  });
+
+  it("duplicates the project from the card menu", async () => {
+    const onDuplicate = vi.fn();
+
+    renderProjectCard({ onDuplicate });
+
+    await openCardMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
+
+    expect(onDuplicate).toHaveBeenCalledWith("project-1");
+  });
+
+  it("exports the project from the card menu", async () => {
+    const onExport = vi.fn();
+
+    renderProjectCard({ onExport });
+
+    await openCardMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export" }));
+
+    expect(onExport).toHaveBeenCalledWith("project-1");
   });
 });

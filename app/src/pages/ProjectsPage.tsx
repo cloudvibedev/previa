@@ -3,27 +3,24 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAppHeader } from "@/components/AppShell";
 import { ProjectCard } from "@/components/ProjectCard";
-import { ExportDialog } from "@/components/ExportDialog";
 import { ProjectsSqliteExportDialog } from "@/components/ProjectsSqliteExportDialog";
 import { ProjectSettingsDialog } from "@/components/ProjectSettingsDialog";
 import { Button } from "@/components/ui/button";
 import { Plus, FolderOpen, Upload, Download } from "lucide-react";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useOrchestratorStore } from "@/stores/useOrchestratorStore";
-import { importProjectFile } from "@/lib/project-io";
-import type { Project } from "@/types/project";
+import { exportProjectsSqlite, importProjectFile } from "@/lib/project-io";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 
 export default function ProjectsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { projects, loading, loadProjects, loadProject, createProject, updateProject, deleteProject, duplicateProject } = useProjectStore();
+  const { projects, loading, loadProjects, createProject, updateProject, deleteProject, duplicateProject } = useProjectStore();
   const orchUrl = useOrchestratorStore((s) => s.url);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sqliteExportOpen, setSqliteExportOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
-  const [exportProject, setExportProject] = useState<Project | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -55,6 +52,7 @@ export default function ProjectsPage() {
   const handleDuplicateProject = async (id: string) => {
     const newProject = await duplicateProject(id);
     if (newProject) {
+      await loadProjects();
       toast.success(t("projects.duplicated"));
     }
   };
@@ -65,8 +63,12 @@ export default function ProjectsPage() {
   };
 
   const handleExportClick = async (id: string) => {
-    const project = await loadProject(id);
-    if (project) setExportProject(project);
+    try {
+      await exportProjectsSqlite([id], false, false);
+      toast.success(t("export.sqlite.success"));
+    } catch {
+      toast.error(t("export.sqlite.error"));
+    }
   };
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -180,12 +182,6 @@ export default function ProjectsPage() {
         confirmLabel={t("common.delete")}
         variant="destructive"
         onConfirm={handleConfirmDelete}
-      />
-
-      <ExportDialog
-        project={exportProject}
-        open={!!exportProject}
-        onOpenChange={(open) => { if (!open) setExportProject(null); }}
       />
 
       <ProjectsSqliteExportDialog
