@@ -314,20 +314,59 @@ mod tests {
 
         assert!(desired > 200);
     }
+
+    #[test]
+    fn wave_snapshot_drops_target_after_wave_end() {
+        let load = crate::server::models::LoadProfile {
+            points: vec![
+                crate::server::models::LoadPoint {
+                    at_ms: 0,
+                    intensity: 10.0,
+                },
+                crate::server::models::LoadPoint {
+                    at_ms: 3_000,
+                    intensity: 80.0,
+                },
+            ],
+            interpolation: crate::server::models::LoadInterpolation::Smooth,
+            runner_max_rps: 3_000.0,
+            max_in_flight: 200,
+            grace_period_ms: 30_000,
+        };
+        let dispatch = crate::server::load_dispatch::DispatchRuntimeState::new();
+
+        let snapshot = super::wave_snapshot(&load, 3_001, 3_000, 100, 0, &dispatch, 0, 0);
+
+        assert_eq!(snapshot.target_intensity, 0.0);
+        assert_eq!(snapshot.target_rps_limit, 0.0);
+    }
 }
 
 fn wave_snapshot(
     load: &LoadProfile,
     elapsed_ms: u64,
+    end_ms: u64,
     tick_ms: u64,
     in_flight: usize,
     dispatch: &DispatchRuntimeState,
     missed_starts: usize,
     outstanding_requests: usize,
 ) -> crate::server::metrics::WaveMetricsSnapshot {
+    let load_phase_active = elapsed_ms <= end_ms;
+    let target_intensity = if load_phase_active {
+        sample_intensity(load, elapsed_ms)
+    } else {
+        0.0
+    };
+    let target_rps_limit = if load_phase_active {
+        local_rps_limit(load, elapsed_ms)
+    } else {
+        0.0
+    };
+
     crate::server::metrics::WaveMetricsSnapshot {
-        target_intensity: sample_intensity(load, elapsed_ms),
-        target_rps_limit: local_rps_limit(load, elapsed_ms),
+        target_intensity,
+        target_rps_limit,
         in_flight,
         runner_max_rps: load.runner_max_rps,
         tick_ms,
@@ -498,6 +537,7 @@ async fn run_wave_load(
                         Some(wave_snapshot(
                             &load_for_snapshot,
                             elapsed_ms,
+                            timeline_end_ms(&load_for_snapshot),
                             tick_ms,
                             in_flight.load(Ordering::SeqCst),
                             &dispatch,
@@ -528,6 +568,7 @@ async fn run_wave_load(
                 Some(wave_snapshot(
                     &load,
                     elapsed_ms,
+                    end_ms,
                     tick_ms,
                     in_flight.load(Ordering::SeqCst),
                     &dispatch,
@@ -576,11 +617,13 @@ async fn run_wave_load(
             let mut sampler = runtime_sampler.lock().await;
             sampler.snapshot()
         };
+        let elapsed_ms = started.elapsed().as_millis() as u64;
         lock.snapshot_with_wave(
             None,
             runtime,
             Some(wave_snapshot(
                 &load,
+                elapsed_ms,
                 end_ms,
                 tick_ms,
                 in_flight.load(Ordering::SeqCst),

@@ -274,6 +274,27 @@ describe("LoadTestResultsPanel", () => {
     expect(buildRpsChartData(metrics, config).data[1].targetRpsLimit).toBe(2400);
   });
 
+  it("drops configured target RPS to zero after the wave duration", () => {
+    const config: WaveLoadConfig = {
+      points: [
+        { atMs: 0, intensity: 10 },
+        { atMs: 3_000, intensity: 80 },
+      ],
+      interpolation: "smooth",
+    };
+    const metrics: LoadTestMetrics = {
+      ...emptyMetrics,
+      runnerMaxRps: 3_000,
+      rpsHistory: [
+        { timestamp: 1_000, rps: 0, httpStarted: 0 },
+        { timestamp: 4_000, rps: 0, httpStarted: 2_400 },
+        { timestamp: 5_000, rps: 0, httpStarted: 2_400 },
+      ],
+    };
+
+    expect(buildRpsChartData(metrics, config).data[2].targetRpsLimit).toBe(0);
+  });
+
   it("shows wave dispatch adherence metrics when available", () => {
     render(
       <LoadTestResultsPanel

@@ -20,6 +20,7 @@ pub struct DispatchTickReport {
 #[derive(Debug)]
 pub struct DispatchClock {
     tick_ms: u64,
+    cursor_elapsed_ms: u64,
     fractional_carry: f64,
     scheduled_total: usize,
 }
@@ -28,13 +29,17 @@ impl DispatchClock {
     pub fn new(tick_ms: u64) -> Self {
         Self {
             tick_ms,
+            cursor_elapsed_ms: 0,
             fractional_carry: 0.0,
             scheduled_total: 0,
         }
     }
 
     pub fn plan_tick(&mut self, elapsed_ms: u64, target_rps: f64) -> DispatchTick {
-        let raw_slots = target_rps.max(0.0) * self.tick_ms as f64 / 1000.0 + self.fractional_carry;
+        let tick_end_ms = elapsed_ms.saturating_add(self.tick_ms);
+        let window_ms = tick_end_ms.saturating_sub(self.cursor_elapsed_ms);
+        self.cursor_elapsed_ms = tick_end_ms.max(self.cursor_elapsed_ms);
+        let raw_slots = target_rps.max(0.0) * window_ms as f64 / 1000.0 + self.fractional_carry;
         let scheduled_starts = raw_slots.floor() as usize;
         self.fractional_carry = raw_slots - scheduled_starts as f64;
         self.scheduled_total = self.scheduled_total.saturating_add(scheduled_starts);
@@ -176,6 +181,18 @@ mod tests {
         let third = clock.plan_tick(200, 15.0);
         assert_eq!(third.scheduled_starts, 1);
         assert_eq!(third.scheduled_total, 4);
+    }
+
+    #[test]
+    fn delayed_tick_schedules_elapsed_wall_time_window() {
+        let mut clock = DispatchClock::new(100);
+
+        let first = clock.plan_tick(0, 1000.0);
+        assert_eq!(first.scheduled_starts, 100);
+
+        let delayed = clock.plan_tick(500, 1000.0);
+        assert_eq!(delayed.scheduled_starts, 500);
+        assert_eq!(delayed.scheduled_total, 600);
     }
 
     #[test]

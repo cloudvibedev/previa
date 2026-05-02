@@ -26,6 +26,7 @@ function sampleWaveIntensity(config: WaveLoadConfig, elapsedMs: number) {
   const points = [...config.points].sort((a, b) => a.atMs - b.atMs);
   const last = points[points.length - 1];
   if (!last) return undefined;
+  if (elapsedMs > last.atMs) return 0;
   if (elapsedMs >= last.atMs) return last.intensity;
 
   const segment = points
