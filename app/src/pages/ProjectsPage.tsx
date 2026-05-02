@@ -48,6 +48,10 @@ export default function ProjectsPage() {
     navigate(`/projects/${id}`);
   };
 
+  const handleOpenProjectDashboard = (id: string) => {
+    navigate(`/projects/${id}/dashboard`);
+  };
+
   const handleDuplicateProject = async (id: string) => {
     const newProject = await duplicateProject(id);
     if (newProject) {
@@ -139,6 +143,7 @@ export default function ProjectsPage() {
                   <ProjectCard
                     project={project}
                     onOpen={handleOpenProject}
+                    onDashboard={handleOpenProjectDashboard}
                     onDuplicate={handleDuplicateProject}
                     onDelete={handleDeleteClick}
                     onExport={handleExportClick}
