@@ -181,6 +181,39 @@ where
     .await
 }
 
+pub async fn execute_pipeline_with_client_runtime_request_gate<FStart, FResult, FCancel, FGate>(
+    client: &Client,
+    pipeline: &Pipeline,
+    selected_base_url_key: Option<&str>,
+    specs: Option<&[RuntimeSpec]>,
+    env_groups: Option<&[RuntimeEnvGroup]>,
+    selected_env_group_slug: Option<&str>,
+    on_step_start: FStart,
+    on_step_result: FResult,
+    should_cancel: FCancel,
+    on_request_start: FGate,
+) -> Vec<StepExecutionResult>
+where
+    FStart: FnMut(&str),
+    FResult: FnMut(&StepExecutionResult),
+    FCancel: FnMut() -> bool,
+    FGate: for<'a> FnMut(&'a StepRequest) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> + Send,
+{
+    execute_pipeline_with_client_runtime_hooks(
+        client,
+        pipeline,
+        selected_base_url_key,
+        specs,
+        env_groups,
+        selected_env_group_slug,
+        on_step_start,
+        on_step_result,
+        should_cancel,
+        on_request_start,
+    )
+    .await
+}
+
 pub async fn execute_pipeline_with_client_hooks<FStart, FResult, FCancel>(
     client: &Client,
     pipeline: &Pipeline,
@@ -830,6 +863,55 @@ mod tests {
 
         assert!(results.is_empty());
         call.assert_calls_async(0).await;
+    }
+
+    #[tokio::test]
+    async fn client_runtime_request_gate_uses_provided_client() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/shared-client");
+                then.status(200).body("ok");
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Shared client".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "shared".to_owned(),
+                name: "Shared".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/shared-client", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: vec![],
+            }],
+        };
+
+        let client = Client::new();
+        let results = execute_pipeline_with_client_runtime_request_gate(
+            &client,
+            &pipeline,
+            None,
+            None,
+            None,
+            None,
+            |_| {},
+            |_| {},
+            || false,
+            |_| Box::pin(async { true }),
+        )
+        .await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "success");
+        call.assert_calls_async(1).await;
     }
 
     #[tokio::test]

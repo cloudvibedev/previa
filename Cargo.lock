@@ -2049,6 +2049,7 @@ dependencies = [
  "http-body-util",
  "httpmock",
  "previa-engine",
+ "reqwest",
  "serde",
  "serde_json",
  "sysinfo",

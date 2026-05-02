@@ -7,6 +7,7 @@ use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
 use axum::http::HeaderMap;
 use axum::response::Response;
+use reqwest::Client;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -14,7 +15,8 @@ use tracing::error;
 use uuid::Uuid;
 
 use previa_runner::{
-    Pipeline, RuntimeEnvGroup, RuntimeSpec, execute_pipeline_with_runtime_request_gate,
+    Pipeline, RuntimeEnvGroup, RuntimeSpec, execute_pipeline_with_client_runtime_request_gate,
+    execute_pipeline_with_runtime_request_gate,
 };
 
 use crate::server::errors::{bad_request_message_response, bad_request_response};
@@ -425,6 +427,7 @@ async fn run_wave_load(
     let dispatch = Arc::new(DispatchRuntimeState::new());
     let missed_starts = Arc::new(AtomicUsize::new(0));
     let outstanding_requests = Arc::new(AtomicUsize::new(0));
+    let http_client = Arc::new(Client::new());
     let mut dispatch_clock = DispatchClock::new(tick_ms);
     let mut tasks = JoinSet::new();
 
@@ -470,6 +473,7 @@ async fn run_wave_load(
             let missed_starts = Arc::clone(&missed_starts);
             let outstanding_requests = Arc::clone(&outstanding_requests);
             let load_for_snapshot = load.clone();
+            let http_client = Arc::clone(&http_client);
 
             in_flight.fetch_add(1, Ordering::SeqCst);
             {
@@ -482,7 +486,8 @@ async fn run_wave_load(
                 let token_for_gate = token.clone();
                 let dispatch_for_gate = Arc::clone(&dispatch);
                 let outstanding_for_gate = Arc::clone(&outstanding_requests);
-                let results = execute_pipeline_with_runtime_request_gate(
+                let results = execute_pipeline_with_client_runtime_request_gate(
+                    http_client.as_ref(),
                     &pipeline,
                     selected_key.as_deref(),
                     Some(specs.as_slice()),
