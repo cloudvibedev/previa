@@ -111,8 +111,11 @@ export function LoadTestTab({ pipeline, projectId, pipelineIndex, onStateChange,
 
   if (state === "idle" && !viewingHistoricRun) {
     const configContent = (
-      <div className="flex-1 flex items-start justify-center overflow-auto p-4">
-        <div className="w-full max-w-xl space-y-4">
+      <div
+        data-testid="load-test-config-scroll"
+        className="h-full min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4"
+      >
+        <div className="mx-auto w-full max-w-xl space-y-4">
           <LoadTestConfigPanel
             pipeline={pipeline}
             onStart={handleStart}
@@ -130,8 +133,8 @@ export function LoadTestTab({ pipeline, projectId, pipelineIndex, onStateChange,
 
     if (!isMobile && runs.length > 0) {
       return (
-        <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
-          <ResizablePanel defaultSize={75} minSize={40}>
+        <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1 overflow-hidden">
+          <ResizablePanel defaultSize={75} minSize={40} className="min-h-0 overflow-hidden">
             {configContent}
           </ResizablePanel>
           <ResizableHandle />
@@ -142,7 +145,7 @@ export function LoadTestTab({ pipeline, projectId, pipelineIndex, onStateChange,
       );
     }
 
-    return <div className="flex flex-1 w-full overflow-hidden">{configContent}</div>;
+    return <div className="flex h-full min-h-0 flex-1 w-full overflow-hidden">{configContent}</div>;
   }
 
   const resultsContent = (
