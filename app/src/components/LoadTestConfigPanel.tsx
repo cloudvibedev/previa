@@ -166,6 +166,24 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
           <span className="pb-2 text-[10px] text-muted-foreground">{formatDurationMs(durationMs)}</span>
         </div>
 
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Label className="text-xs font-medium">{t("loadTest.interpolation")}</Label>
+            </div>
+          </div>
+          <Select value={interpolation} onValueChange={(value) => setInterpolation(value as LoadInterpolation)}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="smooth">{t("loadTest.interpolationSmooth")}</SelectItem>
+              <SelectItem value="linear">{t("loadTest.interpolationLinear")}</SelectItem>
+              <SelectItem value="step">{t("loadTest.interpolationStep")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <WaveEditor
           points={sortedPoints}
           durationMs={durationMs}
@@ -222,24 +240,6 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
             </div>
           </div>
         )}
-      </div>
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Label className="text-xs font-medium">{t("loadTest.interpolation")}</Label>
-          </div>
-        </div>
-        <Select value={interpolation} onValueChange={(value) => setInterpolation(value as LoadInterpolation)}>
-          <SelectTrigger className="h-8 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="smooth">{t("loadTest.interpolationSmooth")}</SelectItem>
-            <SelectItem value="linear">{t("loadTest.interpolationLinear")}</SelectItem>
-            <SelectItem value="step">{t("loadTest.interpolationStep")}</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       <div className="space-y-3">

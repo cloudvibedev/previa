@@ -95,6 +95,15 @@ describe("LoadTestConfigPanel", () => {
     expect(screen.getAllByText("300,000 ms (300s)").length).toBeGreaterThan(0);
   });
 
+  it("places interpolation immediately before the wave editor", () => {
+    renderPanel();
+
+    const interpolationSelect = screen.getByRole("combobox");
+    const graph = screen.getByTestId("wave-editor-graph");
+
+    expect(interpolationSelect.compareDocumentPosition(graph)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("creates points with one graph click and drags existing points", async () => {
     const onConfigChange = renderPanel();
     const graph = mockGraphBounds();
