@@ -199,6 +199,7 @@
   "loadTestResults.nodes": "{{count}}개 노드",
   "loadTestResults.nodes_plural": "{{count}}개 노드",
   "loadTestResults.nodesOf": "{{count}}개 중",
+  "loadTestResults.configuredWave": "구성된 웨이브",
 
   "pipeline.editPipeline": "파이프라인 편집",
   "pipeline.duplicatePipeline": "파이프라인 복제",

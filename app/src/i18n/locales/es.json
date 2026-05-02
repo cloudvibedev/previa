@@ -199,6 +199,7 @@
   "loadTestResults.nodes": "{{count}} nodo",
   "loadTestResults.nodes_plural": "{{count}} nodos",
   "loadTestResults.nodesOf": "de {{count}} disponibles",
+  "loadTestResults.configuredWave": "Onda configurada",
 
   "pipeline.editPipeline": "Editar pipeline",
   "pipeline.duplicatePipeline": "Duplicar pipeline",

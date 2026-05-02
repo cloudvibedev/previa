@@ -196,6 +196,7 @@
   "loadTestResults.nodes": "{{count}} Knoten",
   "loadTestResults.nodes_plural": "{{count}} Knoten",
   "loadTestResults.nodesOf": "von {{count}} verfügbar",
+  "loadTestResults.configuredWave": "Konfigurierte Welle",
 
   "pipeline.editPipeline": "Pipeline bearbeiten",
   "pipeline.duplicatePipeline": "Pipeline duplizieren",

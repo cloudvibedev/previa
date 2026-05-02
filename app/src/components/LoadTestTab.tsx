@@ -155,6 +155,7 @@ export function LoadTestTab({ pipeline, projectId, pipelineIndex, onStateChange,
           metrics={metrics}
           state={state}
           totalRequests={config && !isWaveLoadConfig(config) ? config.totalRequests : 0}
+          config={config}
           nodesInfo={nodesInfo}
         />
       </div>

@@ -204,6 +204,7 @@
   "loadTestResults.nodes": "{{count}} nœud",
   "loadTestResults.nodes_plural": "{{count}} nœuds",
   "loadTestResults.nodesOf": "sur {{count}} disponibles",
+  "loadTestResults.configuredWave": "Onde configurée",
 
   "pipeline.editPipeline": "Modifier pipeline",
   "pipeline.duplicatePipeline": "Dupliquer pipeline",

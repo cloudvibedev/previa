@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LoadTestResultsPanel } from "@/components/LoadTestResultsPanel";
-import type { LoadTestMetrics } from "@/types/load-test";
+import type { LoadTestMetrics, WaveLoadConfig } from "@/types/load-test";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -14,6 +14,21 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("LoadTestResultsPanel", () => {
+  const emptyMetrics: LoadTestMetrics = {
+    totalSent: 0,
+    totalSuccess: 0,
+    totalError: 0,
+    avgLatency: 0,
+    p95: 0,
+    p99: 0,
+    rps: 0,
+    latencyHistory: [],
+    rpsHistory: [],
+    runnerResourceHistory: [],
+    startTime: 1_000,
+    elapsedMs: 0,
+  };
+
   it("shows runner resource charts when a single runtime sample exists", () => {
     const metrics: LoadTestMetrics = {
       totalSent: 1,
@@ -72,5 +87,33 @@ describe("LoadTestResultsPanel", () => {
     expect(screen.getByText("2s")).toBeInTheDocument();
     expect(screen.getByText("TIME")).toBeInTheDocument();
     expect(screen.queryByText(/elapsed/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the configured wave profile on wave load results", () => {
+    const config: WaveLoadConfig = {
+      points: [
+        { atMs: 0, intensity: 10 },
+        { atMs: 30_000, intensity: 80 },
+        { atMs: 60_000, intensity: 25 },
+      ],
+      interpolation: "smooth",
+      maxInFlight: 200,
+      gracePeriodMs: 30_000,
+    };
+
+    render(
+      <LoadTestResultsPanel
+        metrics={emptyMetrics}
+        state="completed"
+        totalRequests={0}
+        config={config}
+      />,
+    );
+
+    expect(screen.getByText("loadTestResults.configuredWave")).toBeInTheDocument();
+    expect(screen.getByTestId("configured-wave-chart")).toBeInTheDocument();
+    expect(screen.getByText("10%")).toBeInTheDocument();
+    expect(screen.getByText("80%")).toBeInTheDocument();
+    expect(screen.getByText("25%")).toBeInTheDocument();
   });
 });

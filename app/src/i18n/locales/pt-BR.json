@@ -191,7 +191,7 @@
   "loadTest.e2eWarning": "Recomendamos executar um teste End-to-End primeiro para validar seu pipeline antes do teste de carga.",
   "loadTest.wavePoints": "Pontos da onda",
   "loadTest.wavePoints.help": "Pontos da timeline da onda de carga. Tempo em milissegundos e intensidade em porcentagem da capacidade segura de RPS de cada runner.",
-  "loadTest.wavePoints.hint": "Defina a duração do teste e desenhe a onda no gráfico. Duplo clique cria um ponto; arraste os pontos para mudar tempo e intensidade.",
+  "loadTest.wavePoints.hint": "Defina a duração do teste e desenhe a onda no gráfico. Clique para criar um ponto; arraste os pontos para mudar tempo e intensidade.",
   "loadTest.duration": "Duração",
   "loadTest.duration.help": "Duração total da onda. Esse valor define a largura da timeline no gráfico.",
   "loadTest.pointTimeMs": "Tempo em milissegundos",
@@ -227,6 +227,7 @@
   "loadTestResults.targetIntensity": "Alvo",
   "loadTestResults.targetRpsLimit": "Limite RPS",
   "loadTestResults.inFlight": "Em voo",
+  "loadTestResults.configuredWave": "Onda configurada",
 
   "pipeline.editPipeline": "Editar pipeline",
   "pipeline.duplicatePipeline": "Duplicar pipeline",

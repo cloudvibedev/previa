@@ -196,6 +196,7 @@
   "loadTestResults.nodes": "{{count}}ノード",
   "loadTestResults.nodes_plural": "{{count}}ノード",
   "loadTestResults.nodesOf": "{{count}}件中",
+  "loadTestResults.configuredWave": "設定された波形",
 
   "pipeline.editPipeline": "パイプラインを編集",
   "pipeline.duplicatePipeline": "パイプラインを複製",

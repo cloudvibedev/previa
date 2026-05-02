@@ -196,6 +196,7 @@
   "loadTestResults.nodes": "{{count}}个节点",
   "loadTestResults.nodes_plural": "{{count}}个节点",
   "loadTestResults.nodesOf": "共{{count}}个可用",
+  "loadTestResults.configuredWave": "已配置波形",
 
   "pipeline.editPipeline": "编辑管道",
   "pipeline.duplicatePipeline": "复制管道",

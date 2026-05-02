@@ -3,7 +3,8 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Activity, Zap, AlertCircle, CheckCircle2, Clock, TrendingUp, Server, Gauge } from "lucide-react";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import type { LoadTestMetrics, LoadTestState, RunnerResourcePoint } from "@/types/load-test";
+import { isWaveLoadConfig } from "@/types/load-test";
+import type { LoadInterpolation, LoadPoint, LoadRunConfig, LoadTestMetrics, LoadTestState, RunnerResourcePoint, WaveLoadConfig } from "@/types/load-test";
 
 const RUNNER_RESOURCE_COLORS = [
   "hsl(var(--primary))",
@@ -88,16 +89,44 @@ function formatNetwork(value: number) {
   return `${Math.round(value)} KB`;
 }
 
+function buildWaveChartData(config: WaveLoadConfig) {
+  return config.points.map((point) => ({
+    time: Math.round(point.atMs / 1000),
+    intensity: point.intensity,
+  }));
+}
+
+function waveChartType(interpolation: LoadInterpolation) {
+  if (interpolation === "step") return "stepAfter";
+  if (interpolation === "linear") return "linear";
+  return "monotone";
+}
+
+function interpolationLabelKey(interpolation: LoadInterpolation) {
+  if (interpolation === "step") return "loadTest.interpolationStep";
+  if (interpolation === "linear") return "loadTest.interpolationLinear";
+  return "loadTest.interpolationSmooth";
+}
+
+function formatPointTime(point: LoadPoint) {
+  const seconds = point.atMs / 1000;
+  if (Number.isInteger(seconds)) return `${seconds}s`;
+  return `${seconds.toFixed(1)}s`;
+}
+
 interface LoadTestResultsPanelProps {
   metrics: LoadTestMetrics;
   state: LoadTestState;
   totalRequests: number;
+  config?: LoadRunConfig | null;
   nodesInfo?: { nodesUsed: number; nodesFound: number; nodeNames: string[] } | null;
 }
 
-export function LoadTestResultsPanel({ metrics, state, totalRequests, nodesInfo }: LoadTestResultsPanelProps) {
+export function LoadTestResultsPanel({ metrics, state, totalRequests, config, nodesInfo }: LoadTestResultsPanelProps) {
   const { t } = useTranslation();
   const progressPercent = totalRequests > 0 ? (metrics.totalSent / totalRequests) * 100 : 0;
+  const waveConfig = isWaveLoadConfig(config) ? config : null;
+  const waveChartData = waveConfig ? buildWaveChartData(waveConfig) : [];
 
   const latencyChartData = (metrics.latencyHistory ?? []).slice(-100).map((p) => ({
     idx: p.index,
@@ -186,6 +215,52 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, nodesInfo 
           {typeof metrics.inFlight === "number" && (
             <MetricCard icon={Activity} label={t("loadTestResults.inFlight")} value={metrics.inFlight} />
           )}
+        </div>
+      )}
+
+      {waveConfig && waveChartData.length > 1 && (
+        <div data-testid="configured-wave-chart" className="glass rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              {t("loadTestResults.configuredWave")}
+            </p>
+            <span className="text-[10px] text-muted-foreground">
+              {t(interpolationLabelKey(waveConfig.interpolation))}
+            </span>
+          </div>
+          <ResponsiveContainer width="100%" height={120}>
+            <AreaChart data={waveChartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="time" tick={{ fontSize: 9 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `${v}s`} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `${v}%`} />
+              <RechartsTooltip
+                contentStyle={{
+                  background: "hsl(var(--popover))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "var(--radius)",
+                  fontSize: 11,
+                }}
+                formatter={(v: number) => [`${v}%`, t("loadTestResults.targetIntensity")]}
+                labelFormatter={(v) => `${v}s`}
+              />
+              <Area
+                type={waveChartType(waveConfig.interpolation)}
+                dataKey="intensity"
+                stroke="hsl(var(--primary))"
+                fill="hsl(var(--primary) / 0.14)"
+                strokeWidth={1.8}
+                dot={waveChartData.length <= 12}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+          <div className="flex flex-wrap gap-1">
+            {waveConfig.points.map((point, index) => (
+              <span key={`${point.atMs}-${point.intensity}-${index}`} className="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 text-[10px]">
+                <span className="font-mono text-muted-foreground">{formatPointTime(point)}</span>
+                <span className="font-semibold">{point.intensity}%</span>
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
