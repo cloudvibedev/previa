@@ -1978,7 +1978,6 @@ fn tool_definitions() -> Vec<ToolDefinition> {
                                 }
                             },
                             "interpolation": { "type": "string", "enum": ["smooth", "linear", "step"] },
-                            "maxInFlight": { "type": "integer", "minimum": 1 },
                             "gracePeriodMs": { "type": "integer", "minimum": 0 }
                         }
                     },
@@ -3038,7 +3037,7 @@ fn load_test_designer_prompt() -> String {
         "2. If needed, inspect prior load results with list_load_history and get_load_test.",
         "3. Prefer a wave load payload with points as { atMs, intensity }, where intensity is 0-100 percent of each runner's configured safe RPS capacity.",
         "4. Use smooth interpolation by default. Use step only for explicit spike/degradation tests.",
-        "5. Highlight operational risks such as overly high intensity, missing assertions, unstable environments, or maxInFlight pressure.",
+        "5. Highlight operational risks such as overly high intensity, missing assertions, unstable environments, or slow responses creating a large pending-response backlog.",
         "Output requirements:",
         "- Present a runnable payload for run_project_load_test when enough context exists.",
         "- Explain what the run is trying to learn.",

@@ -233,9 +233,8 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
       )}
       {(typeof metrics.curveAdherence === "number" ||
         typeof metrics.missedStarts === "number" ||
-        typeof metrics.readyRequests === "number" ||
-        typeof metrics.outstandingRequests === "number") && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        typeof metrics.readyRequests === "number") && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {typeof metrics.curveAdherence === "number" && (
             <MetricCard
               icon={Activity}
@@ -258,13 +257,6 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
               label={t("loadTestResults.readyRequests")}
               value={metrics.readyRequests}
               color="text-primary"
-            />
-          )}
-          {typeof metrics.outstandingRequests === "number" && (
-            <MetricCard
-              icon={Activity}
-              label={t("loadTestResults.outstandingRequests")}
-              value={metrics.outstandingRequests}
             />
           )}
         </div>

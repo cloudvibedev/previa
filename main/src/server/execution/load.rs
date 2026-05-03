@@ -419,10 +419,7 @@ pub async fn start_load_execution(
                 .map(|node| RunnerLoadPlanItem {
                     node: node.clone(),
                     total_requests: 0,
-                    concurrency: runner_load
-                        .as_ref()
-                        .and_then(|load| load.max_in_flight)
-                        .unwrap_or_else(|| state_clone.rps_per_node.max(1) as usize),
+                    concurrency: 0,
                     desired_total_requests: 0,
                     above_desired: false,
                 })
@@ -759,7 +756,7 @@ fn load_context_config(
     LoadTestConfig {
         total_requests: active_nodes.max(1),
         concurrency: load
-            .and_then(|load| load.max_in_flight)
+            .map(|_| active_nodes.max(1))
             .unwrap_or_else(|| rps_per_node.max(1) as usize),
         ramp_up_seconds: 0.0,
     }
@@ -770,7 +767,6 @@ fn runner_load_profile(profile: &LoadProfile, runner_max_rps: u64) -> Value {
         "points": profile.points,
         "interpolation": profile.interpolation,
         "runnerMaxRps": profile.runner_max_rps.unwrap_or(runner_max_rps as f64),
-        "maxInFlight": profile.max_in_flight.unwrap_or_else(|| runner_max_rps.max(1) as usize),
         "gracePeriodMs": profile.grace_period_ms.unwrap_or(30_000)
     })
 }
@@ -935,7 +931,7 @@ mod tests {
 
     use super::start_load_execution;
     use crate::server::execution::ExecutionScheduler;
-    use crate::server::models::{LoadTestConfig, LoadTestRequest};
+    use crate::server::models::{LoadProfile, LoadTestConfig, LoadTestRequest};
     use crate::server::state::AppState;
 
     #[tokio::test]
@@ -1026,6 +1022,26 @@ mod tests {
         }
 
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    #[test]
+    fn runner_wave_profile_does_not_emit_max_in_flight() {
+        let profile: LoadProfile = serde_json::from_value(json!({
+            "points": [
+                { "atMs": 0, "intensity": 10.0 },
+                { "atMs": 60_000, "intensity": 80.0 }
+            ],
+            "interpolation": "smooth",
+            "runnerMaxRps": 1000.0,
+            "maxInFlight": 5000,
+            "gracePeriodMs": 30_000
+        }))
+        .expect("legacy wave profile");
+
+        let payload = super::runner_load_profile(&profile, 1000);
+
+        assert_eq!(payload["runnerMaxRps"], json!(1000.0));
+        assert_eq!(payload.get("maxInFlight"), None);
     }
 
     #[tokio::test]

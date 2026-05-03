@@ -24,8 +24,6 @@ vi.mock("react-i18next", () => ({
         "loadTest.interpolationSmooth": "Smooth",
         "loadTest.interpolationLinear": "Linear",
         "loadTest.interpolationStep": "Step",
-        "loadTest.maxInFlight": "Max in flight",
-        "loadTest.maxInFlight.help": "Maximum concurrent executions.",
         "loadTest.gracePeriod": "Grace period",
         "loadTest.wavePreview": "Wave editor",
         "loadTest.previewIntensityAxis": "Intensity (%)",
@@ -104,6 +102,25 @@ describe("LoadTestConfigPanel", () => {
     expect(interpolationSelect.compareDocumentPosition(graph)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it("does not expose or emit max in flight from the wave config", async () => {
+    const onConfigChange = renderPanel(vi.fn(), {
+      points: [
+        { atMs: 0, intensity: 10 },
+        { atMs: 120_000, intensity: 80 },
+      ],
+      interpolation: "smooth",
+      maxInFlight: 5000,
+      gracePeriodMs: 30_000,
+    } as WaveLoadConfig & { maxInFlight: number });
+
+    expect(screen.queryByText("Max in flight")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      const latest = onConfigChange.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(latest).not.toHaveProperty("maxInFlight");
+    });
+  });
+
   it("creates points with one graph click and drags existing points", async () => {
     const onConfigChange = renderPanel();
     const graph = mockGraphBounds();
@@ -141,7 +158,6 @@ describe("LoadTestConfigPanel", () => {
         { atMs: 120_000, intensity: 30 },
       ],
       interpolation: "smooth",
-      maxInFlight: 200,
       gracePeriodMs: 30_000,
     };
 

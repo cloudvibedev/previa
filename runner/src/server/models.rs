@@ -48,7 +48,6 @@ pub struct LoadProfile {
     #[serde(default)]
     pub interpolation: LoadInterpolation,
     pub runner_max_rps: f64,
-    pub max_in_flight: usize,
     #[serde(default = "default_load_grace_period_ms")]
     pub grace_period_ms: u64,
 }

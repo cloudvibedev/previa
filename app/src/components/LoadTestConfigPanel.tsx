@@ -103,7 +103,6 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
   const [durationMs, setDurationMs] = useState(Math.max(initialWave.points.at(-1)?.atMs ?? 120_000, 100));
   const [selectedPointIndex, setSelectedPointIndex] = useState(0);
   const [interpolation, setInterpolation] = useState<LoadInterpolation>(initialWave.interpolation);
-  const [maxInFlight, setMaxInFlight] = useState(initialWave.maxInFlight ?? 200);
   const [gracePeriodMs, setGracePeriodMs] = useState(initialWave.gracePeriodMs ?? 30_000);
   const [selectedEnv, setSelectedEnv] = useState<string | undefined>(undefined);
 
@@ -113,13 +112,12 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
   const waveConfig: WaveLoadConfig = {
     points: sortedPoints,
     interpolation,
-    maxInFlight,
     gracePeriodMs,
   };
 
   useEffect(() => {
     onConfigChange?.(waveConfig, selectedEnv);
-  }, [points, durationMs, interpolation, maxInFlight, gracePeriodMs, selectedEnv, onConfigChange]);
+  }, [points, durationMs, interpolation, gracePeriodMs, selectedEnv, onConfigChange]);
 
   const setPoint = (index: number, patch: Partial<LoadPoint>) => {
     setPoints((current) =>
@@ -240,17 +238,6 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
             </div>
           </div>
         )}
-      </div>
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Label className="text-xs font-medium">{t("loadTest.maxInFlight")}</Label>
-            <HelpPopover text={t("loadTest.maxInFlight.help")} />
-          </div>
-          <span className="text-xs font-bold text-primary">{maxInFlight.toLocaleString()}</span>
-        </div>
-        <SliderWithManual value={maxInFlight} onChange={setMaxInFlight} min={1} max={5000} step={10} />
       </div>
 
       <div className="space-y-3">
@@ -447,7 +434,6 @@ function defaultWaveConfig(): WaveLoadConfig {
       { atMs: 120_000, intensity: 80 },
     ],
     interpolation: "smooth",
-    maxInFlight: 200,
     gracePeriodMs: 30_000,
   };
 }

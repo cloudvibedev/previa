@@ -116,7 +116,6 @@ describe("LoadTestResultsPanel", () => {
         { atMs: 60_000, intensity: 25 },
       ],
       interpolation: "smooth",
-      maxInFlight: 200,
       gracePeriodMs: 30_000,
     };
 

@@ -93,8 +93,6 @@ vi.mock("react-i18next", () => ({
         "loadTest.interpolationSmooth": "Smooth",
         "loadTest.interpolationLinear": "Linear",
         "loadTest.interpolationStep": "Step",
-        "loadTest.maxInFlight": "Max in flight",
-        "loadTest.maxInFlight.help": "Maximum concurrent executions.",
         "loadTest.gracePeriod": "Grace period",
         "loadTest.wavePreview": "Wave editor",
         "loadTest.previewIntensityAxis": "Intensity (%)",

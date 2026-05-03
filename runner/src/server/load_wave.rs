@@ -10,9 +10,6 @@ pub fn validate_load_profile(profile: &LoadProfile) -> Result<(), String> {
     if profile.runner_max_rps <= 0.0 {
         return Err("load.runnerMaxRps must be positive".to_owned());
     }
-    if profile.max_in_flight == 0 {
-        return Err("load.maxInFlight must be positive".to_owned());
-    }
 
     for point in &profile.points {
         if !(0.0..=100.0).contains(&point.intensity) {
@@ -104,6 +101,7 @@ fn segment_t(start: &LoadPoint, end: &LoadPoint, elapsed_ms: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::server::models::{LoadInterpolation, LoadPoint, LoadProfile};
+    use serde_json::json;
 
     #[test]
     fn accepts_valid_wave_profile() {
@@ -120,9 +118,24 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Smooth,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
+
+        assert!(super::validate_load_profile(&profile).is_ok());
+    }
+
+    #[test]
+    fn accepts_wave_profile_without_max_in_flight() {
+        let profile: LoadProfile = serde_json::from_value(json!({
+            "points": [
+                { "atMs": 0, "intensity": 10.0 },
+                { "atMs": 60_000, "intensity": 80.0 }
+            ],
+            "interpolation": "smooth",
+            "runnerMaxRps": 1000.0,
+            "gracePeriodMs": 30_000
+        }))
+        .expect("wave profile without maxInFlight");
 
         assert!(super::validate_load_profile(&profile).is_ok());
     }
@@ -142,7 +155,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Smooth,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
 
@@ -167,7 +179,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Smooth,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
 
@@ -192,7 +203,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Smooth,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
 
@@ -217,7 +227,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Smooth,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
         assert_eq!(super::calculate_tick_ms(&long_profile), 1000);
@@ -235,7 +244,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Smooth,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
         assert_eq!(super::calculate_tick_ms(&short_profile), 100);
@@ -256,7 +264,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Smooth,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
 
@@ -279,7 +286,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Linear,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
         assert_eq!(super::sample_intensity(&profile, 500), 50.0);
@@ -300,7 +306,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Smooth,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
         assert!((super::sample_intensity(&profile, 250) - 15.625).abs() < 0.001);
@@ -322,7 +327,6 @@ mod tests {
             ],
             interpolation: LoadInterpolation::Step,
             runner_max_rps: 1000.0,
-            max_in_flight: 200,
             grace_period_ms: 30_000,
         };
         assert_eq!(super::sample_intensity(&profile, 999), 10.0);

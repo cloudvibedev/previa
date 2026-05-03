@@ -14,7 +14,6 @@ export interface LoadPoint {
 export interface WaveLoadConfig {
   points: LoadPoint[];
   interpolation: LoadInterpolation;
-  maxInFlight?: number;
   gracePeriodMs?: number;
 }
 

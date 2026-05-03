@@ -78,7 +78,7 @@ Wave load tests use elapsed time and intensity percentage. A runner treats
 ```bash
 curl -N http://127.0.0.1:5588/api/v1/projects/$PROJECT_ID/tests/load \
   -H 'content-type: application/json' \
-  -d '{"pipelineId":"users-crud","selectedBaseUrlKey":"hml","load":{"points":[{"atMs":0,"intensity":30},{"atMs":300000,"intensity":30}],"interpolation":"smooth","maxInFlight":200,"gracePeriodMs":30000},"specs":[]}'
+  -d '{"pipelineId":"users-crud","selectedBaseUrlKey":"hml","load":{"points":[{"atMs":0,"intensity":30},{"atMs":300000,"intensity":30}],"interpolation":"smooth","gracePeriodMs":30000},"specs":[]}'
 ```
 
 ## Repository Import

@@ -98,8 +98,6 @@ pub struct LoadProfile {
     #[serde(default)]
     pub runner_max_rps: Option<f64>,
     #[serde(default)]
-    pub max_in_flight: Option<usize>,
-    #[serde(default)]
     pub grace_period_ms: Option<u64>,
 }
 
