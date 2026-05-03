@@ -90,6 +90,24 @@ describe("LoadTestResultsPanel", () => {
     expect(screen.queryByText(/elapsed/i)).not.toBeInTheDocument();
   });
 
+  it("renders load error samples", () => {
+    render(
+      <LoadTestResultsPanel
+        metrics={{
+          ...emptyMetrics,
+          totalSent: 10,
+          totalError: 10,
+          errors: ["runner-a create_user HTTP 409: HTTP 409 Conflict (x10)"],
+        }}
+        state="completed"
+        totalRequests={0}
+      />,
+    );
+
+    expect(screen.getByText("loadTestResults.errorSamples")).toBeInTheDocument();
+    expect(screen.getByText(/create_user HTTP 409/)).toBeInTheDocument();
+  });
+
   it("shows the configured wave profile on wave load results", () => {
     const config: WaveLoadConfig = {
       points: [

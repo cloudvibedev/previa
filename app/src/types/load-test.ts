@@ -139,6 +139,7 @@ export interface LoadTestMetrics {
   latencyHistory: LatencyPoint[];
   rpsHistory: RpsPoint[];
   runnerResourceHistory: RunnerResourcePoint[];
+  errors?: string[];
   startTime: number;
   elapsedMs: number;
   targetIntensity?: number;

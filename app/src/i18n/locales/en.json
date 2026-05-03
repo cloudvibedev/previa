@@ -240,6 +240,7 @@
   "loadTestResults.responseBodyCompleted": "Bodies completed",
   "loadTestResults.dependencyLimitedStarts": "Dependency limited",
   "loadTestResults.runtimeLaggedStarts": "Runtime lagged",
+  "loadTestResults.errorSamples": "Error samples",
   "loadTestResults.configuredWave": "Configured wave",
 
   "pipeline.editPipeline": "Edit pipeline",

@@ -802,6 +802,9 @@ export function loadRecordToRun(r: LoadHistoryRecord): LoadTestRunRecord {
     latencyHistory: consolidated?.latencyHistory ?? [],
     rpsHistory: consolidated?.rpsHistory ?? [],
     runnerResourceHistory: consolidated?.runnerResourceHistory ?? buildRunnerResourceHistoryFromLines(r.finalLines),
+    errors: Array.isArray(r.errors)
+      ? r.errors.filter((item): item is string => typeof item === "string")
+      : [],
     startTime: consolidated?.startTime ?? r.startedAtMs,
     elapsedMs: consolidated?.elapsedMs ?? r.durationMs,
     targetIntensity: consolidated?.targetIntensity,

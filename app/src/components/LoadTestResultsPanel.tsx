@@ -202,6 +202,20 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
           </>
         )}
       </div>
+      {metrics.errors && metrics.errors.length > 0 && (
+        <div className="glass rounded-lg p-3 space-y-2">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            {t("loadTestResults.errorSamples")}
+          </p>
+          <div className="space-y-1">
+            {metrics.errors.slice(0, 5).map((error, index) => (
+              <p key={`${error}-${index}`} className="break-words text-xs text-destructive">
+                {error}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
       {(typeof metrics.targetIntensity === "number" ||
         typeof metrics.targetRpsLimit === "number" ||
         typeof metrics.inFlight === "number") && (

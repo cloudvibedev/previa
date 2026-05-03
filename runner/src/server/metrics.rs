@@ -1,4 +1,8 @@
-use crate::server::models::{LoadTestMetrics, RunnerInfoResponse};
+use std::collections::BTreeMap;
+
+use crate::server::models::{
+    LoadErrorSample, LoadLatencyBucket, LoadTestMetrics, RunnerInfoResponse,
+};
 use crate::server::utils::{now_ms, round2};
 use previa_runner::{StepExecutionResult, StepRequest, StepResponse};
 
@@ -32,6 +36,10 @@ pub struct MetricsAccumulator {
     start_time: u64,
     network_tx_bytes: u64,
     network_rx_bytes: u64,
+    latency_sample_count: usize,
+    latency_total_duration_ms: u64,
+    latency_histogram: BTreeMap<u64, usize>,
+    error_samples: Vec<LoadErrorSample>,
 }
 
 impl MetricsAccumulator {
@@ -51,6 +59,10 @@ impl MetricsAccumulator {
             start_time: now_ms(),
             network_tx_bytes: 0,
             network_rx_bytes: 0,
+            latency_sample_count: 0,
+            latency_total_duration_ms: 0,
+            latency_histogram: BTreeMap::new(),
+            error_samples: Vec::new(),
         }
     }
 
@@ -58,12 +70,22 @@ impl MetricsAccumulator {
         self.total_started += 1;
     }
 
-    pub fn update(&mut self, _duration: f64, success: bool) {
-        self.total_sent += 1;
-        if success {
-            self.total_success += 1;
+    pub fn update(&mut self, duration: f64, success: bool) {
+        let duration_ms = if duration.is_finite() && duration >= 0.0 {
+            duration.round() as u64
         } else {
-            self.total_error += 1;
+            0
+        };
+
+        self.total_sent = self.total_sent.saturating_add(1);
+        self.latency_sample_count = self.latency_sample_count.saturating_add(1);
+        self.latency_total_duration_ms = self.latency_total_duration_ms.saturating_add(duration_ms);
+        *self.latency_histogram.entry(duration_ms).or_insert(0) += 1;
+
+        if success {
+            self.total_success = self.total_success.saturating_add(1);
+        } else {
+            self.total_error = self.total_error.saturating_add(1);
         }
     }
 
@@ -98,6 +120,26 @@ impl MetricsAccumulator {
     pub fn add_network_bytes(&mut self, tx_bytes: u64, rx_bytes: u64) {
         self.network_tx_bytes = self.network_tx_bytes.saturating_add(tx_bytes);
         self.network_rx_bytes = self.network_rx_bytes.saturating_add(rx_bytes);
+    }
+
+    pub fn record_error_sample(&mut self, step_id: &str, http_status: Option<u16>, error: &str) {
+        if let Some(existing) = self.error_samples.iter_mut().find(|sample| {
+            sample.step_id == step_id && sample.http_status == http_status && sample.error == error
+        }) {
+            existing.count = existing.count.saturating_add(1);
+            return;
+        }
+
+        if self.error_samples.len() >= 10 {
+            return;
+        }
+
+        self.error_samples.push(LoadErrorSample {
+            step_id: step_id.to_owned(),
+            http_status,
+            error: error.to_owned(),
+            count: 1,
+        });
     }
 
     pub fn snapshot(
@@ -178,6 +220,19 @@ impl MetricsAccumulator {
             outstanding_requests: wave.as_ref().map(|value| value.outstanding_requests),
             curve_adherence,
             duration_ms,
+            latency_buckets: self
+                .latency_histogram
+                .iter()
+                .map(|(duration_ms, count)| LoadLatencyBucket {
+                    duration_ms: *duration_ms,
+                    count: *count,
+                })
+                .collect(),
+            latency_sample_count: (self.latency_sample_count > 0)
+                .then_some(self.latency_sample_count),
+            latency_total_duration_ms: (self.latency_sample_count > 0)
+                .then_some(self.latency_total_duration_ms),
+            error_samples: self.error_samples.clone(),
             runtime,
         }
     }
@@ -249,6 +304,48 @@ mod tests {
         assert_eq!(snapshot.total_success, 2);
         assert_eq!(snapshot.total_error, 0);
         assert_eq!(snapshot.duration_ms, None);
+    }
+
+    #[test]
+    fn snapshot_includes_cumulative_latency_histogram() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.update(20.0, true);
+        metrics.update(30.4, false);
+        metrics.update(30.6, false);
+
+        let snapshot = metrics.snapshot(None, None);
+
+        assert_eq!(snapshot.total_sent, 3);
+        assert_eq!(snapshot.total_success, 1);
+        assert_eq!(snapshot.total_error, 2);
+        assert_eq!(snapshot.latency_sample_count, Some(3));
+        assert_eq!(snapshot.latency_total_duration_ms, Some(81));
+        assert_eq!(snapshot.latency_buckets.len(), 3);
+        assert_eq!(snapshot.latency_buckets[0].duration_ms, 20);
+        assert_eq!(snapshot.latency_buckets[0].count, 1);
+        assert_eq!(snapshot.latency_buckets[1].duration_ms, 30);
+        assert_eq!(snapshot.latency_buckets[1].count, 1);
+        assert_eq!(snapshot.latency_buckets[2].duration_ms, 31);
+        assert_eq!(snapshot.latency_buckets[2].count, 1);
+    }
+
+    #[test]
+    fn snapshot_includes_deduped_error_samples() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.record_error_sample("create_user", Some(409), "HTTP 409 Conflict");
+        metrics.record_error_sample("create_user", Some(409), "HTTP 409 Conflict");
+        metrics.record_error_sample("get_created_user", Some(404), "HTTP 404 Not Found");
+
+        let snapshot = metrics.snapshot(None, None);
+
+        assert_eq!(snapshot.error_samples.len(), 2);
+        assert_eq!(snapshot.error_samples[0].step_id, "create_user");
+        assert_eq!(snapshot.error_samples[0].http_status, Some(409));
+        assert_eq!(snapshot.error_samples[0].count, 2);
+        assert_eq!(snapshot.error_samples[1].step_id, "get_created_user");
+        assert_eq!(snapshot.error_samples[1].count, 1);
     }
 
     #[test]

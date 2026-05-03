@@ -7,7 +7,7 @@ use reqwest::Client;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tracing::error;
+use tracing::{debug, error};
 
 use previa_runner::{
     Pipeline, PipelineStep, RuntimeEnvGroup, RuntimeSpec, StepExecutionResult, prepare_http_step,
@@ -86,7 +86,7 @@ pub async fn run_wave_load(
     let mut scheduled_total = 0usize;
 
     loop {
-        drain_finished_tasks(&mut tasks).await;
+        log_drain_report(drain_finished_tasks(&mut tasks).await);
         drain_observer_events(&mut event_rx, &mut ready, &pipeline, &metrics).await;
 
         if token.is_cancelled() {
@@ -119,7 +119,7 @@ pub async fn run_wave_load(
             }
 
             let Some(step) = pipeline.steps.get(cursor.step_index).cloned() else {
-                record_terminal_pipeline(&metrics, cursor, false).await;
+                record_terminal_pipeline(&metrics, cursor, false, None).await;
                 continue;
             };
             let max_attempts = max_attempts_for_step(&step);
@@ -196,7 +196,7 @@ pub async fn run_wave_load(
     let grace_deadline =
         tokio::time::Instant::now() + tokio::time::Duration::from_millis(load.grace_period_ms);
     while response_in_flight.load(Ordering::SeqCst) > 0 || !tasks.is_empty() {
-        drain_finished_tasks(&mut tasks).await;
+        log_drain_report(drain_finished_tasks(&mut tasks).await);
         drain_observer_events(&mut event_rx, &mut ready, &pipeline, &metrics).await;
         if token.is_cancelled() || tokio::time::Instant::now() >= grace_deadline {
             break;
@@ -226,7 +226,7 @@ pub async fn run_wave_load(
     if !tasks.is_empty() {
         tasks.abort_all();
     }
-    drain_finished_tasks(&mut tasks).await;
+    log_drain_report(drain_finished_tasks(&mut tasks).await);
     drain_observer_events(&mut event_rx, &mut ready, &pipeline, &metrics).await;
 
     if send_metrics_snapshot(SnapshotArgs {
@@ -363,7 +363,7 @@ async fn handle_step_result(
     metrics: &Arc<tokio::sync::Mutex<MetricsAccumulator>>,
 ) {
     let Some(step) = pipeline.steps.get(cursor.step_index) else {
-        record_terminal_pipeline(metrics, cursor, false).await;
+        record_terminal_pipeline(metrics, cursor, false, Some(&result)).await;
         return;
     };
     let max_attempts = max_attempts_for_step(step);
@@ -375,7 +375,7 @@ async fn handle_step_result(
     }
 
     if result.status == "error" {
-        record_terminal_pipeline(metrics, cursor, false).await;
+        record_terminal_pipeline(metrics, cursor, false, Some(&result)).await;
         return;
     }
 
@@ -384,7 +384,7 @@ async fn handle_step_result(
     cursor.attempt = 1;
 
     if cursor.step_index >= pipeline.steps.len() {
-        record_terminal_pipeline(metrics, cursor, true).await;
+        record_terminal_pipeline(metrics, cursor, true, None).await;
     } else {
         ready.push_back(cursor);
     }
@@ -415,28 +415,65 @@ async fn handle_prepare_error(
         let mut lock = metrics.lock().await;
         lock.record_dependency_limited_starts_count(1);
     }
-    let _ = result;
-    record_terminal_pipeline(metrics, cursor, false).await;
+    record_terminal_pipeline(metrics, cursor, false, Some(&result)).await;
 }
 
 async fn record_terminal_pipeline(
     metrics: &Arc<tokio::sync::Mutex<MetricsAccumulator>>,
     cursor: PipelineCursor,
     success: bool,
+    result: Option<&StepExecutionResult>,
 ) {
     let duration_ms = cursor.pipeline_started_at.elapsed().as_millis() as f64;
     let mut lock = metrics.lock().await;
     lock.update(duration_ms, success);
+    if !success {
+        if let Some(result) = result {
+            let http_status = result.response.as_ref().map(|response| response.status);
+            let error = result.error.as_deref().unwrap_or("pipeline failed");
+            lock.record_error_sample(&result.step_id, http_status, error);
+        }
+    }
 }
 
-async fn drain_finished_tasks(tasks: &mut JoinSet<()>) {
+#[derive(Debug, Default, PartialEq, Eq)]
+struct DrainTaskReport {
+    completed: usize,
+    cancelled: usize,
+    failed: usize,
+}
+
+async fn drain_finished_tasks(tasks: &mut JoinSet<()>) -> DrainTaskReport {
+    let mut report = DrainTaskReport::default();
+
     loop {
         match tokio::time::timeout(tokio::time::Duration::from_millis(0), tasks.join_next()).await {
-            Ok(Some(Err(err))) => error!("wave response observer join error: {}", err),
-            Ok(Some(Ok(()))) => {}
+            Ok(Some(Err(err))) if err.is_cancelled() => {
+                report.cancelled = report.cancelled.saturating_add(1);
+            }
+            Ok(Some(Err(_err))) => {
+                report.failed = report.failed.saturating_add(1);
+            }
+            Ok(Some(Ok(()))) => {
+                report.completed = report.completed.saturating_add(1);
+            }
             Ok(None) => break,
             Err(_) => break,
         }
+    }
+
+    report
+}
+
+fn log_drain_report(report: DrainTaskReport) {
+    if report.failed > 0 {
+        error!("wave response observer task failures: {}", report.failed);
+    }
+    if report.cancelled > 0 {
+        debug!(
+            "wave response observer tasks cancelled: {}",
+            report.cancelled
+        );
     }
 }
 
@@ -586,5 +623,22 @@ mod tests {
 
         assert_eq!(cursor.step_index, 2);
         assert!(!started_new);
+    }
+
+    #[tokio::test]
+    async fn drain_finished_tasks_reports_cancelled_tasks_without_failure() {
+        let mut tasks = JoinSet::new();
+        tasks.spawn(async {
+            std::future::pending::<()>().await;
+        });
+
+        tasks.abort_all();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        let report = drain_finished_tasks(&mut tasks).await;
+
+        assert_eq!(report.cancelled, 1);
+        assert_eq!(report.failed, 0);
+        assert!(tasks.is_empty());
     }
 }

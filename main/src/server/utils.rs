@@ -2,7 +2,7 @@ use chrono::{SecondsFormat, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::server::models::RunnerLoadMetricsPoint;
+use crate::server::models::{RunnerLoadLatencyBucket, RunnerLoadMetricsPoint};
 
 pub fn now_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -55,6 +55,9 @@ pub fn parse_runner_load_metrics(payload: &Value) -> Option<RunnerLoadMetricsPoi
         active_pipelines: get_usize_field(payload, "activePipelines"),
         outstanding_requests: get_usize_field(payload, "outstandingRequests"),
         curve_adherence: get_f64_field(payload, "curveAdherence"),
+        latency_sample_count: get_usize_field(payload, "latencySampleCount"),
+        latency_total_duration_ms: get_u64_field(payload, "latencyTotalDurationMs"),
+        latency_buckets: parse_latency_buckets(payload),
     })
 }
 
@@ -75,4 +78,21 @@ pub fn get_u64_field(payload: &Value, key: &str) -> Option<u64> {
 
 pub fn get_f64_field(payload: &Value, key: &str) -> Option<f64> {
     payload.get(key).and_then(Value::as_f64)
+}
+
+fn parse_latency_buckets(payload: &Value) -> Vec<RunnerLoadLatencyBucket> {
+    payload
+        .get("latencyBuckets")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let duration_ms = get_u64_field(item, "durationMs")?;
+                    let count = get_usize_field(item, "count")?;
+                    Some(RunnerLoadLatencyBucket { duration_ms, count })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }

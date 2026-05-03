@@ -89,6 +89,22 @@ pub struct E2eSummary {
 
 #[derive(Debug, Serialize, Clone, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct LoadLatencyBucket {
+    pub duration_ms: u64,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadErrorSample {
+    pub step_id: String,
+    pub http_status: Option<u16>,
+    pub error: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct LoadTestMetrics {
     pub total_started: usize,
     pub total_sent: usize,
@@ -133,6 +149,14 @@ pub struct LoadTestMetrics {
     pub curve_adherence: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub latency_buckets: Vec<LoadLatencyBucket>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_sample_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_total_duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub error_samples: Vec<LoadErrorSample>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RunnerInfoResponse>,
 }

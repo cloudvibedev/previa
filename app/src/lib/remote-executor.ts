@@ -445,6 +445,7 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
   const activePipelines = toNumber(consolidated?.activePipelines) ?? aggregated?.activePipelines;
   const outstandingRequests = toNumber(consolidated?.outstandingRequests) ?? aggregated?.outstandingRequests;
   const curveAdherence = toNumber(consolidated?.curveAdherence) ?? aggregated?.curveAdherence;
+  const errors = pickStringArray(snapshot.errors);
 
   return {
     totalSent,
@@ -482,6 +483,7 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
     runnerResourceHistory: Array.isArray(snapshot.lines)
       ? extractRunnerResourcePoints(snapshot.lines)
       : [],
+    errors,
     startTime,
     elapsedMs: toNumber(consolidated?.elapsedMs) ?? aggregated?.elapsedMs ?? 0,
     targetIntensity,

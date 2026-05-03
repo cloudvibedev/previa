@@ -217,6 +217,7 @@ pub async fn forward_runner_stream_load_chunked(
                     let mut lock = load_latency.lock().await;
                     lock.add_sample(duration_ms);
                 }
+                merge_runner_error_samples(&load_errors, &node, &data).await;
             }
             let line = RunnerLoadLine {
                 node: node.clone(),
@@ -316,6 +317,57 @@ pub async fn flush_load_batches(
             load_context.as_ref(),
         );
         let _ = send_sse_best_effort(&tx, "metrics", payload);
+    }
+}
+
+async fn merge_runner_error_samples(
+    load_errors: &Arc<Mutex<Vec<String>>>,
+    node: &str,
+    payload: &Value,
+) {
+    let mut lock = load_errors.lock().await;
+    merge_runner_error_samples_into(&mut lock, node, payload);
+}
+
+fn merge_runner_error_samples_into(errors: &mut Vec<String>, node: &str, payload: &Value) {
+    let Some(samples) = payload.get("errorSamples").and_then(Value::as_array) else {
+        return;
+    };
+
+    for sample in samples {
+        let step_id = sample
+            .get("stepId")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown_step");
+        let error = sample
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("pipeline failed");
+        let count = sample
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .max(1);
+        let status = sample
+            .get("httpStatus")
+            .and_then(Value::as_u64)
+            .map(|value| format!(" HTTP {}", value))
+            .unwrap_or_default();
+        let key = format!("{} {}{}: {}", node, step_id, status, error);
+        let message = format!("{} (x{})", key, count);
+
+        if let Some(existing) = errors
+            .iter_mut()
+            .find(|existing| existing.starts_with(&key))
+        {
+            *existing = message;
+            continue;
+        }
+
+        if errors.len() >= 20 {
+            break;
+        }
+        errors.push(message);
     }
 }
 
@@ -478,6 +530,7 @@ pub fn consolidate_load_metrics(
     latest_by_node: &HashMap<String, RunnerLoadLine>,
     latency: LoadLatencySummary,
 ) -> Option<ConsolidatedLoadMetrics> {
+    let latency = summarize_runner_latency(latest_by_node).unwrap_or(latency);
     let mut total_sent = 0usize;
     let mut total_started = 0usize;
     let mut total_started_nodes = 0usize;
@@ -649,6 +702,44 @@ pub fn consolidate_load_metrics(
     })
 }
 
+fn summarize_runner_latency(
+    latest_by_node: &HashMap<String, RunnerLoadLine>,
+) -> Option<LoadLatencySummary> {
+    let mut accumulator = LoadLatencyAccumulator::default();
+
+    for line in latest_by_node.values() {
+        let Some(metrics) = parse_runner_load_metrics(&line.payload) else {
+            continue;
+        };
+
+        let reported_sample_count = metrics.latency_sample_count.unwrap_or(0);
+        let reported_total_duration_ms = metrics.latency_total_duration_ms.unwrap_or(0);
+        let mut bucket_sample_count = 0usize;
+        for bucket in metrics.latency_buckets {
+            bucket_sample_count = bucket_sample_count.saturating_add(bucket.count);
+            accumulator.sample_count = accumulator.sample_count.saturating_add(bucket.count);
+            accumulator.total_duration_ms = accumulator
+                .total_duration_ms
+                .saturating_add((bucket.duration_ms as u128).saturating_mul(bucket.count as u128));
+            *accumulator.histogram.entry(bucket.duration_ms).or_insert(0) += bucket.count;
+        }
+
+        if bucket_sample_count == 0 && reported_sample_count > 0 {
+            let duration_ms =
+                round_average_latency(reported_total_duration_ms as u128, reported_sample_count);
+            accumulator.sample_count = accumulator
+                .sample_count
+                .saturating_add(reported_sample_count);
+            accumulator.total_duration_ms = accumulator
+                .total_duration_ms
+                .saturating_add(reported_total_duration_ms as u128);
+            *accumulator.histogram.entry(duration_ms).or_insert(0) += reported_sample_count;
+        }
+    }
+
+    (accumulator.sample_count > 0).then(|| summarize_load_latency(&accumulator))
+}
+
 pub fn summarize_load_latency(accumulator: &LoadLatencyAccumulator) -> LoadLatencySummary {
     if accumulator.sample_count == 0 {
         return LoadLatencySummary::default();
@@ -760,7 +851,7 @@ mod tests {
 
     use crate::server::execution::load_batch::{
         add_load_context_fields, build_rps_history_sample, consolidate_load_metrics,
-        drain_load_chunk, summarize_load_latency,
+        drain_load_chunk, merge_runner_error_samples_into, summarize_load_latency,
     };
     use crate::server::models::{
         ConsolidatedLoadMetrics, LoadEventContext, LoadLatencyAccumulator, LoadLatencySummary,
@@ -932,6 +1023,63 @@ mod tests {
     }
 
     #[test]
+    fn consolidates_latency_from_runner_histograms() {
+        let latest = HashMap::from([
+            (
+                "http://runner-a:3000".to_owned(),
+                RunnerLoadLine {
+                    node: "http://runner-a:3000".to_owned(),
+                    runner_event: "metrics".to_owned(),
+                    received_at: 1,
+                    payload: json!({
+                        "totalSent": 2,
+                        "totalSuccess": 1,
+                        "totalError": 1,
+                        "rps": 10.0,
+                        "startTime": 1_000,
+                        "elapsedMs": 1_000,
+                        "latencySampleCount": 2,
+                        "latencyTotalDurationMs": 300,
+                        "latencyBuckets": [
+                            { "durationMs": 100, "count": 1 },
+                            { "durationMs": 200, "count": 1 }
+                        ]
+                    }),
+                },
+            ),
+            (
+                "http://runner-b:3000".to_owned(),
+                RunnerLoadLine {
+                    node: "http://runner-b:3000".to_owned(),
+                    runner_event: "metrics".to_owned(),
+                    received_at: 1,
+                    payload: json!({
+                        "totalSent": 2,
+                        "totalSuccess": 0,
+                        "totalError": 2,
+                        "rps": 20.0,
+                        "startTime": 900,
+                        "elapsedMs": 1_200,
+                        "latencySampleCount": 2,
+                        "latencyTotalDurationMs": 100,
+                        "latencyBuckets": [
+                            { "durationMs": 50, "count": 2 }
+                        ]
+                    }),
+                },
+            ),
+        ]);
+
+        let consolidated = consolidate_load_metrics(&latest, LoadLatencySummary::default())
+            .expect("expected consolidated metrics");
+
+        assert_eq!(consolidated.total_sent, 4);
+        assert_eq!(consolidated.avg_latency, 100);
+        assert_eq!(consolidated.p95, 200);
+        assert_eq!(consolidated.p99, 200);
+    }
+
+    #[test]
     fn consolidates_dispatch_metrics() {
         let latest = HashMap::from([
             (
@@ -1004,6 +1152,51 @@ mod tests {
         assert_eq!(consolidated.active_pipelines, Some(110));
         assert_eq!(consolidated.outstanding_requests, Some(70));
         assert_eq!(consolidated.curve_adherence, Some(90.0));
+    }
+
+    #[test]
+    fn merges_runner_error_samples_with_deduped_counts() {
+        let mut errors = vec!["existing runner error".to_owned()];
+        let payload = json!({
+            "errorSamples": [
+                {
+                    "stepId": "create_user",
+                    "httpStatus": 409,
+                    "error": "HTTP 409 Conflict",
+                    "count": 2
+                },
+                {
+                    "stepId": "get_created_user",
+                    "httpStatus": 404,
+                    "error": "HTTP 404 Not Found",
+                    "count": 1
+                }
+            ]
+        });
+
+        merge_runner_error_samples_into(&mut errors, "http://runner-a:3000", &payload);
+        merge_runner_error_samples_into(
+            &mut errors,
+            "http://runner-a:3000",
+            &json!({
+                "errorSamples": [{
+                    "stepId": "create_user",
+                    "httpStatus": 409,
+                    "error": "HTTP 409 Conflict",
+                    "count": 5
+                }]
+            }),
+        );
+
+        assert_eq!(
+            errors,
+            vec![
+                "existing runner error".to_owned(),
+                "http://runner-a:3000 create_user HTTP 409: HTTP 409 Conflict (x5)".to_owned(),
+                "http://runner-a:3000 get_created_user HTTP 404: HTTP 404 Not Found (x1)"
+                    .to_owned(),
+            ]
+        );
     }
 
     #[test]
