@@ -10,6 +10,8 @@ pub struct DispatchTick {
     pub target_rps: f64,
     pub scheduled_starts: usize,
     pub scheduled_total: usize,
+    pub scheduler_lag_ms: u64,
+    pub missed_due_to_scheduler_lag: usize,
 }
 
 #[cfg(test)]
@@ -39,19 +41,23 @@ impl DispatchClock {
     }
 
     pub fn plan_tick(&mut self, elapsed_ms: u64, target_rps: f64) -> DispatchTick {
-        let tick_end_ms = elapsed_ms.saturating_add(self.tick_ms);
-        let window_ms = tick_end_ms.saturating_sub(self.cursor_elapsed_ms);
-        self.cursor_elapsed_ms = tick_end_ms.max(self.cursor_elapsed_ms);
-        let raw_slots = target_rps.max(0.0) * window_ms as f64 / 1000.0 + self.fractional_carry;
+        let scheduler_lag_ms = elapsed_ms.saturating_sub(self.cursor_elapsed_ms);
+        let missed_raw = target_rps.max(0.0) * scheduler_lag_ms as f64 / 1000.0;
+        let missed_due_to_scheduler_lag = missed_raw.floor() as usize;
+        let raw_slots =
+            target_rps.max(0.0) * self.tick_ms as f64 / 1000.0 + self.fractional_carry;
         let scheduled_starts = raw_slots.floor() as usize;
         self.fractional_carry = raw_slots - scheduled_starts as f64;
         self.scheduled_total = self.scheduled_total.saturating_add(scheduled_starts);
+        self.cursor_elapsed_ms = elapsed_ms.saturating_add(self.tick_ms);
 
         DispatchTick {
             elapsed_ms,
             target_rps,
             scheduled_starts,
             scheduled_total: self.scheduled_total,
+            scheduler_lag_ms,
+            missed_due_to_scheduler_lag,
         }
     }
 }
@@ -153,6 +159,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn delayed_tick_records_lag_without_repaying_missed_wall_time() {
+        let mut clock = DispatchClock::new(100);
+
+        let first = clock.plan_tick(0, 1000.0);
+        assert_eq!(first.scheduled_starts, 100);
+        assert_eq!(first.scheduler_lag_ms, 0);
+        assert_eq!(first.missed_due_to_scheduler_lag, 0);
+
+        let delayed = clock.plan_tick(500, 1000.0);
+        assert_eq!(delayed.scheduled_starts, 100);
+        assert_eq!(delayed.scheduler_lag_ms, 400);
+        assert_eq!(delayed.missed_due_to_scheduler_lag, 400);
+        assert_eq!(delayed.scheduled_total, 200);
+    }
+
+    #[test]
     fn schedules_exact_integer_slots_per_tick() {
         let mut clock = DispatchClock::new(100);
 
@@ -181,15 +203,31 @@ mod tests {
     }
 
     #[test]
-    fn delayed_tick_schedules_elapsed_wall_time_window() {
+    fn delayed_tick_keeps_next_window_size_after_reporting_lag() {
         let mut clock = DispatchClock::new(100);
 
         let first = clock.plan_tick(0, 1000.0);
         assert_eq!(first.scheduled_starts, 100);
 
         let delayed = clock.plan_tick(500, 1000.0);
-        assert_eq!(delayed.scheduled_starts, 500);
-        assert_eq!(delayed.scheduled_total, 600);
+        assert_eq!(delayed.scheduled_starts, 100);
+        assert_eq!(delayed.scheduler_lag_ms, 400);
+        assert_eq!(delayed.missed_due_to_scheduler_lag, 400);
+        assert_eq!(delayed.scheduled_total, 200);
+    }
+
+    #[test]
+    fn dispatch_clock_is_independent_from_failures_by_design() {
+        let mut clock = DispatchClock::new(100);
+
+        let a = clock.plan_tick(0, 1000.0);
+        let b = clock.plan_tick(100, 1000.0);
+        let c = clock.plan_tick(200, 1000.0);
+
+        assert_eq!(a.scheduled_starts, 100);
+        assert_eq!(b.scheduled_starts, 100);
+        assert_eq!(c.scheduled_starts, 100);
+        assert_eq!(c.scheduled_total, 300);
     }
 
     #[test]
@@ -200,6 +238,8 @@ mod tests {
             target_rps: 1000.0,
             scheduled_starts: 100,
             scheduled_total: 100,
+            scheduler_lag_ms: 0,
+            missed_due_to_scheduler_lag: 0,
         });
 
         assert_eq!(
@@ -216,6 +256,8 @@ mod tests {
             target_rps: 1000.0,
             scheduled_starts: 100,
             scheduled_total: 200,
+            scheduler_lag_ms: 0,
+            missed_due_to_scheduler_lag: 0,
         });
 
         assert_eq!(
@@ -236,6 +278,8 @@ mod tests {
             target_rps: 1000.0,
             scheduled_starts: 100,
             scheduled_total: 100,
+            scheduler_lag_ms: 0,
+            missed_due_to_scheduler_lag: 0,
         });
 
         assert_eq!(
@@ -264,6 +308,8 @@ mod tests {
             target_rps: 1000.0,
             scheduled_starts: 100,
             scheduled_total: 100,
+            scheduler_lag_ms: 0,
+            missed_due_to_scheduler_lag: 0,
         });
 
         state.close();

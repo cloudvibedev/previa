@@ -385,6 +385,7 @@ fn build_rps_history_sample(
             insert_optional(&mut runner, "httpStarted", metrics.http_started);
             insert_optional(&mut runner, "httpCompleted", metrics.http_completed);
             insert_optional(&mut runner, "dispatchSubmitted", metrics.dispatch_submitted);
+            insert_optional(&mut runner, "dispatchStarted", metrics.dispatch_started);
             insert_optional(&mut runner, "httpSendReturned", metrics.http_send_returned);
             insert_optional(
                 &mut runner,
@@ -400,6 +401,12 @@ fn build_rps_history_sample(
                 &mut runner,
                 "runtimeLaggedStarts",
                 metrics.runtime_lagged_starts,
+            );
+            insert_optional(&mut runner, "schedulerLagMs", metrics.scheduler_lag_ms);
+            insert_optional(
+                &mut runner,
+                "schedulerLaggedStarts",
+                metrics.scheduler_lagged_starts,
             );
             insert_optional(&mut runner, "totalStarted", metrics.total_started);
             runner.insert("totalSent".to_owned(), json!(metrics.total_sent));
@@ -431,6 +438,7 @@ fn build_rps_history_sample(
     insert_optional(&mut sample, "httpStarted", metrics.http_started);
     insert_optional(&mut sample, "httpCompleted", metrics.http_completed);
     insert_optional(&mut sample, "dispatchSubmitted", metrics.dispatch_submitted);
+    insert_optional(&mut sample, "dispatchStarted", metrics.dispatch_started);
     insert_optional(&mut sample, "httpSendReturned", metrics.http_send_returned);
     insert_optional(
         &mut sample,
@@ -446,6 +454,12 @@ fn build_rps_history_sample(
         &mut sample,
         "runtimeLaggedStarts",
         metrics.runtime_lagged_starts,
+    );
+    insert_optional(&mut sample, "schedulerLagMs", metrics.scheduler_lag_ms);
+    insert_optional(
+        &mut sample,
+        "schedulerLaggedStarts",
+        metrics.scheduler_lagged_starts,
     );
     insert_optional(&mut sample, "targetIntensity", metrics.target_intensity);
     insert_optional(&mut sample, "targetRpsLimit", metrics.target_rps_limit);
@@ -542,6 +556,8 @@ pub fn consolidate_load_metrics(
     let mut http_completed_nodes = 0usize;
     let mut dispatch_submitted = 0usize;
     let mut dispatch_submitted_nodes = 0usize;
+    let mut dispatch_started = 0usize;
+    let mut dispatch_started_nodes = 0usize;
     let mut http_send_returned = 0usize;
     let mut http_send_returned_nodes = 0usize;
     let mut response_body_completed = 0usize;
@@ -550,6 +566,10 @@ pub fn consolidate_load_metrics(
     let mut dependency_limited_starts_nodes = 0usize;
     let mut runtime_lagged_starts = 0usize;
     let mut runtime_lagged_starts_nodes = 0usize;
+    let mut scheduler_lag_ms = 0u64;
+    let mut scheduler_lag_ms_nodes = 0usize;
+    let mut scheduler_lagged_starts = 0usize;
+    let mut scheduler_lagged_starts_nodes = 0usize;
     let mut rps = 0.0f64;
     let mut target_intensity = 0.0f64;
     let mut target_intensity_nodes = 0usize;
@@ -595,6 +615,10 @@ pub fn consolidate_load_metrics(
             dispatch_submitted = dispatch_submitted.saturating_add(value);
             dispatch_submitted_nodes += 1;
         }
+        if let Some(value) = metrics.dispatch_started {
+            dispatch_started = dispatch_started.saturating_add(value);
+            dispatch_started_nodes += 1;
+        }
         if let Some(value) = metrics.http_send_returned {
             http_send_returned = http_send_returned.saturating_add(value);
             http_send_returned_nodes += 1;
@@ -610,6 +634,14 @@ pub fn consolidate_load_metrics(
         if let Some(value) = metrics.runtime_lagged_starts {
             runtime_lagged_starts = runtime_lagged_starts.saturating_add(value);
             runtime_lagged_starts_nodes += 1;
+        }
+        if let Some(value) = metrics.scheduler_lag_ms {
+            scheduler_lag_ms = scheduler_lag_ms.saturating_add(value);
+            scheduler_lag_ms_nodes += 1;
+        }
+        if let Some(value) = metrics.scheduler_lagged_starts {
+            scheduler_lagged_starts = scheduler_lagged_starts.saturating_add(value);
+            scheduler_lagged_starts_nodes += 1;
         }
         rps += metrics.rps;
         if let Some(value) = metrics.target_intensity {
@@ -665,12 +697,16 @@ pub fn consolidate_load_metrics(
         http_started: (http_started_nodes > 0).then_some(http_started),
         http_completed: (http_completed_nodes > 0).then_some(http_completed),
         dispatch_submitted: (dispatch_submitted_nodes > 0).then_some(dispatch_submitted),
+        dispatch_started: (dispatch_started_nodes > 0).then_some(dispatch_started),
         http_send_returned: (http_send_returned_nodes > 0).then_some(http_send_returned),
         response_body_completed: (response_body_completed_nodes > 0)
             .then_some(response_body_completed),
         dependency_limited_starts: (dependency_limited_starts_nodes > 0)
             .then_some(dependency_limited_starts),
         runtime_lagged_starts: (runtime_lagged_starts_nodes > 0).then_some(runtime_lagged_starts),
+        scheduler_lag_ms: (scheduler_lag_ms_nodes > 0).then_some(scheduler_lag_ms),
+        scheduler_lagged_starts: (scheduler_lagged_starts_nodes > 0)
+            .then_some(scheduler_lagged_starts),
         rps,
         target_intensity: (target_intensity_nodes > 0)
             .then(|| target_intensity / target_intensity_nodes as f64),
@@ -1098,10 +1134,13 @@ mod tests {
                         "scheduledStarts": 100,
                         "missedStarts": 5,
                         "dispatchSubmitted": 100,
+                        "dispatchStarted": 95,
                         "httpSendReturned": 80,
                         "responseBodyCompleted": 70,
                         "dependencyLimitedStarts": 1,
                         "runtimeLaggedStarts": 2,
+                        "schedulerLagMs": 30,
+                        "schedulerLaggedStarts": 4,
                         "readyRequests": 20,
                         "activePipelines": 50,
                         "outstandingRequests": 30,
@@ -1125,10 +1164,13 @@ mod tests {
                         "scheduledStarts": 100,
                         "missedStarts": 15,
                         "dispatchSubmitted": 100,
+                        "dispatchStarted": 85,
                         "httpSendReturned": 90,
                         "responseBodyCompleted": 85,
                         "dependencyLimitedStarts": 3,
                         "runtimeLaggedStarts": 4,
+                        "schedulerLagMs": 50,
+                        "schedulerLaggedStarts": 6,
                         "readyRequests": 30,
                         "activePipelines": 60,
                         "outstandingRequests": 40,
@@ -1144,10 +1186,13 @@ mod tests {
         assert_eq!(consolidated.scheduled_starts, Some(200));
         assert_eq!(consolidated.missed_starts, Some(20));
         assert_eq!(consolidated.dispatch_submitted, Some(200));
+        assert_eq!(consolidated.dispatch_started, Some(180));
         assert_eq!(consolidated.http_send_returned, Some(170));
         assert_eq!(consolidated.response_body_completed, Some(155));
         assert_eq!(consolidated.dependency_limited_starts, Some(4));
         assert_eq!(consolidated.runtime_lagged_starts, Some(6));
+        assert_eq!(consolidated.scheduler_lag_ms, Some(80));
+        assert_eq!(consolidated.scheduler_lagged_starts, Some(10));
         assert_eq!(consolidated.ready_requests, Some(50));
         assert_eq!(consolidated.active_pipelines, Some(110));
         assert_eq!(consolidated.outstanding_requests, Some(70));
@@ -1209,10 +1254,13 @@ mod tests {
             http_started: Some(60),
             http_completed: Some(58),
             dispatch_submitted: None,
+            dispatch_started: None,
             http_send_returned: None,
             response_body_completed: None,
             dependency_limited_starts: None,
             runtime_lagged_starts: None,
+            scheduler_lag_ms: None,
+            scheduler_lagged_starts: None,
             rps: 21.5,
             target_intensity: Some(75.0),
             target_rps_limit: Some(150.0),

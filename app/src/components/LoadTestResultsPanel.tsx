@@ -262,16 +262,28 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
         </div>
       )}
       {(typeof metrics.dispatchSubmitted === "number" ||
+        typeof metrics.dispatchStarted === "number" ||
         typeof metrics.httpSendReturned === "number" ||
         typeof metrics.responseBodyCompleted === "number" ||
         typeof metrics.dependencyLimitedStarts === "number" ||
-        typeof metrics.runtimeLaggedStarts === "number") && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        typeof metrics.runtimeLaggedStarts === "number" ||
+        typeof metrics.schedulerLagMs === "number" ||
+        typeof metrics.schedulerLaggedStarts === "number" ||
+        typeof metrics.outstandingRequests === "number") && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-5">
           {typeof metrics.dispatchSubmitted === "number" && (
             <MetricCard
               icon={ListChecks}
               label={t("loadTestResults.dispatchSubmitted")}
               value={metrics.dispatchSubmitted}
+              color="text-primary"
+            />
+          )}
+          {typeof metrics.dispatchStarted === "number" && (
+            <MetricCard
+              icon={Activity}
+              label={t("loadTestResults.dispatchStarted")}
+              value={metrics.dispatchStarted}
               color="text-primary"
             />
           )}
@@ -303,6 +315,29 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
               label={t("loadTestResults.runtimeLaggedStarts")}
               value={metrics.runtimeLaggedStarts}
               color="text-warning"
+            />
+          )}
+          {typeof metrics.schedulerLagMs === "number" && (
+            <MetricCard
+              icon={Clock}
+              label={t("loadTestResults.schedulerLagMs")}
+              value={`${metrics.schedulerLagMs}ms`}
+              color="text-warning"
+            />
+          )}
+          {typeof metrics.schedulerLaggedStarts === "number" && (
+            <MetricCard
+              icon={AlertTriangle}
+              label={t("loadTestResults.schedulerLaggedStarts")}
+              value={metrics.schedulerLaggedStarts}
+              color="text-warning"
+            />
+          )}
+          {typeof metrics.outstandingRequests === "number" && (
+            <MetricCard
+              icon={Activity}
+              label={t("loadTestResults.observerBacklog")}
+              value={metrics.outstandingRequests}
             />
           )}
         </div>

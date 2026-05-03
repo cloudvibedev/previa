@@ -29,10 +29,13 @@ pub struct MetricsAccumulator {
     http_started: usize,
     http_completed: usize,
     dispatch_submitted: usize,
+    dispatch_started: usize,
     http_send_returned: usize,
     response_body_completed: usize,
     dependency_limited_starts: usize,
     runtime_lagged_starts: usize,
+    scheduler_lag_ms: u64,
+    scheduler_lagged_starts: usize,
     start_time: u64,
     network_tx_bytes: u64,
     network_rx_bytes: u64,
@@ -52,10 +55,13 @@ impl MetricsAccumulator {
             http_started: 0,
             http_completed: 0,
             dispatch_submitted: 0,
+            dispatch_started: 0,
             http_send_returned: 0,
             response_body_completed: 0,
             dependency_limited_starts: 0,
             runtime_lagged_starts: 0,
+            scheduler_lag_ms: 0,
+            scheduler_lagged_starts: 0,
             start_time: now_ms(),
             network_tx_bytes: 0,
             network_rx_bytes: 0,
@@ -101,6 +107,10 @@ impl MetricsAccumulator {
         self.dispatch_submitted = self.dispatch_submitted.saturating_add(count);
     }
 
+    pub fn record_dispatch_started(&mut self) {
+        self.dispatch_started = self.dispatch_started.saturating_add(1);
+    }
+
     pub fn record_http_send_returned(&mut self) {
         self.http_send_returned = self.http_send_returned.saturating_add(1);
     }
@@ -115,6 +125,14 @@ impl MetricsAccumulator {
 
     pub fn record_runtime_lagged_start(&mut self) {
         self.runtime_lagged_starts = self.runtime_lagged_starts.saturating_add(1);
+    }
+
+    pub fn record_scheduler_lag_ms(&mut self, lag_ms: u64) {
+        self.scheduler_lag_ms = self.scheduler_lag_ms.saturating_add(lag_ms);
+    }
+
+    pub fn record_scheduler_lagged_starts_count(&mut self, count: usize) {
+        self.scheduler_lagged_starts = self.scheduler_lagged_starts.saturating_add(count);
     }
 
     pub fn add_network_bytes(&mut self, tx_bytes: u64, rx_bytes: u64) {
@@ -198,6 +216,7 @@ impl MetricsAccumulator {
             http_started: self.http_started,
             http_completed: self.http_completed,
             dispatch_submitted: (self.dispatch_submitted > 0).then_some(self.dispatch_submitted),
+            dispatch_started: (self.dispatch_started > 0).then_some(self.dispatch_started),
             http_send_returned: (self.http_send_returned > 0).then_some(self.http_send_returned),
             response_body_completed: (self.response_body_completed > 0)
                 .then_some(self.response_body_completed),
@@ -205,6 +224,9 @@ impl MetricsAccumulator {
                 .then_some(self.dependency_limited_starts),
             runtime_lagged_starts: (self.runtime_lagged_starts > 0)
                 .then_some(self.runtime_lagged_starts),
+            scheduler_lag_ms: (self.scheduler_lag_ms > 0).then_some(self.scheduler_lag_ms),
+            scheduler_lagged_starts: (self.scheduler_lagged_starts > 0)
+                .then_some(self.scheduler_lagged_starts),
             rps,
             start_time: self.start_time,
             elapsed_ms,
@@ -382,6 +404,31 @@ mod tests {
         assert_eq!(snapshot.scheduled_starts, Some(80));
         assert_eq!(snapshot.missed_starts, Some(4));
         assert_eq!(snapshot.curve_adherence, Some(95.0));
+    }
+
+    #[test]
+    fn snapshot_includes_scheduler_lag_metrics() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.record_scheduler_lag_ms(400);
+        metrics.record_scheduler_lagged_starts_count(12);
+
+        let snapshot = metrics.snapshot(None, None);
+
+        assert_eq!(snapshot.scheduler_lag_ms, Some(400));
+        assert_eq!(snapshot.scheduler_lagged_starts, Some(12));
+    }
+
+    #[test]
+    fn snapshot_includes_dispatch_started_counter() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.record_dispatch_started();
+        metrics.record_dispatch_started();
+
+        let snapshot = metrics.snapshot(None, None);
+
+        assert_eq!(snapshot.dispatch_started, Some(2));
     }
 
     #[test]

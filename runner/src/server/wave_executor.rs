@@ -43,6 +43,7 @@ impl PipelineCursor {
 }
 
 type ObserverEvent = WaveObserverEvent<PipelineCursor>;
+const OBSERVER_EVENTS_PER_TICK_BUDGET: usize = 1024;
 
 fn next_cursor_for_slot(
     ready: &mut VecDeque<PipelineCursor>,
@@ -72,6 +73,7 @@ pub async fn run_wave_load(
     let response_in_flight = Arc::new(AtomicUsize::new(0));
     let ready_to_send = Arc::new(AtomicUsize::new(0));
     let missed_starts = Arc::new(AtomicUsize::new(0));
+    let observer_token = token.child_token();
     let http_client = Arc::new(Client::new());
     let mut dispatch_clock = DispatchClock::new(tick_ms);
     let mut ready = VecDeque::new();
@@ -84,14 +86,12 @@ pub async fn run_wave_load(
         Arc::clone(&ready_to_send),
         request_rx,
         event_tx,
-        token.clone(),
+        observer_token.clone(),
     );
     let sender_task = tokio::spawn(sender.run());
     let mut scheduled_total = 0usize;
 
     loop {
-        drain_observer_events(&mut event_rx, &mut ready, &pipeline, &metrics).await;
-
         if token.is_cancelled() {
             break;
         }
@@ -104,6 +104,12 @@ pub async fn run_wave_load(
         let target_rps_limit = local_rps_limit(&load, elapsed_ms);
         let tick = dispatch_clock.plan_tick(elapsed_ms, target_rps_limit);
         scheduled_total = tick.scheduled_total;
+        if tick.scheduler_lag_ms > 0 || tick.missed_due_to_scheduler_lag > 0 {
+            missed_starts.fetch_add(tick.missed_due_to_scheduler_lag, Ordering::SeqCst);
+            let mut lock = metrics.lock().await;
+            lock.record_scheduler_lag_ms(tick.scheduler_lag_ms);
+            lock.record_scheduler_lagged_starts_count(tick.missed_due_to_scheduler_lag);
+        }
         {
             let mut lock = metrics.lock().await;
             lock.record_dispatch_submitted_count(tick.scheduled_starts);
@@ -178,6 +184,15 @@ pub async fn run_wave_load(
             }
         }
 
+        drain_observer_events_budgeted(
+            &mut event_rx,
+            &mut ready,
+            &pipeline,
+            &metrics,
+            OBSERVER_EVENTS_PER_TICK_BUDGET,
+        )
+        .await;
+
         send_metrics_snapshot(SnapshotArgs {
             load: &load,
             started,
@@ -205,7 +220,7 @@ pub async fn run_wave_load(
         tokio::time::Instant::now() + tokio::time::Duration::from_millis(load.grace_period_ms);
     while response_in_flight.load(Ordering::SeqCst) > 0 || ready_to_send.load(Ordering::SeqCst) > 0
     {
-        drain_observer_events(&mut event_rx, &mut ready, &pipeline, &metrics).await;
+        drain_all_observer_events(&mut event_rx, &mut ready, &pipeline, &metrics).await;
         if token.is_cancelled() || tokio::time::Instant::now() >= grace_deadline {
             break;
         }
@@ -235,14 +250,21 @@ pub async fn run_wave_load(
 
     drop(request_tx);
     if response_in_flight.load(Ordering::SeqCst) > 0 {
-        sender_task.abort();
+        observer_token.cancel();
+        let observer_shutdown_deadline =
+            tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
+        while response_in_flight.load(Ordering::SeqCst) > 0
+            && tokio::time::Instant::now() < observer_shutdown_deadline
+        {
+            tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
+        }
     }
     if let Err(err) = sender_task.await {
         if !err.is_cancelled() {
             error!("wave sender task failed: {err}");
         }
     }
-    drain_observer_events(&mut event_rx, &mut ready, &pipeline, &metrics).await;
+    drain_all_observer_events(&mut event_rx, &mut ready, &pipeline, &metrics).await;
 
     if send_metrics_snapshot(SnapshotArgs {
         load: &load,
@@ -290,15 +312,40 @@ pub async fn run_wave_load(
     }
 }
 
-async fn drain_observer_events(
+async fn drain_observer_events_budgeted(
+    event_rx: &mut mpsc::UnboundedReceiver<ObserverEvent>,
+    ready: &mut VecDeque<PipelineCursor>,
+    pipeline: &Pipeline,
+    metrics: &Arc<tokio::sync::Mutex<MetricsAccumulator>>,
+    budget: usize,
+) -> usize {
+    let mut drained = 0usize;
+    while drained < budget {
+        let Ok(event) = event_rx.try_recv() else {
+            break;
+        };
+        handle_step_result(event.result, event.cursor, ready, pipeline, metrics).await;
+        drained += 1;
+    }
+    drained
+}
+
+async fn drain_all_observer_events(
     event_rx: &mut mpsc::UnboundedReceiver<ObserverEvent>,
     ready: &mut VecDeque<PipelineCursor>,
     pipeline: &Pipeline,
     metrics: &Arc<tokio::sync::Mutex<MetricsAccumulator>>,
 ) {
-    while let Ok(event) = event_rx.try_recv() {
-        handle_step_result(event.result, event.cursor, ready, pipeline, metrics).await;
-    }
+    while drain_observer_events_budgeted(
+        event_rx,
+        ready,
+        pipeline,
+        metrics,
+        OBSERVER_EVENTS_PER_TICK_BUDGET,
+    )
+    .await
+        > 0
+    {}
 }
 
 async fn handle_step_result(
@@ -528,5 +575,56 @@ mod tests {
 
         assert_eq!(cursor.step_index, 2);
         assert!(!started_new);
+    }
+
+    #[test]
+    fn next_cursor_starts_new_pipeline_when_no_continuation_is_ready() {
+        let mut ready = VecDeque::new();
+        let cursor = next_cursor_for_slot(&mut ready, || PipelineCursor::new(Instant::now()));
+
+        assert_eq!(cursor.step_index, 0);
+        assert_eq!(cursor.attempt, 1);
+        assert!(cursor.context.is_empty());
+    }
+
+    #[tokio::test]
+    async fn observer_drain_respects_per_tick_budget() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ObserverEvent>();
+        let mut ready = VecDeque::new();
+        let pipeline = Pipeline {
+            id: Some("p".to_owned()),
+            name: "pipeline".to_owned(),
+            description: None,
+            steps: Vec::new(),
+        };
+        let metrics = Arc::new(tokio::sync::Mutex::new(MetricsAccumulator::new()));
+
+        for _ in 0..3 {
+            tx.send(WaveObserverEvent {
+                cursor: PipelineCursor::new(Instant::now()),
+                result: StepExecutionResult {
+                    step_id: "missing".to_owned(),
+                    status: "error".to_owned(),
+                    request: None,
+                    response: None,
+                    error: Some("synthetic".to_owned()),
+                    duration: Some(0),
+                    attempts: None,
+                    attempt: Some(1),
+                    max_attempts: Some(1),
+                    assert_results: None,
+                },
+            })
+            .unwrap();
+        }
+
+        let drained =
+            drain_observer_events_budgeted(&mut rx, &mut ready, &pipeline, &metrics, 2).await;
+
+        assert_eq!(drained, 2);
+        assert!(
+            rx.try_recv().is_ok(),
+            "one event should remain for a later tick"
+        );
     }
 }

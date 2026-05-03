@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use reqwest::Client;
 use tokio::sync::mpsc;
+#[cfg(test)]
 use tokio::task::JoinSet;
-use tracing::error;
 
 use previa_runner::{
     PipelineStep, PreparedHttpStep, RuntimeEnvGroup, RuntimeSpec, StepExecutionResult,
@@ -66,31 +66,16 @@ where
     }
 
     pub async fn run(mut self) {
-        let mut tasks = JoinSet::new();
-        loop {
-            tokio::select! {
-                maybe_request = self.request_rx.recv() => {
-                    let Some(request) = maybe_request else {
-                        break;
-                    };
-                    self.ready_to_send.fetch_sub(1, Ordering::SeqCst);
-                    if self.token.is_cancelled() {
-                        break;
-                    }
-                    self.spawn_observer(&mut tasks, request);
-                }
-                Some(joined) = tasks.join_next(), if !tasks.is_empty() => {
-                    log_observer_join(joined);
-                }
+        while let Some(request) = self.request_rx.recv().await {
+            self.ready_to_send.fetch_sub(1, Ordering::SeqCst);
+            if self.token.is_cancelled() {
+                break;
             }
-        }
-
-        while let Some(joined) = tasks.join_next().await {
-            log_observer_join(joined);
+            self.spawn_observer(request);
         }
     }
 
-    fn spawn_observer(&self, tasks: &mut JoinSet<()>, request: ReadyWaveRequest<C>) {
+    fn spawn_observer(&self, request: ReadyWaveRequest<C>) {
         self.response_in_flight.fetch_add(1, Ordering::SeqCst);
 
         let client = Arc::clone(&self.client);
@@ -101,9 +86,10 @@ where
         let observer_tx = self.observer_tx.clone();
         let token = self.token.clone();
 
-        tasks.spawn(async move {
+        tokio::spawn(async move {
             {
                 let mut lock = metrics.lock().await;
+                lock.record_dispatch_started();
                 lock.record_http_start();
             }
 
@@ -153,14 +139,6 @@ where
                 result,
             });
         });
-    }
-}
-
-fn log_observer_join(joined: Result<(), tokio::task::JoinError>) {
-    if let Err(err) = joined {
-        if !err.is_cancelled() {
-            error!("wave response observer task failed: {err}");
-        }
     }
 }
 
@@ -228,6 +206,44 @@ mod tests {
         })
         .await
         .expect("sender should start all requests while response tasks are blocked");
+
+        drop(tx);
+        sender.abort();
+    }
+
+    #[tokio::test]
+    async fn sender_accepts_many_requests_even_when_observers_never_finish() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let started = Arc::new(AtomicUsize::new(0));
+        let blocker = Arc::new(Notify::new());
+
+        let sender_started = Arc::clone(&started);
+        let sender_blocker = Arc::clone(&blocker);
+        let sender = tokio::spawn(run_test_sender(
+            rx,
+            sender_started,
+            move |_payload: usize| {
+                let blocker = Arc::clone(&sender_blocker);
+                async move {
+                    blocker.notified().await;
+                }
+            },
+        ));
+
+        for payload in 0..10_000 {
+            tx.send(TestReadyWaveRequest { payload }).unwrap();
+        }
+
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if started.load(Ordering::SeqCst) == 10_000 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("sender hot path should accept requests even with blocked observers");
 
         drop(tx);
         sender.abort();

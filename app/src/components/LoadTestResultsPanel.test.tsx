@@ -246,6 +246,43 @@ describe("LoadTestResultsPanel", () => {
     });
   });
 
+  it("prefers dispatch started counters over HTTP started counters", () => {
+    const metrics: LoadTestMetrics = {
+      ...emptyMetrics,
+      rpsHistory: [
+        {
+          timestamp: 1_000,
+          rps: 0,
+          httpStarted: 0,
+          dispatchStarted: 0,
+          runners: [
+            { runnerId: "runner-a", httpStarted: 0, dispatchStarted: 0, rps: 0 },
+            { runnerId: "runner-b", httpStarted: 0, dispatchStarted: 0, rps: 0 },
+          ],
+        },
+        {
+          timestamp: 2_000,
+          rps: 0,
+          httpStarted: 10,
+          dispatchStarted: 30,
+          targetRpsLimit: 40,
+          runners: [
+            { runnerId: "runner-a", httpStarted: 1, dispatchStarted: 10, rps: 1 },
+            { runnerId: "runner-b", httpStarted: 2, dispatchStarted: 20, rps: 2 },
+          ],
+        },
+      ],
+    };
+
+    expect(buildRpsChartData(metrics, null).data[1]).toEqual({
+      time: 1,
+      rpsTotal: 30,
+      runner0: 10,
+      runner1: 20,
+      targetRpsLimit: 40,
+    });
+  });
+
   it("does not use cumulative runner RPS for the first HTTP chart sample", () => {
     const metrics: LoadTestMetrics = {
       ...emptyMetrics,
@@ -320,6 +357,10 @@ describe("LoadTestResultsPanel", () => {
           curveAdherence: 95,
           missedStarts: 20,
           readyRequests: 50,
+          dispatchStarted: 120,
+          schedulerLagMs: 400,
+          schedulerLaggedStarts: 12,
+          outstandingRequests: 90,
           runtimeLaggedStarts: 7,
           dependencyLimitedStarts: 3,
         }}
@@ -334,6 +375,14 @@ describe("LoadTestResultsPanel", () => {
     expect(screen.getByText("20")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.readyRequests")).toBeInTheDocument();
     expect(screen.getByText("50")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.dispatchStarted")).toBeInTheDocument();
+    expect(screen.getByText("120")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.schedulerLagMs")).toBeInTheDocument();
+    expect(screen.getByText("400ms")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.schedulerLaggedStarts")).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.observerBacklog")).toBeInTheDocument();
+    expect(screen.getByText("90")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.runtimeLaggedStarts")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.dependencyLimitedStarts")).toBeInTheDocument();

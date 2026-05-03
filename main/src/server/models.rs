@@ -680,6 +680,8 @@ pub struct ConsolidatedLoadMetrics {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dispatch_submitted: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatch_started: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub http_send_returned: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_body_completed: Option<usize>,
@@ -687,6 +689,10 @@ pub struct ConsolidatedLoadMetrics {
     pub dependency_limited_starts: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_lag_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_lagged_starts: Option<usize>,
     pub rps: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_intensity: Option<f64>,
@@ -788,10 +794,13 @@ pub struct RunnerLoadMetricsPoint {
     pub http_started: Option<usize>,
     pub http_completed: Option<usize>,
     pub dispatch_submitted: Option<usize>,
+    pub dispatch_started: Option<usize>,
     pub http_send_returned: Option<usize>,
     pub response_body_completed: Option<usize>,
     pub dependency_limited_starts: Option<usize>,
     pub runtime_lagged_starts: Option<usize>,
+    pub scheduler_lag_ms: Option<u64>,
+    pub scheduler_lagged_starts: Option<usize>,
     pub rps: f64,
     pub start_time: u64,
     pub elapsed_ms: u64,

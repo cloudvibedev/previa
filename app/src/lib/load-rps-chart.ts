@@ -22,6 +22,10 @@ function roundOne(value: number) {
   return Math.round(value * 10) / 10;
 }
 
+function dispatchStarted(point: { dispatchStarted?: number; httpStarted?: number }) {
+  return point.dispatchStarted ?? point.httpStarted;
+}
+
 function sampleWaveIntensity(config: WaveLoadConfig, elapsedMs: number) {
   const points = [...config.points].sort((a, b) => a.atMs - b.atMs);
   const last = points[points.length - 1];
@@ -69,8 +73,8 @@ function estimateTargetRpsLimit(
 export function buildRpsChartData(metrics: LoadTestMetrics, waveConfig: WaveLoadConfig | null) {
   const history = metrics.rpsHistory ?? [];
   const usesHttpRps = history.some((point) =>
-    typeof point.httpStarted === "number"
-    || point.runners?.some((runner) => typeof runner.httpStarted === "number"),
+    typeof dispatchStarted(point) === "number"
+    || point.runners?.some((runner) => typeof dispatchStarted(runner) === "number"),
   );
   const runnerIds = usesHttpRps
     ? Array.from(
@@ -120,11 +124,13 @@ export function buildRpsChartData(metrics: LoadTestMetrics, waveConfig: WaveLoad
         const key = runnerKeyById.get(runner.runnerId);
         if (!key) continue;
         const previousRunner = previous?.runners?.find((item) => item.runnerId === runner.runnerId);
+        const currentStarted = dispatchStarted(runner);
+        const previousStarted = previousRunner ? dispatchStarted(previousRunner) : undefined;
         const intervalRps = previousRunner
-          && typeof previousRunner.httpStarted === "number"
-          && typeof runner.httpStarted === "number"
+          && typeof previousStarted === "number"
+          && typeof currentStarted === "number"
           && intervalSeconds > 0
-          ? Math.max(0, (runner.httpStarted - previousRunner.httpStarted) / intervalSeconds)
+          ? Math.max(0, (currentStarted - previousStarted) / intervalSeconds)
           : 0;
         const rounded = roundOne(intervalRps);
         row[key] = rounded;
@@ -134,11 +140,12 @@ export function buildRpsChartData(metrics: LoadTestMetrics, waveConfig: WaveLoad
       return row;
     }
 
-    const previousHttpStarted = previous?.httpStarted;
+    const previousHttpStarted = previous ? dispatchStarted(previous) : undefined;
+    const currentHttpStarted = dispatchStarted(point);
     const total = typeof previousHttpStarted === "number"
-      && typeof point.httpStarted === "number"
+      && typeof currentHttpStarted === "number"
       && intervalSeconds > 0
-      ? Math.max(0, (point.httpStarted - previousHttpStarted) / intervalSeconds)
+      ? Math.max(0, (currentHttpStarted - previousHttpStarted) / intervalSeconds)
       : 0;
     row.rpsTotal = roundOne(total);
     return row;
