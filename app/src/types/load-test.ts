@@ -140,6 +140,7 @@ export interface LoadLifecycleBucket {
 
 /** Slim payload sent by the backend SSE (no latency history/percentiles). */
 export interface RemoteMetricsEvent {
+  snapshotMode?: "live" | "final";
   totalStarted?: number;
   totalSent: number;
   totalSuccess: number;
@@ -181,6 +182,7 @@ export interface RemoteMetricsEvent {
 
 /** Rich client-side metrics used by UI & storage. */
 export interface LoadTestMetrics {
+  snapshotMode?: "live" | "final";
   totalStarted?: number;
   totalSent: number;
   totalSuccess: number;

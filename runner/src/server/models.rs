@@ -100,6 +100,13 @@ pub struct LoadDispatchBucket {
     pub count: usize,
 }
 
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum LoadMetricsSnapshotMode {
+    Live,
+    Final,
+}
+
 #[derive(Debug, Serialize, Clone, Default, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadLifecycleBucket {
@@ -144,6 +151,8 @@ pub struct LoadErrorSample {
 #[derive(Debug, Serialize, Clone, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadTestMetrics {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_mode: Option<LoadMetricsSnapshotMode>,
     pub total_started: usize,
     pub total_sent: usize,
     pub total_success: usize,
@@ -224,6 +233,7 @@ pub struct LoadTestMetrics {
 impl Default for LoadTestMetrics {
     fn default() -> Self {
         Self {
+            snapshot_mode: None,
             total_started: 0,
             total_sent: 0,
             total_success: 0,

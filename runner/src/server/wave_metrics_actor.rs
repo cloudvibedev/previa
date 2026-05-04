@@ -1,6 +1,8 @@
 use tokio::sync::{mpsc, watch};
 
-use crate::server::metrics::{MetricsAccumulator, WaveMetricsSnapshot};
+use crate::server::metrics::{MetricsAccumulator, MetricsSnapshotScope, WaveMetricsSnapshot};
+#[cfg(test)]
+use crate::server::models::LoadMetricsSnapshotMode;
 use crate::server::models::{LoadTestMetrics, RunnerInfoResponse};
 use crate::server::wave_scheduler::WaveSchedulerMetric;
 
@@ -63,6 +65,7 @@ pub enum WaveMetricEvent {
         wave: WaveMetricsSnapshot,
         runtime: Option<RunnerInfoResponse>,
         duration_ms: Option<u64>,
+        scope: MetricsSnapshotScope,
     },
 }
 
@@ -74,6 +77,7 @@ pub async fn run_wave_metrics_actor(
     let mut latest_wave: Option<WaveMetricsSnapshot> = None;
     let mut latest_runtime: Option<RunnerInfoResponse> = None;
     let mut latest_duration_ms: Option<u64> = None;
+    let mut latest_scope = MetricsSnapshotScope::Full;
 
     while let Some(event) = event_rx.recv().await {
         let mut should_publish = false;
@@ -156,10 +160,12 @@ pub async fn run_wave_metrics_actor(
                 wave,
                 runtime,
                 duration_ms,
+                scope,
             } => {
                 latest_wave = Some(wave);
                 latest_runtime = runtime;
                 latest_duration_ms = duration_ms;
+                latest_scope = scope;
                 should_publish = true;
             }
         }
@@ -171,6 +177,7 @@ pub async fn run_wave_metrics_actor(
                 latest_duration_ms,
                 latest_runtime.clone(),
                 latest_wave,
+                latest_scope,
             );
         }
     }
@@ -181,6 +188,7 @@ pub async fn run_wave_metrics_actor(
         latest_duration_ms,
         latest_runtime,
         latest_wave,
+        MetricsSnapshotScope::Full,
     );
 }
 
@@ -190,8 +198,9 @@ fn publish_snapshot(
     duration_ms: Option<u64>,
     runtime: Option<RunnerInfoResponse>,
     wave: Option<WaveMetricsSnapshot>,
+    scope: MetricsSnapshotScope,
 ) {
-    let snapshot = accumulator.snapshot_with_wave(duration_ms, runtime, wave);
+    let snapshot = accumulator.snapshot_with_wave_scope(duration_ms, runtime, wave, scope);
     let _ = snapshot_tx.send(snapshot);
 }
 
@@ -285,5 +294,63 @@ mod tests {
         assert_eq!(snapshot.lifecycle_buckets.len(), 1);
         assert_eq!(snapshot.lifecycle_buckets[0].planned, 3);
         assert_eq!(snapshot.lifecycle_buckets[0].http_send_returned, 1);
+    }
+
+    #[tokio::test]
+    async fn metrics_actor_publishes_scoped_live_snapshot() {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (snapshot_tx, mut snapshot_rx) = watch::channel(LoadTestMetrics::default());
+
+        let actor = tokio::spawn(run_wave_metrics_actor(event_rx, snapshot_tx));
+
+        event_tx
+            .send(WaveMetricEvent::Scheduler(
+                WaveSchedulerMetric::DispatchScheduled {
+                    elapsed_ms: 0,
+                    count: 10,
+                },
+            ))
+            .unwrap();
+        event_tx
+            .send(WaveMetricEvent::Scheduler(
+                WaveSchedulerMetric::DispatchScheduled {
+                    elapsed_ms: 1_000,
+                    count: 20,
+                },
+            ))
+            .unwrap();
+        event_tx
+            .send(WaveMetricEvent::Snapshot {
+                wave: WaveMetricsSnapshot {
+                    target_intensity: 10.0,
+                    target_rps_limit: 100.0,
+                    in_flight: 0,
+                    runner_max_rps: 1000.0,
+                    tick_ms: 100,
+                    scheduled_starts: 30,
+                    missed_starts: 0,
+                    ready_requests: 0,
+                    active_pipelines: 0,
+                    outstanding_requests: 0,
+                },
+                runtime: None,
+                duration_ms: None,
+                scope: MetricsSnapshotScope::LiveWindow {
+                    from_elapsed_ms: 1_000,
+                    through_elapsed_ms: 1_000,
+                },
+            })
+            .unwrap();
+
+        snapshot_rx.changed().await.unwrap();
+        let snapshot = snapshot_rx.borrow().clone();
+
+        assert_eq!(snapshot.snapshot_mode, Some(LoadMetricsSnapshotMode::Live));
+        assert_eq!(snapshot.lifecycle_buckets.len(), 1);
+        assert_eq!(snapshot.lifecycle_buckets[0].elapsed_ms, 1_000);
+        assert_eq!(snapshot.lifecycle_buckets[0].planned, 20);
+
+        drop(event_tx);
+        actor.await.unwrap();
     }
 }

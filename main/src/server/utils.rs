@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::server::models::{
     RunnerLoadDispatchBucket, RunnerLoadLatencyBucket, RunnerLoadLifecycleBucket,
-    RunnerLoadMetricsPoint,
+    RunnerLoadMetricsPoint, RunnerLoadSnapshotMode,
 };
 
 pub fn now_ms() -> u64 {
@@ -33,6 +33,7 @@ pub fn parse_runner_load_metrics(payload: &Value) -> Option<RunnerLoadMetricsPoi
     let elapsed_ms = get_u64_field(payload, "elapsedMs")?;
 
     Some(RunnerLoadMetricsPoint {
+        snapshot_mode: parse_runner_load_snapshot_mode(payload),
         total_started: get_usize_field(payload, "totalStarted"),
         total_sent,
         total_success,
@@ -73,6 +74,14 @@ pub fn parse_runner_load_metrics(payload: &Value) -> Option<RunnerLoadMetricsPoi
         dispatch_buckets: parse_dispatch_buckets(payload),
         lifecycle_buckets: parse_lifecycle_buckets(payload),
     })
+}
+
+fn parse_runner_load_snapshot_mode(payload: &Value) -> Option<RunnerLoadSnapshotMode> {
+    match payload.get("snapshotMode").and_then(Value::as_str) {
+        Some("live") => Some(RunnerLoadSnapshotMode::Live),
+        Some("final") => Some(RunnerLoadSnapshotMode::Final),
+        _ => None,
+    }
 }
 
 pub fn parse_runner_duration_ms(payload: &Value) -> Option<u64> {

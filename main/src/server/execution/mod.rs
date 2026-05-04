@@ -18,9 +18,9 @@ pub use load::{
     StartLoadExecutionError, sse_response_for_started_load_execution, start_load_execution,
 };
 pub use load_batch::{
-    add_load_context_fields, drain_load_chunk, flush_load_batches,
-    forward_runner_stream_load_chunked, rebuild_final_rps_history, snapshot_consolidated_metrics,
-    snapshot_latest_lines,
+    LoadTelemetryState, add_load_context_fields, drain_load_chunk, flush_load_batches,
+    forward_runner_stream_load_chunked, rebuild_final_rps_history,
+    snapshot_telemetry_consolidated_metrics, snapshot_telemetry_lines, snapshot_telemetry_map,
 };
 pub use node_plan::{
     calculate_node_plan, collect_runner_statuses, parse_runner_endpoints, split_even,

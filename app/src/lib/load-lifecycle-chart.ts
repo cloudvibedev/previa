@@ -73,14 +73,29 @@ function roundOne(value: number) {
 
 export function buildLifecycleChartData(metrics: LoadTestMetrics): LifecycleChartData {
   const history = metrics.rpsHistory ?? [];
-  if (history.length === 0) return { data: [], series: SERIES };
+  if (history.length === 0 && (!metrics.lifecycleBuckets || metrics.lifecycleBuckets.length === 0)) {
+    return { data: [], series: SERIES };
+  }
 
   const rows = new Map<number, LifecycleChartRow>();
+  const directRowTimes = new Set<number>();
+
+  for (const bucket of metrics.lifecycleBuckets ?? []) {
+    const time = Math.max(0, Math.floor(bucket.elapsedMs / 1000));
+    const row = ensureRow(rows, time);
+    row.planned += bucket.planned ?? 0;
+    row.sendStarted += bucket.sendStarted ?? 0;
+    row.httpStarted += bucket.httpStarted ?? 0;
+    row.httpSendReturned += bucket.httpSendReturned ?? 0;
+    row.responseBodyCompleted += bucket.responseBodyCompleted ?? 0;
+    directRowTimes.add(time);
+  }
 
   for (let index = 0; index < history.length; index += 1) {
     const point = history[index];
     const previous = history[index - 1];
     const time = bucketSecond(point, metrics);
+    if (directRowTimes.has(time)) continue;
     const row = ensureRow(rows, time);
     const directBucket = point.lifecycleBucket
       ?? metrics.lifecycleBuckets?.find((bucket) => bucket.elapsedMs === time * 1000);

@@ -665,6 +665,12 @@ pub struct RunnerLoadLine {
     pub payload: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunnerLoadSnapshotMode {
+    Live,
+    Final,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConsolidatedLoadMetrics {
@@ -840,6 +846,7 @@ pub struct E2eHistoryAccumulator {
 
 #[derive(Debug, Clone)]
 pub struct RunnerLoadMetricsPoint {
+    pub snapshot_mode: Option<RunnerLoadSnapshotMode>,
     pub total_started: Option<usize>,
     pub total_sent: usize,
     pub total_success: usize,

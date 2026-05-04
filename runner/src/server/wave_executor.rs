@@ -12,7 +12,7 @@ use previa_runner::{Pipeline, RuntimeEnvGroup, RuntimeSpec};
 use crate::server::load_wave::{
     calculate_dispatch_tick_ms, local_rps_limit, sample_intensity, timeline_end_ms,
 };
-use crate::server::metrics::WaveMetricsSnapshot;
+use crate::server::metrics::{MetricsSnapshotScope, WaveMetricsSnapshot};
 use crate::server::models::{LoadProfile, LoadTestMetrics};
 use crate::server::runtime::RuntimeSampler;
 use crate::server::sse::{SseMessage, send_sse_or_cancel};
@@ -23,6 +23,9 @@ use crate::server::wave_dispatcher::{
 use crate::server::wave_metrics_actor::{WaveMetricEvent, run_wave_metrics_actor};
 use crate::server::wave_scheduler::{WaveSchedulerMetric, spawn_wave_scheduler_thread};
 use crate::server::wave_sender::{ReadyWaveRequest, WaveSender, spawn_wave_sender_thread};
+
+const WAVE_LIVE_METRICS_INTERVAL_MS: u64 = 1_000;
+const WAVE_LIVE_BUCKET_LAG_MS: u64 = 1_000;
 
 pub async fn run_wave_load(
     load: LoadProfile,
@@ -122,28 +125,43 @@ pub async fn run_wave_load(
         observer_token.clone(),
     );
     let sender_handle = spawn_wave_sender_thread(sender);
+    let mut next_live_metrics_at_ms = 0u64;
+    let mut next_live_bucket_from_ms = 0u64;
 
     while !token.is_cancelled() && started.elapsed().as_millis() as u64 <= end_ms {
-        let dispatcher_snapshot = *dispatcher_snapshot_rx.borrow();
-        let scheduled_total = snapshot_rx.borrow().scheduled_starts.unwrap_or_default();
-        send_metrics_snapshot(SnapshotArgs {
-            load: &load,
-            started,
-            end_ms,
-            tick_ms,
-            scheduled_total,
-            missed_total: missed_starts.load(Ordering::SeqCst),
-            ready_requests: dispatcher_snapshot.ready_requests(),
-            response_in_flight: response_in_flight.load(Ordering::SeqCst),
-            metric_tx: &metric_tx,
-            snapshot_rx: &mut snapshot_rx,
-            runtime_sampler: &runtime_sampler,
-            tx: &tx,
-            token: &token,
-            event: "metrics",
-            duration_ms: None,
-        })
-        .await;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        if elapsed_ms >= next_live_metrics_at_ms {
+            if let Some(through_elapsed_ms) = closed_bucket_through_elapsed_ms(elapsed_ms) {
+                if through_elapsed_ms >= next_live_bucket_from_ms {
+                    let dispatcher_snapshot = *dispatcher_snapshot_rx.borrow();
+                    let scheduled_total = snapshot_rx.borrow().scheduled_starts.unwrap_or_default();
+                    send_metrics_snapshot(SnapshotArgs {
+                        load: &load,
+                        started,
+                        end_ms,
+                        tick_ms,
+                        scheduled_total,
+                        missed_total: missed_starts.load(Ordering::SeqCst),
+                        ready_requests: dispatcher_snapshot.ready_requests(),
+                        response_in_flight: response_in_flight.load(Ordering::SeqCst),
+                        metric_tx: &metric_tx,
+                        snapshot_rx: &mut snapshot_rx,
+                        runtime_sampler: &runtime_sampler,
+                        tx: &tx,
+                        token: &token,
+                        event: "metrics",
+                        duration_ms: None,
+                        scope: MetricsSnapshotScope::LiveWindow {
+                            from_elapsed_ms: next_live_bucket_from_ms,
+                            through_elapsed_ms,
+                        },
+                    })
+                    .await;
+                    next_live_bucket_from_ms = through_elapsed_ms.saturating_add(1_000);
+                }
+            }
+            next_live_metrics_at_ms = elapsed_ms.saturating_add(WAVE_LIVE_METRICS_INTERVAL_MS);
+        }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(tick_ms.min(250))).await;
     }
@@ -156,26 +174,39 @@ pub async fn run_wave_load(
             break;
         }
 
-        let scheduled_total = snapshot_rx.borrow().scheduled_starts.unwrap_or_default();
-        let ready_requests = dispatcher_snapshot_rx.borrow().ready_requests();
-        send_metrics_snapshot(SnapshotArgs {
-            load: &load,
-            started,
-            end_ms,
-            tick_ms,
-            scheduled_total,
-            missed_total: missed_starts.load(Ordering::SeqCst),
-            ready_requests,
-            response_in_flight: response_in_flight.load(Ordering::SeqCst),
-            metric_tx: &metric_tx,
-            snapshot_rx: &mut snapshot_rx,
-            runtime_sampler: &runtime_sampler,
-            tx: &tx,
-            token: &token,
-            event: "metrics",
-            duration_ms: None,
-        })
-        .await;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        if elapsed_ms >= next_live_metrics_at_ms {
+            if let Some(through_elapsed_ms) = closed_bucket_through_elapsed_ms(elapsed_ms) {
+                if through_elapsed_ms >= next_live_bucket_from_ms {
+                    let scheduled_total = snapshot_rx.borrow().scheduled_starts.unwrap_or_default();
+                    let ready_requests = dispatcher_snapshot_rx.borrow().ready_requests();
+                    send_metrics_snapshot(SnapshotArgs {
+                        load: &load,
+                        started,
+                        end_ms,
+                        tick_ms,
+                        scheduled_total,
+                        missed_total: missed_starts.load(Ordering::SeqCst),
+                        ready_requests,
+                        response_in_flight: response_in_flight.load(Ordering::SeqCst),
+                        metric_tx: &metric_tx,
+                        snapshot_rx: &mut snapshot_rx,
+                        runtime_sampler: &runtime_sampler,
+                        tx: &tx,
+                        token: &token,
+                        event: "metrics",
+                        duration_ms: None,
+                        scope: MetricsSnapshotScope::LiveWindow {
+                            from_elapsed_ms: next_live_bucket_from_ms,
+                            through_elapsed_ms,
+                        },
+                    })
+                    .await;
+                    next_live_bucket_from_ms = through_elapsed_ms.saturating_add(1_000);
+                }
+            }
+            next_live_metrics_at_ms = elapsed_ms.saturating_add(WAVE_LIVE_METRICS_INTERVAL_MS);
+        }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(tick_ms.min(250))).await;
     }
@@ -216,6 +247,7 @@ pub async fn run_wave_load(
         token: &token,
         event: "metrics",
         duration_ms: None,
+        scope: MetricsSnapshotScope::Full,
     })
     .await
         && !token.is_cancelled()
@@ -249,6 +281,7 @@ struct SnapshotArgs<'a> {
     token: &'a tokio_util::sync::CancellationToken,
     event: &'static str,
     duration_ms: Option<u64>,
+    scope: MetricsSnapshotScope,
 }
 
 async fn send_metrics_snapshot(args: SnapshotArgs<'_>) -> bool {
@@ -270,6 +303,7 @@ async fn send_metrics_snapshot(args: SnapshotArgs<'_>) -> bool {
         ),
         runtime,
         duration_ms: args.duration_ms,
+        scope: args.scope,
     });
 
     let _ = tokio::time::timeout(
@@ -284,6 +318,12 @@ async fn send_metrics_snapshot(args: SnapshotArgs<'_>) -> bool {
         serde_json::to_value(snapshot).unwrap_or(Value::Null),
         args.token,
     )
+}
+
+fn closed_bucket_through_elapsed_ms(elapsed_ms: u64) -> Option<u64> {
+    elapsed_ms
+        .checked_sub(WAVE_LIVE_BUCKET_LAG_MS)
+        .map(|value| (value / 1_000).saturating_mul(1_000))
 }
 
 fn wave_snapshot(

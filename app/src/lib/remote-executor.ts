@@ -219,6 +219,9 @@ function extractRemoteMetrics(value: unknown): RemoteMetricsEvent | null {
   }
 
   return {
+    snapshotMode: value.snapshotMode === "live" || value.snapshotMode === "final"
+      ? value.snapshotMode
+      : undefined,
     totalSent: totalSent ?? 0,
     totalStarted,
     totalSuccess: totalSuccess ?? 0,
@@ -389,6 +392,26 @@ function aggregateLineMetrics(lines: unknown[]): RemoteMetricsEvent | null {
     .filter((item): item is RemoteMetricsEvent => item !== null);
 
   if (metrics.length === 0) return null;
+  const lifecycleByElapsed = new Map<number, LoadLifecycleBucket>();
+  for (const item of metrics) {
+    for (const bucket of item.lifecycleBuckets ?? []) {
+      const current = lifecycleByElapsed.get(bucket.elapsedMs);
+      lifecycleByElapsed.set(bucket.elapsedMs, {
+        elapsedMs: bucket.elapsedMs,
+        planned: (current?.planned ?? 0) + (bucket.planned ?? 0),
+        slotEnqueued: (current?.slotEnqueued ?? 0) + (bucket.slotEnqueued ?? 0),
+        requestPrepared: (current?.requestPrepared ?? 0) + (bucket.requestPrepared ?? 0),
+        requestEnqueued: (current?.requestEnqueued ?? 0) + (bucket.requestEnqueued ?? 0),
+        sendTaskSpawned: (current?.sendTaskSpawned ?? 0) + (bucket.sendTaskSpawned ?? 0),
+        sendStarted: (current?.sendStarted ?? 0) + (bucket.sendStarted ?? 0),
+        httpStarted: (current?.httpStarted ?? 0) + (bucket.httpStarted ?? 0),
+        httpSendReturned: (current?.httpSendReturned ?? 0) + (bucket.httpSendReturned ?? 0),
+        responseBodyCompleted: (current?.responseBodyCompleted ?? 0) + (bucket.responseBodyCompleted ?? 0),
+        dispatcherLagged: (current?.dispatcherLagged ?? 0) + (bucket.dispatcherLagged ?? 0),
+        runtimeLagged: (current?.runtimeLagged ?? 0) + (bucket.runtimeLagged ?? 0),
+      });
+    }
+  }
 
   const aggregated = metrics.reduce<RemoteMetricsEvent>(
     (acc, item) => {
@@ -465,6 +488,8 @@ function aggregateLineMetrics(lines: unknown[]): RemoteMetricsEvent | null {
 
   return {
     ...aggregated,
+    snapshotMode: metrics.some((item) => item.snapshotMode === "final") ? "final" : metrics[0]?.snapshotMode,
+    lifecycleBuckets: Array.from(lifecycleByElapsed.values()).sort((a, b) => a.elapsedMs - b.elapsedMs),
     curveAdherence: computeCurveAdherence(
       aggregated.scheduledStarts,
       aggregated.missedStarts,
@@ -526,8 +551,13 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
   const errors = pickStringArray(snapshot.errors);
 
   const elapsedMs = toNumber(consolidated?.elapsedMs) ?? aggregated?.elapsedMs ?? 0;
+  const lifecycleBuckets = Array.isArray(consolidated?.lifecycleBuckets)
+    ? extractLifecycleBuckets(consolidated.lifecycleBuckets)
+    : aggregated?.lifecycleBuckets ?? [];
+  const lifecycleBucket = lifecycleBuckets.find((bucket) => bucket.elapsedMs === elapsedMs);
 
   return {
+    snapshotMode: aggregated?.snapshotMode,
     totalSent,
     totalStarted,
     httpStarted,
@@ -542,7 +572,8 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
     rpsHistory: rps > 0 ? [{
       timestamp: startTime + elapsedMs,
       elapsedMs,
-      rps,
+      rps: lifecycleBucket?.httpStarted ?? rps,
+      lifecycleBucket,
       totalStarted,
       totalSent,
       httpStarted,
@@ -568,6 +599,7 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
     runnerResourceHistory: Array.isArray(snapshot.lines)
       ? extractRunnerResourcePoints(snapshot.lines)
       : [],
+    lifecycleBuckets,
     errors,
     startTime,
     elapsedMs,
@@ -1089,7 +1121,7 @@ function buildRpsHistoryPoint(
         schedulerLaggedStarts: metrics.schedulerLaggedStarts,
         totalStarted: metrics.totalStarted,
         totalSent: metrics.totalSent,
-        rps: metrics.rps,
+        rps: lifecycleBucket?.httpStarted ?? metrics.rps,
         scheduledStarts: metrics.scheduledStarts,
         missedStarts: metrics.missedStarts,
         readyRequests: metrics.readyRequests,
@@ -1114,7 +1146,7 @@ function buildRpsHistoryPoint(
       ? startTime + sampleElapsedMs
       : fallbackTimestamp,
     elapsedMs: sampleElapsedMs,
-    rps: consolidated?.rps ?? event.rps,
+    rps: lifecycleBucket?.httpStarted ?? consolidated?.rps ?? event.rps,
     dispatchBucket: dispatchBucket !== undefined ? dispatchBucket : undefined,
     lifecycleBucket,
     totalStarted: consolidated?.totalStarted ?? event.totalStarted,
@@ -1171,6 +1203,7 @@ export function runRemoteLoadTest(
       lastRpsPointTime = now;
     }
     return {
+      snapshotMode: event.snapshotMode,
       totalSent: consolidated?.totalSent ?? event.totalSent,
       totalStarted: consolidated?.totalStarted ?? event.totalStarted,
       httpStarted: consolidated?.httpStarted ?? event.httpStarted,
@@ -1545,6 +1578,7 @@ export function reconnectToLoadExecution(
       lastRpsPointTime = now;
     }
     return {
+      snapshotMode: event.snapshotMode,
       totalSent: consolidated?.totalSent ?? event.totalSent,
       totalStarted: consolidated?.totalStarted ?? event.totalStarted,
       httpStarted: consolidated?.httpStarted ?? event.httpStarted,

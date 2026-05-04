@@ -16,13 +16,26 @@ use crate::server::execution::scheduler::SharedValue;
 use crate::server::execution::snapshot::build_live_load_snapshot_payload;
 use crate::server::models::{
     ConsolidatedLoadLifecycleBucket, ConsolidatedLoadMetrics, LoadEventContext,
-    LoadLatencyAccumulator, LoadLatencySummary, RunnerLoadLine,
+    LoadLatencyAccumulator, LoadLatencySummary, RunnerLoadDispatchBucket,
+    RunnerLoadLifecycleBucket, RunnerLoadLine, RunnerLoadSnapshotMode,
 };
 use crate::server::state::TRANSACTION_ID_HEADER;
 use crate::server::utils::{now_ms, parse_runner_duration_ms, parse_runner_load_metrics};
 
 const RPS_HISTORY_BUCKET_MS: u64 = 1_000;
 const RPS_HISTORY_CORRECTION_WINDOW_MS: u64 = 10_000;
+
+#[derive(Debug, Clone, Default)]
+pub struct LoadTelemetryState {
+    runners: HashMap<String, RunnerLoadTelemetryState>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RunnerLoadTelemetryState {
+    line: Option<RunnerLoadLine>,
+    dispatch_buckets: BTreeMap<u64, RunnerLoadDispatchBucket>,
+    lifecycle_buckets: BTreeMap<u64, RunnerLoadLifecycleBucket>,
+}
 
 pub async fn forward_runner_stream_load_chunked(
     client: &Client,
@@ -31,7 +44,7 @@ pub async fn forward_runner_stream_load_chunked(
     tx: broadcast::Sender<crate::server::models::SseMessage>,
     cancel: CancellationToken,
     load_chunk: Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
-    load_latest: Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
+    load_telemetry: Arc<Mutex<LoadTelemetryState>>,
     load_latency: Arc<Mutex<LoadLatencyAccumulator>>,
     load_errors: Arc<Mutex<Vec<String>>>,
     load_context: Arc<LoadEventContext>,
@@ -65,10 +78,10 @@ pub async fn forward_runner_stream_load_chunked(
         Ok(Ok(response)) => response,
         Ok(Err(err)) => {
             push_load_error(&load_errors, format!("runner request failed: {}", err)).await;
-            refresh_load_snapshot(
+            refresh_load_snapshot_from_telemetry(
                 &execution_id,
                 &snapshot_payload,
-                &load_latest,
+                &load_telemetry,
                 &load_latency,
                 &load_errors,
                 load_context.as_ref(),
@@ -92,10 +105,10 @@ pub async fn forward_runner_stream_load_chunked(
         }
         Err(_) => {
             push_load_error(&load_errors, "runner request timeout".to_owned()).await;
-            refresh_load_snapshot(
+            refresh_load_snapshot_from_telemetry(
                 &execution_id,
                 &snapshot_payload,
-                &load_latest,
+                &load_telemetry,
                 &load_latency,
                 &load_errors,
                 load_context.as_ref(),
@@ -124,10 +137,10 @@ pub async fn forward_runner_stream_load_chunked(
         let body_text = response.text().await.unwrap_or_default();
         let message = format!("runner returned HTTP {}: {}", status, body_text);
         push_load_error(&load_errors, message.clone()).await;
-        refresh_load_snapshot(
+        refresh_load_snapshot_from_telemetry(
             &execution_id,
             &snapshot_payload,
-            &load_latest,
+            &load_telemetry,
             &load_latency,
             &load_errors,
             load_context.as_ref(),
@@ -169,10 +182,10 @@ pub async fn forward_runner_stream_load_chunked(
             Ok(chunk) => chunk,
             Err(err) => {
                 push_load_error(&load_errors, format!("runner stream read error: {}", err)).await;
-                refresh_load_snapshot(
+                refresh_load_snapshot_from_telemetry(
                     &execution_id,
                     &snapshot_payload,
-                    &load_latest,
+                    &load_telemetry,
                     &load_latency,
                     &load_errors,
                     load_context.as_ref(),
@@ -234,19 +247,8 @@ pub async fn forward_runner_stream_load_chunked(
                 lock.insert(node.clone(), line.clone());
             }
 
-            let mut latest_lock = load_latest.lock().await;
-            latest_lock.insert(node.clone(), line);
-            drop(latest_lock);
-            refresh_load_snapshot(
-                &execution_id,
-                &snapshot_payload,
-                &load_latest,
-                &load_latency,
-                &load_errors,
-                load_context.as_ref(),
-                "running",
-            )
-            .await;
+            let mut telemetry_lock = load_telemetry.lock().await;
+            apply_runner_telemetry_line(&mut telemetry_lock, line);
         }
     }
 }
@@ -257,7 +259,7 @@ pub async fn flush_load_batches(
     cancel: CancellationToken,
     stop: CancellationToken,
     load_chunk: Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
-    load_latest: Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
+    load_telemetry: Arc<Mutex<LoadTelemetryState>>,
     load_latency: Arc<Mutex<LoadLatencyAccumulator>>,
     load_errors: Arc<Mutex<Vec<String>>>,
     load_context: Arc<LoadEventContext>,
@@ -279,10 +281,7 @@ pub async fn flush_load_batches(
             continue;
         }
 
-        let latest_snapshot = {
-            let lock = load_latest.lock().await;
-            lock.clone()
-        };
+        let latest_snapshot = snapshot_telemetry_map(&load_telemetry).await;
         let consolidated = {
             let latency_summary = {
                 let lock = load_latency.lock().await;
@@ -297,7 +296,7 @@ pub async fn flush_load_batches(
             }
         }
         let errors = load_errors.lock().await.clone();
-        let latest_lines = snapshot_latest_lines(&load_latest).await;
+        let latest_lines = snapshot_telemetry_lines(&load_telemetry).await;
         snapshot_payload
             .set(build_live_load_snapshot_payload(
                 &execution_id,
@@ -571,6 +570,9 @@ pub fn rebuild_final_rps_history(
     latest_by_node: &HashMap<String, RunnerLoadLine>,
 ) -> Vec<Value> {
     let mut bucket_ms = BTreeMap::<u64, ()>::new();
+    for bucket in &metrics.lifecycle_buckets {
+        bucket_ms.insert(bucket.elapsed_ms, ());
+    }
     for line in latest_by_node.values() {
         let Some(metrics) = parse_runner_load_metrics(&line.payload) else {
             continue;
@@ -614,17 +616,17 @@ fn insert_optional<T: Serialize>(map: &mut Map<String, Value>, key: &str, value:
     }
 }
 
-async fn refresh_load_snapshot(
+async fn refresh_load_snapshot_from_telemetry(
     execution_id: &str,
     snapshot_payload: &SharedValue<Value>,
-    load_latest: &Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
+    load_telemetry: &Arc<Mutex<LoadTelemetryState>>,
     load_latency: &Arc<Mutex<LoadLatencyAccumulator>>,
     load_errors: &Arc<Mutex<Vec<String>>>,
     load_context: &LoadEventContext,
     status: &str,
 ) {
-    let lines = snapshot_latest_lines(load_latest).await;
-    let consolidated = snapshot_consolidated_metrics(load_latest, load_latency).await;
+    let lines = snapshot_telemetry_lines(load_telemetry).await;
+    let consolidated = snapshot_telemetry_consolidated_metrics(load_telemetry, load_latency).await;
     let errors = load_errors.lock().await.clone();
     snapshot_payload
         .set(build_live_load_snapshot_payload(
@@ -638,6 +640,85 @@ async fn refresh_load_snapshot(
         .await;
 }
 
+pub fn apply_runner_telemetry_line(state: &mut LoadTelemetryState, mut line: RunnerLoadLine) {
+    let Some(metrics) = parse_runner_load_metrics(&line.payload) else {
+        let node = line.node.clone();
+        let runner = state.runners.entry(node).or_default();
+        if runner.line.is_none() {
+            runner.line = Some(line);
+        }
+        return;
+    };
+
+    let runner = state.runners.entry(line.node.clone()).or_default();
+    let replaces_bucket_state = metrics.snapshot_mode != Some(RunnerLoadSnapshotMode::Live);
+    if replaces_bucket_state {
+        runner.dispatch_buckets.clear();
+        runner.lifecycle_buckets.clear();
+    }
+
+    for bucket in metrics.dispatch_buckets {
+        runner.dispatch_buckets.insert(bucket.elapsed_ms, bucket);
+    }
+    for bucket in metrics.lifecycle_buckets {
+        runner.lifecycle_buckets.insert(bucket.elapsed_ms, bucket);
+    }
+
+    line.payload = payload_with_merged_buckets(
+        &line.payload,
+        &runner.dispatch_buckets,
+        &runner.lifecycle_buckets,
+    );
+    runner.line = Some(line);
+}
+
+fn payload_with_merged_buckets(
+    payload: &Value,
+    dispatch_buckets: &BTreeMap<u64, RunnerLoadDispatchBucket>,
+    lifecycle_buckets: &BTreeMap<u64, RunnerLoadLifecycleBucket>,
+) -> Value {
+    let mut obj = payload.as_object().cloned().unwrap_or_default();
+    obj.insert(
+        "dispatchBuckets".to_owned(),
+        Value::Array(
+            dispatch_buckets
+                .values()
+                .map(|bucket| {
+                    json!({
+                        "elapsedMs": bucket.elapsed_ms,
+                        "count": bucket.count,
+                    })
+                })
+                .collect(),
+        ),
+    );
+    obj.insert(
+        "lifecycleBuckets".to_owned(),
+        Value::Array(
+            lifecycle_buckets
+                .values()
+                .map(|bucket| {
+                    json!({
+                        "elapsedMs": bucket.elapsed_ms,
+                        "planned": bucket.planned,
+                        "slotEnqueued": bucket.slot_enqueued,
+                        "requestPrepared": bucket.request_prepared,
+                        "requestEnqueued": bucket.request_enqueued,
+                        "sendTaskSpawned": bucket.send_task_spawned,
+                        "sendStarted": bucket.send_started,
+                        "httpStarted": bucket.http_started,
+                        "httpSendReturned": bucket.http_send_returned,
+                        "responseBodyCompleted": bucket.response_body_completed,
+                        "dispatcherLagged": bucket.dispatcher_lagged,
+                        "runtimeLagged": bucket.runtime_lagged,
+                    })
+                })
+                .collect(),
+        ),
+    );
+    Value::Object(obj)
+}
+
 pub async fn drain_load_chunk(
     load_chunk: &Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
 ) -> Vec<RunnerLoadLine> {
@@ -647,23 +728,34 @@ pub async fn drain_load_chunk(
     lines
 }
 
-pub async fn snapshot_latest_lines(
-    load_latest: &Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
+pub async fn snapshot_telemetry_lines(
+    load_telemetry: &Arc<Mutex<LoadTelemetryState>>,
 ) -> Vec<RunnerLoadLine> {
-    let lock = load_latest.lock().await;
-    let mut lines: Vec<RunnerLoadLine> = lock.values().cloned().collect();
+    let lock = load_telemetry.lock().await;
+    let mut lines: Vec<RunnerLoadLine> = lock
+        .runners
+        .values()
+        .filter_map(|runner| runner.line.clone())
+        .collect();
     lines.sort_by(|a, b| a.node.cmp(&b.node));
     lines
 }
 
-pub async fn snapshot_consolidated_metrics(
-    load_latest: &Arc<Mutex<HashMap<String, RunnerLoadLine>>>,
+pub async fn snapshot_telemetry_map(
+    load_telemetry: &Arc<Mutex<LoadTelemetryState>>,
+) -> HashMap<String, RunnerLoadLine> {
+    snapshot_telemetry_lines(load_telemetry)
+        .await
+        .into_iter()
+        .map(|line| (line.node.clone(), line))
+        .collect()
+}
+
+pub async fn snapshot_telemetry_consolidated_metrics(
+    load_telemetry: &Arc<Mutex<LoadTelemetryState>>,
     load_latency: &Arc<Mutex<LoadLatencyAccumulator>>,
 ) -> Option<ConsolidatedLoadMetrics> {
-    let latest_snapshot = {
-        let lock = load_latest.lock().await;
-        lock.clone()
-    };
+    let latest_snapshot = snapshot_telemetry_map(load_telemetry).await;
     let latency_summary = {
         let lock = load_latency.lock().await;
         summarize_load_latency(&lock)
@@ -898,6 +990,7 @@ pub fn consolidate_load_metrics(
     if nodes_reporting == 0 {
         return None;
     }
+    let temporal_curve_adherence = lifecycle_curve_adherence(&lifecycle_by_elapsed);
 
     Some(ConsolidatedLoadMetrics {
         total_started: (total_started_nodes > 0).then_some(total_started),
@@ -936,15 +1029,17 @@ pub fn consolidate_load_metrics(
         ready_requests: (ready_requests_nodes > 0).then_some(ready_requests),
         active_pipelines: (active_pipelines_nodes > 0).then_some(active_pipelines),
         outstanding_requests: (outstanding_requests_nodes > 0).then_some(outstanding_requests),
-        curve_adherence: (scheduled_starts_nodes > 0).then(|| {
-            if scheduled_starts == 0 {
-                100.0
-            } else {
-                let value = ((scheduled_starts.saturating_sub(missed_starts)) as f64
-                    / scheduled_starts as f64)
-                    * 100.0;
-                (value * 100.0).round() / 100.0
-            }
+        curve_adherence: temporal_curve_adherence.or_else(|| {
+            (scheduled_starts_nodes > 0).then(|| {
+                if scheduled_starts == 0 {
+                    100.0
+                } else {
+                    let value = ((scheduled_starts.saturating_sub(missed_starts)) as f64
+                        / scheduled_starts as f64)
+                        * 100.0;
+                    (value * 100.0).round() / 100.0
+                }
+            })
         }),
         avg_latency: latency.avg_latency,
         p95: latency.p95,
@@ -954,6 +1049,25 @@ pub fn consolidate_load_metrics(
         nodes_reporting,
         lifecycle_buckets: lifecycle_by_elapsed.into_values().collect(),
     })
+}
+
+fn lifecycle_curve_adherence(
+    lifecycle_by_elapsed: &BTreeMap<u64, ConsolidatedLoadLifecycleBucket>,
+) -> Option<f64> {
+    let planned_total: usize = lifecycle_by_elapsed
+        .values()
+        .map(|bucket| bucket.planned)
+        .sum();
+    if planned_total == 0 {
+        return None;
+    }
+
+    let absolute_error: usize = lifecycle_by_elapsed
+        .values()
+        .map(|bucket| bucket.planned.abs_diff(bucket.http_started))
+        .sum();
+    let raw = (1.0 - (absolute_error as f64 / planned_total as f64)).max(0.0) * 100.0;
+    Some((raw * 100.0).round() / 100.0)
 }
 
 fn summarize_runner_latency(
@@ -1104,9 +1218,10 @@ mod tests {
     use tokio::sync::Mutex;
 
     use crate::server::execution::load_batch::{
-        add_load_context_fields, build_rps_history_sample, consolidate_load_metrics,
-        drain_load_chunk, merge_runner_error_samples_into, rebuild_final_rps_history,
-        rps_history_elapsed_bucket_ms, rps_history_timestamp, summarize_load_latency,
+        LoadTelemetryState, add_load_context_fields, apply_runner_telemetry_line,
+        build_rps_history_sample, consolidate_load_metrics, drain_load_chunk,
+        merge_runner_error_samples_into, rebuild_final_rps_history, rps_history_elapsed_bucket_ms,
+        rps_history_timestamp, snapshot_telemetry_map, summarize_load_latency,
         upsert_rps_history_samples,
     };
     use crate::server::models::{
@@ -1878,5 +1993,58 @@ mod tests {
 
         let second_read = drain_load_chunk(&chunk).await;
         assert!(second_read.is_empty());
+    }
+
+    #[tokio::test]
+    async fn telemetry_state_merges_live_bucket_windows_per_runner() {
+        let telemetry = Arc::new(Mutex::new(LoadTelemetryState::default()));
+        {
+            let mut lock = telemetry.lock().await;
+            apply_runner_telemetry_line(
+                &mut lock,
+                RunnerLoadLine {
+                    node: "http://runner-a:3000".to_owned(),
+                    runner_event: "metrics".to_owned(),
+                    received_at: 1,
+                    payload: json!({
+                        "snapshotMode": "live",
+                        "totalSent": 10,
+                        "totalSuccess": 10,
+                        "totalError": 0,
+                        "rps": 10.0,
+                        "startTime": 1_000,
+                        "elapsedMs": 1_100,
+                        "lifecycleBuckets": [{ "elapsedMs": 0, "planned": 10, "httpStarted": 9 }]
+                    }),
+                },
+            );
+            apply_runner_telemetry_line(
+                &mut lock,
+                RunnerLoadLine {
+                    node: "http://runner-a:3000".to_owned(),
+                    runner_event: "metrics".to_owned(),
+                    received_at: 2,
+                    payload: json!({
+                        "snapshotMode": "live",
+                        "totalSent": 20,
+                        "totalSuccess": 20,
+                        "totalError": 0,
+                        "rps": 20.0,
+                        "startTime": 1_000,
+                        "elapsedMs": 2_100,
+                        "lifecycleBuckets": [{ "elapsedMs": 1_000, "planned": 20, "httpStarted": 18 }]
+                    }),
+                },
+            );
+        }
+
+        let snapshot = snapshot_telemetry_map(&telemetry).await;
+        let consolidated = consolidate_load_metrics(&snapshot, LoadLatencySummary::default())
+            .expect("expected consolidated telemetry");
+
+        assert_eq!(consolidated.lifecycle_buckets.len(), 2);
+        assert_eq!(consolidated.lifecycle_buckets[0].http_started, 9);
+        assert_eq!(consolidated.lifecycle_buckets[1].http_started, 18);
+        assert_eq!(consolidated.curve_adherence, Some(90.0));
     }
 }

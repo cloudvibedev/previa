@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::server::models::{
-    LoadDispatchBucket, LoadErrorSample, LoadLatencyBucket, LoadLifecycleBucket, LoadTestMetrics,
-    RunnerInfoResponse,
+    LoadDispatchBucket, LoadErrorSample, LoadLatencyBucket, LoadLifecycleBucket,
+    LoadMetricsSnapshotMode, LoadTestMetrics, RunnerInfoResponse,
 };
 use crate::server::utils::{now_ms, round2};
 use previa_runner::{StepExecutionResult, StepRequest, StepResponse};
@@ -19,6 +19,15 @@ pub struct WaveMetricsSnapshot {
     pub ready_requests: usize,
     pub active_pipelines: usize,
     pub outstanding_requests: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetricsSnapshotScope {
+    Full,
+    LiveWindow {
+        from_elapsed_ms: u64,
+        through_elapsed_ms: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -282,6 +291,16 @@ impl MetricsAccumulator {
         runtime: Option<RunnerInfoResponse>,
         wave: Option<WaveMetricsSnapshot>,
     ) -> LoadTestMetrics {
+        self.snapshot_with_wave_scope(duration_ms, runtime, wave, MetricsSnapshotScope::Full)
+    }
+
+    pub fn snapshot_with_wave_scope(
+        &self,
+        duration_ms: Option<u64>,
+        runtime: Option<RunnerInfoResponse>,
+        wave: Option<WaveMetricsSnapshot>,
+        scope: MetricsSnapshotScope,
+    ) -> LoadTestMetrics {
         let now = now_ms();
         let elapsed_ms = now.saturating_sub(self.start_time);
 
@@ -321,6 +340,10 @@ impl MetricsAccumulator {
         });
 
         LoadTestMetrics {
+            snapshot_mode: Some(match scope {
+                MetricsSnapshotScope::Full => LoadMetricsSnapshotMode::Final,
+                MetricsSnapshotScope::LiveWindow { .. } => LoadMetricsSnapshotMode::Live,
+            }),
             total_started: self.total_started,
             total_sent: self.total_sent,
             total_success: self.total_success,
@@ -361,23 +384,19 @@ impl MetricsAccumulator {
             outstanding_requests: wave.as_ref().map(|value| value.outstanding_requests),
             curve_adherence,
             duration_ms,
-            latency_buckets: self
-                .latency_histogram
-                .iter()
-                .map(|(duration_ms, count)| LoadLatencyBucket {
-                    duration_ms: *duration_ms,
-                    count: *count,
-                })
-                .collect(),
-            dispatch_buckets: self
-                .dispatch_buckets
-                .iter()
-                .map(|(elapsed_ms, count)| LoadDispatchBucket {
-                    elapsed_ms: *elapsed_ms,
-                    count: *count,
-                })
-                .collect(),
-            lifecycle_buckets: self.lifecycle_buckets.values().cloned().collect(),
+            latency_buckets: match scope {
+                MetricsSnapshotScope::Full => self
+                    .latency_histogram
+                    .iter()
+                    .map(|(duration_ms, count)| LoadLatencyBucket {
+                        duration_ms: *duration_ms,
+                        count: *count,
+                    })
+                    .collect(),
+                MetricsSnapshotScope::LiveWindow { .. } => Vec::new(),
+            },
+            dispatch_buckets: filtered_dispatch_buckets(&self.dispatch_buckets, scope),
+            lifecycle_buckets: filtered_lifecycle_buckets(&self.lifecycle_buckets, scope),
             latency_sample_count: (self.latency_sample_count > 0)
                 .then_some(self.latency_sample_count),
             latency_total_duration_ms: (self.latency_sample_count > 0)
@@ -400,6 +419,51 @@ impl MetricsAccumulator {
 
 fn lifecycle_bucket_ms(elapsed_ms: u64) -> u64 {
     (elapsed_ms / 1000).saturating_mul(1000)
+}
+
+fn bucket_in_live_window(
+    bucket_elapsed_ms: u64,
+    from_elapsed_ms: u64,
+    through_elapsed_ms: u64,
+) -> bool {
+    bucket_elapsed_ms >= from_elapsed_ms && bucket_elapsed_ms <= through_elapsed_ms
+}
+
+fn filtered_dispatch_buckets(
+    buckets: &BTreeMap<u64, usize>,
+    scope: MetricsSnapshotScope,
+) -> Vec<LoadDispatchBucket> {
+    buckets
+        .iter()
+        .filter(|(elapsed_ms, _)| match scope {
+            MetricsSnapshotScope::Full => true,
+            MetricsSnapshotScope::LiveWindow {
+                from_elapsed_ms,
+                through_elapsed_ms,
+            } => bucket_in_live_window(**elapsed_ms, from_elapsed_ms, through_elapsed_ms),
+        })
+        .map(|(elapsed_ms, count)| LoadDispatchBucket {
+            elapsed_ms: *elapsed_ms,
+            count: *count,
+        })
+        .collect()
+}
+
+fn filtered_lifecycle_buckets(
+    buckets: &BTreeMap<u64, LoadLifecycleBucket>,
+    scope: MetricsSnapshotScope,
+) -> Vec<LoadLifecycleBucket> {
+    buckets
+        .iter()
+        .filter(|(elapsed_ms, _)| match scope {
+            MetricsSnapshotScope::Full => true,
+            MetricsSnapshotScope::LiveWindow {
+                from_elapsed_ms,
+                through_elapsed_ms,
+            } => bucket_in_live_window(**elapsed_ms, from_elapsed_ms, through_elapsed_ms),
+        })
+        .map(|(_, bucket)| bucket.clone())
+        .collect()
 }
 
 pub fn estimate_results_network_bytes(results: &[StepExecutionResult]) -> (u64, u64) {
@@ -512,12 +576,10 @@ mod tests {
                 .sum::<usize>(),
             2
         );
-        assert!(
-            snapshot
-                .dispatch_buckets
-                .iter()
-                .all(|bucket| bucket.elapsed_ms % 1000 == 0)
-        );
+        assert!(snapshot
+            .dispatch_buckets
+            .iter()
+            .all(|bucket| bucket.elapsed_ms % 1000 == 0));
     }
 
     #[test]
@@ -569,6 +631,34 @@ mod tests {
         assert_eq!(bucket.response_body_completed, 1);
         assert_eq!(bucket.dispatcher_lagged, 2);
         assert_eq!(bucket.runtime_lagged, 1);
+    }
+
+    #[test]
+    fn live_snapshot_includes_only_requested_lifecycle_window() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.record_planned_at(0, 10);
+        metrics.record_http_start_at(0);
+        metrics.record_planned_at(1_000, 20);
+        metrics.record_http_start_at(1_000);
+        metrics.record_planned_at(2_000, 30);
+        metrics.record_http_start_at(2_000);
+
+        let snapshot = metrics.snapshot_with_wave_scope(
+            None,
+            None,
+            None,
+            MetricsSnapshotScope::LiveWindow {
+                from_elapsed_ms: 1_000,
+                through_elapsed_ms: 1_000,
+            },
+        );
+
+        assert_eq!(snapshot.snapshot_mode, Some(LoadMetricsSnapshotMode::Live));
+        assert_eq!(snapshot.lifecycle_buckets.len(), 1);
+        assert_eq!(snapshot.lifecycle_buckets[0].elapsed_ms, 1_000);
+        assert_eq!(snapshot.lifecycle_buckets[0].planned, 20);
+        assert_eq!(snapshot.lifecycle_buckets[0].http_started, 1);
     }
 
     #[test]

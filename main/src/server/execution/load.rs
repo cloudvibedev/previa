@@ -8,12 +8,13 @@ use tracing::error;
 
 use crate::server::db::{save_load_history, upsert_load_history};
 use crate::server::execution::{
-    AcquireOutcome, ScheduledExecutionKind, add_load_context_fields,
+    AcquireOutcome, LoadTelemetryState, ScheduledExecutionKind, add_load_context_fields,
     build_live_load_snapshot_payload, build_load_snapshot_payload, calculate_node_plan,
     determine_load_history_status, extract_load_context_value, flush_load_batches,
     forward_runner_stream_load_chunked, rebuild_final_rps_history,
     resolve_runtime_env_groups_for_execution, resolve_runtime_specs_for_execution,
-    send_sse_best_effort, snapshot_consolidated_metrics, snapshot_latest_lines, split_even,
+    send_sse_best_effort, snapshot_telemetry_consolidated_metrics, snapshot_telemetry_lines,
+    snapshot_telemetry_map, split_even,
 };
 use crate::server::models::{
     HistoryMetadata, LoadEventContext, LoadHistoryWrite, LoadLatencyAccumulator, LoadProfile,
@@ -506,8 +507,8 @@ pub async fn start_load_execution(
 
         let load_chunk: Arc<Mutex<HashMap<String, RunnerLoadLine>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let load_latest: Arc<Mutex<HashMap<String, RunnerLoadLine>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let load_telemetry: Arc<Mutex<LoadTelemetryState>> =
+            Arc::new(Mutex::new(LoadTelemetryState::default()));
         let load_latency: Arc<Mutex<LoadLatencyAccumulator>> =
             Arc::new(Mutex::new(LoadLatencyAccumulator::default()));
         let load_errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -521,7 +522,7 @@ pub async fn start_load_execution(
             exec_ctx.cancel.clone(),
             flush_stop.clone(),
             Arc::clone(&load_chunk),
-            Arc::clone(&load_latest),
+            Arc::clone(&load_telemetry),
             Arc::clone(&load_latency),
             Arc::clone(&load_errors),
             Arc::clone(&load_context),
@@ -538,7 +539,7 @@ pub async fn start_load_execution(
             let snapshot_payload = exec_ctx.snapshot_payload.clone();
             let tx = sse_tx.clone();
             let load_chunk = Arc::clone(&load_chunk);
-            let load_latest = Arc::clone(&load_latest);
+            let load_telemetry = Arc::clone(&load_telemetry);
             let load_latency = Arc::clone(&load_latency);
             let load_errors = Arc::clone(&load_errors);
             let load_context = Arc::clone(&load_context);
@@ -588,7 +589,7 @@ pub async fn start_load_execution(
                     tx,
                     cancel,
                     load_chunk,
-                    load_latest,
+                    load_telemetry,
                     load_latency,
                     load_errors,
                     load_context,
@@ -613,7 +614,8 @@ pub async fn start_load_execution(
 
         if !exec_ctx.cancel.is_cancelled() {
             let lines = crate::server::execution::drain_load_chunk(&load_chunk).await;
-            let consolidated = snapshot_consolidated_metrics(&load_latest, &load_latency).await;
+            let consolidated =
+                snapshot_telemetry_consolidated_metrics(&load_telemetry, &load_latency).await;
             let payload = add_load_context_fields(
                 json!({ "lines": lines, "consolidated": consolidated }),
                 load_context.as_ref(),
@@ -623,12 +625,10 @@ pub async fn start_load_execution(
 
         let finished_at_ms = now_ms() as i64;
         let duration_ms = finished_at_ms.saturating_sub(started_at_ms);
-        let final_lines = snapshot_latest_lines(&load_latest).await;
-        let final_consolidated = snapshot_consolidated_metrics(&load_latest, &load_latency).await;
-        let latest_snapshot = {
-            let lock = load_latest.lock().await;
-            lock.clone()
-        };
+        let final_lines = snapshot_telemetry_lines(&load_telemetry).await;
+        let final_consolidated =
+            snapshot_telemetry_consolidated_metrics(&load_telemetry, &load_latency).await;
+        let latest_snapshot = snapshot_telemetry_map(&load_telemetry).await;
         let rps_history = if let Some(value) = final_consolidated.as_ref() {
             rebuild_final_rps_history(value, &latest_snapshot)
         } else {
