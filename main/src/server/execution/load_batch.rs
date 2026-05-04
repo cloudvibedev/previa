@@ -290,7 +290,7 @@ pub async fn flush_load_batches(
             consolidate_load_metrics(&latest_snapshot, latency_summary)
         };
         if let Some(metrics) = consolidated.as_ref() {
-            let sample_at = now_ms();
+            let sample_at = rps_history_timestamp(metrics);
             if sample_at.saturating_sub(last_rps_history_sample_at) >= 500 {
                 rps_history.lock().await.push(build_rps_history_sample(
                     sample_at,
@@ -437,6 +437,7 @@ fn build_rps_history_sample(
 
     let mut sample = Map::new();
     sample.insert("timestamp".to_owned(), json!(timestamp));
+    sample.insert("elapsedMs".to_owned(), json!(metrics.elapsed_ms));
     sample.insert("rps".to_owned(), json!(metrics.rps));
     insert_optional(&mut sample, "totalStarted", metrics.total_started);
     sample.insert("totalSent".to_owned(), json!(metrics.total_sent));
@@ -485,6 +486,10 @@ fn build_rps_history_sample(
     insert_optional(&mut sample, "curveAdherence", metrics.curve_adherence);
     sample.insert("runners".to_owned(), Value::Array(runners));
     Value::Object(sample)
+}
+
+fn rps_history_timestamp(metrics: &ConsolidatedLoadMetrics) -> u64 {
+    metrics.start_time.saturating_add(metrics.elapsed_ms)
 }
 
 fn insert_optional<T: Serialize>(map: &mut Map<String, Value>, key: &str, value: Option<T>) {
@@ -905,7 +910,8 @@ mod tests {
 
     use crate::server::execution::load_batch::{
         add_load_context_fields, build_rps_history_sample, consolidate_load_metrics,
-        drain_load_chunk, merge_runner_error_samples_into, summarize_load_latency,
+        drain_load_chunk, merge_runner_error_samples_into, rps_history_timestamp,
+        summarize_load_latency,
     };
     use crate::server::models::{
         ConsolidatedLoadMetrics, LoadEventContext, LoadLatencyAccumulator, LoadLatencySummary,
@@ -1322,10 +1328,12 @@ mod tests {
             },
         )]);
 
+        assert_eq!(rps_history_timestamp(&metrics), 3_000);
         assert_eq!(
-            build_rps_history_sample(1_500, &metrics, &latest),
+            build_rps_history_sample(rps_history_timestamp(&metrics), &metrics, &latest),
             json!({
-                "timestamp": 1_500,
+                "timestamp": 3_000,
+                "elapsedMs": 2_000,
                 "rps": 21.5,
                 "totalStarted": 45,
                 "totalSent": 42,

@@ -471,6 +471,8 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
   const curveAdherence = toNumber(consolidated?.curveAdherence) ?? aggregated?.curveAdherence;
   const errors = pickStringArray(snapshot.errors);
 
+  const elapsedMs = toNumber(consolidated?.elapsedMs) ?? aggregated?.elapsedMs ?? 0;
+
   return {
     totalSent,
     totalStarted,
@@ -484,7 +486,8 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
     rps,
     latencyHistory: [],
     rpsHistory: rps > 0 ? [{
-      timestamp: Date.now(),
+      timestamp: startTime + elapsedMs,
+      elapsedMs,
       rps,
       totalStarted,
       totalSent,
@@ -513,7 +516,7 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
       : [],
     errors,
     startTime,
-    elapsedMs: toNumber(consolidated?.elapsedMs) ?? aggregated?.elapsedMs ?? 0,
+    elapsedMs,
     targetIntensity,
     targetRpsLimit,
     inFlight: toNumber(consolidated?.inFlight) ?? aggregated?.inFlight,
@@ -998,11 +1001,13 @@ function consolidateNodeMetrics(nodeMap: Map<string, RemoteMetricsEvent>): Remot
 }
 
 function buildRpsHistoryPoint(
-  now: number,
+  fallbackTimestamp: number,
   event: RemoteMetricsEvent,
   consolidated?: ConsolidatedLoadMetrics | null,
   nodes?: Map<string, RemoteMetricsEvent>,
 ): RpsPoint {
+  const startTime = consolidated?.startTime ?? event.startTime;
+  const elapsedMs = consolidated?.elapsedMs ?? event.elapsedMs;
   const runners = nodes
     ? Array.from(nodes.entries()).map(([runnerId, metrics]) => ({
       runnerId,
@@ -1030,7 +1035,10 @@ function buildRpsHistoryPoint(
     : undefined;
 
   return {
-    timestamp: now,
+    timestamp: Number.isFinite(startTime) && Number.isFinite(elapsedMs)
+      ? startTime + elapsedMs
+      : fallbackTimestamp,
+    elapsedMs,
     rps: consolidated?.rps ?? event.rps,
     totalStarted: consolidated?.totalStarted ?? event.totalStarted,
     totalSent: consolidated?.totalSent ?? event.totalSent,

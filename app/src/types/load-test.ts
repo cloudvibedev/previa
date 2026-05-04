@@ -31,6 +31,7 @@ export interface LatencyPoint {
 
 export interface RpsPoint {
   timestamp: number;
+  elapsedMs?: number;
   rps: number;
   totalStarted?: number;
   totalSent?: number;

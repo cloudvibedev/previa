@@ -103,6 +103,11 @@ describe("remote execution snapshot parsing", () => {
       startTime: 1000,
       elapsedMs: 5000,
     });
+    expect(snapshot?.metrics.rpsHistory[0]).toMatchObject({
+      timestamp: 6000,
+      elapsedMs: 5000,
+      rps: 24,
+    });
     expect(snapshot?.metrics.runnerResourceHistory).toEqual([
       {
         node: "runner-a",
