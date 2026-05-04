@@ -21,7 +21,9 @@ use crate::server::runtime::RuntimeSampler;
 use crate::server::sse::{SseMessage, send_sse_or_cancel};
 use crate::server::wave_emitter::{StartLagClass, classify_start_lag};
 use crate::server::wave_metrics_actor::{WaveMetricEvent, run_wave_metrics_actor};
-use crate::server::wave_scheduler::{WaveDispatchSlot, WaveSchedulerMetric, run_wave_scheduler};
+use crate::server::wave_scheduler::{
+    WaveDispatchSlot, WaveSchedulerMetric, slot_is_expired, spawn_wave_scheduler_thread,
+};
 use crate::server::wave_sender::{ReadyWaveRequest, WaveObserverEvent, WaveSender};
 
 #[derive(Debug)]
@@ -70,6 +72,16 @@ struct DispatchSlotRequestArgs<'a> {
 }
 
 async fn dispatch_slot_requests(args: DispatchSlotRequestArgs<'_>) {
+    let actual_elapsed_ms = args.started.elapsed().as_millis() as u64;
+    if slot_is_expired(&args.slot, actual_elapsed_ms) {
+        args.missed_starts
+            .fetch_add(args.slot.planned_starts, Ordering::SeqCst);
+        let _ = args.metric_tx.send(WaveMetricEvent::DispatcherLaggedStarts(
+            args.slot.planned_starts,
+        ));
+        return;
+    }
+
     for _ in 0..args.slot.planned_starts {
         if args.token.is_cancelled() {
             break;
@@ -184,13 +196,14 @@ pub async fn run_wave_load(
             }
         }
     });
-    let scheduler_task = tokio::spawn(run_wave_scheduler(
+    let scheduler_token = token.child_token();
+    let scheduler_thread = spawn_wave_scheduler_thread(
         load.clone(),
         tick_ms,
         slot_tx,
         scheduler_metric_tx,
-        token.child_token(),
-    ));
+        scheduler_token.clone(),
+    );
     let sender = WaveSender::new(
         Arc::clone(&http_client),
         metric_tx.clone(),
@@ -304,8 +317,10 @@ pub async fn run_wave_load(
         tokio::time::sleep(tokio::time::Duration::from_millis(tick_ms.min(250))).await;
     }
 
-    scheduler_task.abort();
-    let _ = scheduler_task.await;
+    scheduler_token.cancel();
+    if let Err(err) = scheduler_thread.join() {
+        error!("wave scheduler thread panicked: {:?}", err);
+    }
     drop(request_tx);
     if response_in_flight.load(Ordering::SeqCst) > 0 {
         observer_token.cancel();
@@ -659,5 +674,57 @@ mod tests {
             rx.try_recv().is_ok(),
             "one event should remain for a later tick"
         );
+    }
+
+    #[tokio::test]
+    async fn expired_dispatch_slot_records_lag_without_enqueuing_requests() {
+        let pipeline = Pipeline {
+            id: Some("p".to_owned()),
+            name: "pipeline".to_owned(),
+            description: None,
+            steps: Vec::new(),
+        };
+        let specs = Arc::new(Vec::new());
+        let env_groups = Arc::new(Vec::new());
+        let (request_tx, mut request_rx) = mpsc::unbounded_channel();
+        let (metric_tx, mut metric_rx) = mpsc::unbounded_channel();
+        let ready_to_send = Arc::new(AtomicUsize::new(0));
+        let missed_starts = Arc::new(AtomicUsize::new(0));
+        let token = tokio_util::sync::CancellationToken::new();
+        let mut ready = VecDeque::new();
+        let started = Instant::now() - std::time::Duration::from_millis(1_000);
+
+        dispatch_slot_requests(DispatchSlotRequestArgs {
+            slot: WaveDispatchSlot {
+                elapsed_ms: 100,
+                expires_at_elapsed_ms: 200,
+                planned_starts: 7,
+                target_rps_limit: 70.0,
+                scheduled_total: 7,
+                scheduler_lag_ms: 0,
+                missed_due_to_scheduler_lag: 0,
+            },
+            ready: &mut ready,
+            pipeline: &pipeline,
+            specs: &specs,
+            env_groups: &env_groups,
+            selected_env_group_slug: &None,
+            request_tx: &request_tx,
+            metric_tx: &metric_tx,
+            ready_to_send: &ready_to_send,
+            missed_starts: &missed_starts,
+            started,
+            tick_ms: 100,
+            token: &token,
+        })
+        .await;
+
+        assert_eq!(missed_starts.load(Ordering::SeqCst), 7);
+        assert_eq!(ready_to_send.load(Ordering::SeqCst), 0);
+        assert!(request_rx.try_recv().is_err());
+        assert!(matches!(
+            metric_rx.try_recv(),
+            Ok(WaveMetricEvent::DispatcherLaggedStarts(7))
+        ));
     }
 }

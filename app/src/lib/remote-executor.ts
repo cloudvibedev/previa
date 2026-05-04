@@ -202,6 +202,7 @@ function extractRemoteMetrics(value: unknown): RemoteMetricsEvent | null {
   const httpSendReturned = toNumber(value.httpSendReturned);
   const responseBodyCompleted = toNumber(value.responseBodyCompleted);
   const dependencyLimitedStarts = toNumber(value.dependencyLimitedStarts);
+  const dispatcherLaggedStarts = toNumber(value.dispatcherLaggedStarts);
   const runtimeLaggedStarts = toNumber(value.runtimeLaggedStarts);
   const schedulerLagMs = toNumber(value.schedulerLagMs);
   const schedulerLaggedStarts = toNumber(value.schedulerLaggedStarts);
@@ -228,6 +229,7 @@ function extractRemoteMetrics(value: unknown): RemoteMetricsEvent | null {
     httpSendReturned,
     responseBodyCompleted,
     dependencyLimitedStarts,
+    dispatcherLaggedStarts,
     runtimeLaggedStarts,
     schedulerLagMs,
     schedulerLaggedStarts,
@@ -369,6 +371,9 @@ function aggregateLineMetrics(lines: unknown[]): RemoteMetricsEvent | null {
         dependencyLimitedStarts: item.dependencyLimitedStarts !== undefined
           ? (acc.dependencyLimitedStarts ?? 0) + item.dependencyLimitedStarts
           : acc.dependencyLimitedStarts,
+        dispatcherLaggedStarts: item.dispatcherLaggedStarts !== undefined
+          ? (acc.dispatcherLaggedStarts ?? 0) + item.dispatcherLaggedStarts
+          : acc.dispatcherLaggedStarts,
         runtimeLaggedStarts: item.runtimeLaggedStarts !== undefined
           ? (acc.runtimeLaggedStarts ?? 0) + item.runtimeLaggedStarts
           : acc.runtimeLaggedStarts,
@@ -452,6 +457,7 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
   const httpSendReturned = toNumber(consolidated?.httpSendReturned) ?? aggregated?.httpSendReturned;
   const responseBodyCompleted = toNumber(consolidated?.responseBodyCompleted) ?? aggregated?.responseBodyCompleted;
   const dependencyLimitedStarts = toNumber(consolidated?.dependencyLimitedStarts) ?? aggregated?.dependencyLimitedStarts;
+  const dispatcherLaggedStarts = toNumber(consolidated?.dispatcherLaggedStarts) ?? aggregated?.dispatcherLaggedStarts;
   const runtimeLaggedStarts = toNumber(consolidated?.runtimeLaggedStarts) ?? aggregated?.runtimeLaggedStarts;
   const schedulerLagMs = toNumber(consolidated?.schedulerLagMs) ?? aggregated?.schedulerLagMs;
   const schedulerLaggedStarts = toNumber(consolidated?.schedulerLaggedStarts) ?? aggregated?.schedulerLaggedStarts;
@@ -489,6 +495,7 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
       httpSendReturned,
       responseBodyCompleted,
       dependencyLimitedStarts,
+      dispatcherLaggedStarts,
       runtimeLaggedStarts,
       schedulerLagMs,
       schedulerLaggedStarts,
@@ -519,6 +526,7 @@ function buildLoadMetricsFromSnapshot(snapshot: SseObject): LoadTestMetrics {
     httpSendReturned,
     responseBodyCompleted,
     dependencyLimitedStarts,
+    dispatcherLaggedStarts,
     runtimeLaggedStarts,
     schedulerLagMs,
     schedulerLaggedStarts,
@@ -858,6 +866,7 @@ function consolidateNodeMetrics(nodeMap: Map<string, RemoteMetricsEvent>): Remot
   let httpSendReturned = 0, hasHttpSendReturned = false;
   let responseBodyCompleted = 0, hasResponseBodyCompleted = false;
   let dependencyLimitedStarts = 0, hasDependencyLimitedStarts = false;
+  let dispatcherLaggedStarts = 0, hasDispatcherLaggedStarts = false;
   let runtimeLaggedStarts = 0, hasRuntimeLaggedStarts = false;
   let schedulerLagMs = 0, hasSchedulerLagMs = false;
   let schedulerLaggedStarts = 0, hasSchedulerLaggedStarts = false;
@@ -923,6 +932,10 @@ function consolidateNodeMetrics(nodeMap: Map<string, RemoteMetricsEvent>): Remot
       dependencyLimitedStarts += p.dependencyLimitedStarts;
       hasDependencyLimitedStarts = true;
     }
+    if (typeof p.dispatcherLaggedStarts === "number") {
+      dispatcherLaggedStarts += p.dispatcherLaggedStarts;
+      hasDispatcherLaggedStarts = true;
+    }
     if (typeof p.runtimeLaggedStarts === "number") {
       runtimeLaggedStarts += p.runtimeLaggedStarts;
       hasRuntimeLaggedStarts = true;
@@ -973,6 +986,7 @@ function consolidateNodeMetrics(nodeMap: Map<string, RemoteMetricsEvent>): Remot
     httpSendReturned: hasHttpSendReturned ? httpSendReturned : undefined,
     responseBodyCompleted: hasResponseBodyCompleted ? responseBodyCompleted : undefined,
     dependencyLimitedStarts: hasDependencyLimitedStarts ? dependencyLimitedStarts : undefined,
+    dispatcherLaggedStarts: hasDispatcherLaggedStarts ? dispatcherLaggedStarts : undefined,
     runtimeLaggedStarts: hasRuntimeLaggedStarts ? runtimeLaggedStarts : undefined,
     schedulerLagMs: hasSchedulerLagMs ? schedulerLagMs : undefined,
     schedulerLaggedStarts: hasSchedulerLaggedStarts ? schedulerLaggedStarts : undefined,
@@ -999,6 +1013,7 @@ function buildRpsHistoryPoint(
       httpSendReturned: metrics.httpSendReturned,
       responseBodyCompleted: metrics.responseBodyCompleted,
       dependencyLimitedStarts: metrics.dependencyLimitedStarts,
+      dispatcherLaggedStarts: metrics.dispatcherLaggedStarts,
       runtimeLaggedStarts: metrics.runtimeLaggedStarts,
       schedulerLagMs: metrics.schedulerLagMs,
       schedulerLaggedStarts: metrics.schedulerLaggedStarts,
@@ -1026,6 +1041,7 @@ function buildRpsHistoryPoint(
     httpSendReturned: consolidated?.httpSendReturned ?? event.httpSendReturned,
     responseBodyCompleted: consolidated?.responseBodyCompleted ?? event.responseBodyCompleted,
     dependencyLimitedStarts: consolidated?.dependencyLimitedStarts ?? event.dependencyLimitedStarts,
+    dispatcherLaggedStarts: consolidated?.dispatcherLaggedStarts ?? event.dispatcherLaggedStarts,
     runtimeLaggedStarts: consolidated?.runtimeLaggedStarts ?? event.runtimeLaggedStarts,
     schedulerLagMs: consolidated?.schedulerLagMs ?? event.schedulerLagMs,
     schedulerLaggedStarts: consolidated?.schedulerLaggedStarts ?? event.schedulerLaggedStarts,
@@ -1079,6 +1095,7 @@ export function runRemoteLoadTest(
       httpSendReturned: consolidated?.httpSendReturned ?? event.httpSendReturned,
       responseBodyCompleted: consolidated?.responseBodyCompleted ?? event.responseBodyCompleted,
       dependencyLimitedStarts: consolidated?.dependencyLimitedStarts ?? event.dependencyLimitedStarts,
+      dispatcherLaggedStarts: consolidated?.dispatcherLaggedStarts ?? event.dispatcherLaggedStarts,
       runtimeLaggedStarts: consolidated?.runtimeLaggedStarts ?? event.runtimeLaggedStarts,
       schedulerLagMs: consolidated?.schedulerLagMs ?? event.schedulerLagMs,
       schedulerLaggedStarts: consolidated?.schedulerLaggedStarts ?? event.schedulerLaggedStarts,
@@ -1451,6 +1468,7 @@ export function reconnectToLoadExecution(
       httpSendReturned: consolidated?.httpSendReturned ?? event.httpSendReturned,
       responseBodyCompleted: consolidated?.responseBodyCompleted ?? event.responseBodyCompleted,
       dependencyLimitedStarts: consolidated?.dependencyLimitedStarts ?? event.dependencyLimitedStarts,
+      dispatcherLaggedStarts: consolidated?.dispatcherLaggedStarts ?? event.dispatcherLaggedStarts,
       runtimeLaggedStarts: consolidated?.runtimeLaggedStarts ?? event.runtimeLaggedStarts,
       schedulerLagMs: consolidated?.schedulerLagMs ?? event.schedulerLagMs,
       schedulerLaggedStarts: consolidated?.schedulerLaggedStarts ?? event.schedulerLaggedStarts,

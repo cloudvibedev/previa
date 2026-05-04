@@ -237,6 +237,7 @@
   "loadTestResults.httpSendReturned": "Sends returned",
   "loadTestResults.responseBodyCompleted": "Bodies completed",
   "loadTestResults.dependencyLimitedStarts": "Dependency blocked",
+  "loadTestResults.dispatcherLaggedStarts": "Dispatcher lag",
   "loadTestResults.runtimeLaggedStarts": "Sender lag",
   "loadTestResults.schedulerLagMs": "Scheduler lag",
   "loadTestResults.schedulerLaggedStarts": "Starts missed by lag",

@@ -795,6 +795,7 @@ export function loadRecordToRun(r: LoadHistoryRecord): LoadTestRunRecord {
     httpSendReturned: consolidated?.httpSendReturned,
     responseBodyCompleted: consolidated?.responseBodyCompleted,
     dependencyLimitedStarts: consolidated?.dependencyLimitedStarts,
+    dispatcherLaggedStarts: consolidated?.dispatcherLaggedStarts,
     runtimeLaggedStarts: consolidated?.runtimeLaggedStarts,
     schedulerLagMs: consolidated?.schedulerLagMs,
     schedulerLaggedStarts: consolidated?.schedulerLaggedStarts,

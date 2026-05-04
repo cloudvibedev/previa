@@ -122,6 +122,8 @@ pub struct LoadTestMetrics {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependency_limited_starts: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatcher_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_lagged_starts: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduler_lag_ms: Option<u64>,
@@ -180,6 +182,7 @@ impl Default for LoadTestMetrics {
             http_send_returned: None,
             response_body_completed: None,
             dependency_limited_starts: None,
+            dispatcher_lagged_starts: None,
             runtime_lagged_starts: None,
             scheduler_lag_ms: None,
             scheduler_lagged_starts: None,

@@ -399,6 +399,11 @@ fn build_rps_history_sample(
             );
             insert_optional(
                 &mut runner,
+                "dispatcherLaggedStarts",
+                metrics.dispatcher_lagged_starts,
+            );
+            insert_optional(
+                &mut runner,
                 "runtimeLaggedStarts",
                 metrics.runtime_lagged_starts,
             );
@@ -449,6 +454,11 @@ fn build_rps_history_sample(
         &mut sample,
         "dependencyLimitedStarts",
         metrics.dependency_limited_starts,
+    );
+    insert_optional(
+        &mut sample,
+        "dispatcherLaggedStarts",
+        metrics.dispatcher_lagged_starts,
     );
     insert_optional(
         &mut sample,
@@ -564,6 +574,8 @@ pub fn consolidate_load_metrics(
     let mut response_body_completed_nodes = 0usize;
     let mut dependency_limited_starts = 0usize;
     let mut dependency_limited_starts_nodes = 0usize;
+    let mut dispatcher_lagged_starts = 0usize;
+    let mut dispatcher_lagged_starts_nodes = 0usize;
     let mut runtime_lagged_starts = 0usize;
     let mut runtime_lagged_starts_nodes = 0usize;
     let mut scheduler_lag_ms = 0u64;
@@ -630,6 +642,10 @@ pub fn consolidate_load_metrics(
         if let Some(value) = metrics.dependency_limited_starts {
             dependency_limited_starts = dependency_limited_starts.saturating_add(value);
             dependency_limited_starts_nodes += 1;
+        }
+        if let Some(value) = metrics.dispatcher_lagged_starts {
+            dispatcher_lagged_starts = dispatcher_lagged_starts.saturating_add(value);
+            dispatcher_lagged_starts_nodes += 1;
         }
         if let Some(value) = metrics.runtime_lagged_starts {
             runtime_lagged_starts = runtime_lagged_starts.saturating_add(value);
@@ -703,6 +719,8 @@ pub fn consolidate_load_metrics(
             .then_some(response_body_completed),
         dependency_limited_starts: (dependency_limited_starts_nodes > 0)
             .then_some(dependency_limited_starts),
+        dispatcher_lagged_starts: (dispatcher_lagged_starts_nodes > 0)
+            .then_some(dispatcher_lagged_starts),
         runtime_lagged_starts: (runtime_lagged_starts_nodes > 0).then_some(runtime_lagged_starts),
         scheduler_lag_ms: (scheduler_lag_ms_nodes > 0).then_some(scheduler_lag_ms),
         scheduler_lagged_starts: (scheduler_lagged_starts_nodes > 0)
@@ -1138,6 +1156,7 @@ mod tests {
                         "httpSendReturned": 80,
                         "responseBodyCompleted": 70,
                         "dependencyLimitedStarts": 1,
+                        "dispatcherLaggedStarts": 5,
                         "runtimeLaggedStarts": 2,
                         "schedulerLagMs": 30,
                         "schedulerLaggedStarts": 4,
@@ -1168,6 +1187,7 @@ mod tests {
                         "httpSendReturned": 90,
                         "responseBodyCompleted": 85,
                         "dependencyLimitedStarts": 3,
+                        "dispatcherLaggedStarts": 7,
                         "runtimeLaggedStarts": 4,
                         "schedulerLagMs": 50,
                         "schedulerLaggedStarts": 6,
@@ -1190,6 +1210,7 @@ mod tests {
         assert_eq!(consolidated.http_send_returned, Some(170));
         assert_eq!(consolidated.response_body_completed, Some(155));
         assert_eq!(consolidated.dependency_limited_starts, Some(4));
+        assert_eq!(consolidated.dispatcher_lagged_starts, Some(12));
         assert_eq!(consolidated.runtime_lagged_starts, Some(6));
         assert_eq!(consolidated.scheduler_lag_ms, Some(80));
         assert_eq!(consolidated.scheduler_lagged_starts, Some(10));
@@ -1258,6 +1279,7 @@ mod tests {
             http_send_returned: None,
             response_body_completed: None,
             dependency_limited_starts: None,
+            dispatcher_lagged_starts: None,
             runtime_lagged_starts: None,
             scheduler_lag_ms: None,
             scheduler_lagged_starts: None,

@@ -41,6 +41,7 @@ export interface RpsPoint {
   httpSendReturned?: number;
   responseBodyCompleted?: number;
   dependencyLimitedStarts?: number;
+  dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
@@ -64,6 +65,7 @@ export interface RunnerRpsSample {
   httpSendReturned?: number;
   responseBodyCompleted?: number;
   dependencyLimitedStarts?: number;
+  dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
@@ -114,6 +116,7 @@ export interface RemoteMetricsEvent {
   httpSendReturned?: number;
   responseBodyCompleted?: number;
   dependencyLimitedStarts?: number;
+  dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
@@ -147,6 +150,7 @@ export interface LoadTestMetrics {
   httpSendReturned?: number;
   responseBodyCompleted?: number;
   dependencyLimitedStarts?: number;
+  dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
@@ -186,6 +190,7 @@ export interface ConsolidatedLoadMetrics {
   httpSendReturned?: number;
   responseBodyCompleted?: number;
   dependencyLimitedStarts?: number;
+  dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;

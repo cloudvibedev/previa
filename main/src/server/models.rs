@@ -688,6 +688,8 @@ pub struct ConsolidatedLoadMetrics {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependency_limited_starts: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatcher_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_lagged_starts: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduler_lag_ms: Option<u64>,
@@ -798,6 +800,7 @@ pub struct RunnerLoadMetricsPoint {
     pub http_send_returned: Option<usize>,
     pub response_body_completed: Option<usize>,
     pub dependency_limited_starts: Option<usize>,
+    pub dispatcher_lagged_starts: Option<usize>,
     pub runtime_lagged_starts: Option<usize>,
     pub scheduler_lag_ms: Option<u64>,
     pub scheduler_lagged_starts: Option<usize>,

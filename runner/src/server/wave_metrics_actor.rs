@@ -26,6 +26,7 @@ pub enum WaveMetricEvent {
         tx: u64,
         rx: u64,
     },
+    DispatcherLaggedStarts(usize),
     RuntimeLaggedStart,
     DependencyLimitedStarts(usize),
     Snapshot {
@@ -84,6 +85,9 @@ pub async fn run_wave_metrics_actor(
                 error,
             } => accumulator.record_error_sample(&step_id, http_status, &error),
             WaveMetricEvent::NetworkBytes { tx, rx } => accumulator.add_network_bytes(tx, rx),
+            WaveMetricEvent::DispatcherLaggedStarts(count) => {
+                accumulator.record_dispatcher_lagged_starts_count(count);
+            }
             WaveMetricEvent::RuntimeLaggedStart => accumulator.record_runtime_lagged_start(),
             WaveMetricEvent::DependencyLimitedStarts(count) => {
                 accumulator.record_dependency_limited_starts_count(count);
@@ -157,6 +161,9 @@ mod tests {
                 },
             ))
             .unwrap();
+        event_tx
+            .send(WaveMetricEvent::DispatcherLaggedStarts(6))
+            .unwrap();
         drop(event_tx);
 
         actor.await.unwrap();
@@ -166,5 +173,6 @@ mod tests {
         assert_eq!(snapshot.dispatch_started, Some(2));
         assert_eq!(snapshot.scheduler_lag_ms, Some(25));
         assert_eq!(snapshot.scheduler_lagged_starts, Some(4));
+        assert_eq!(snapshot.dispatcher_lagged_starts, Some(6));
     }
 }

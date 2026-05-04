@@ -266,6 +266,7 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
         typeof metrics.httpSendReturned === "number" ||
         typeof metrics.responseBodyCompleted === "number" ||
         typeof metrics.dependencyLimitedStarts === "number" ||
+        typeof metrics.dispatcherLaggedStarts === "number" ||
         typeof metrics.runtimeLaggedStarts === "number" ||
         typeof metrics.schedulerLagMs === "number" ||
         typeof metrics.schedulerLaggedStarts === "number" ||
@@ -306,6 +307,14 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
               icon={AlertTriangle}
               label={t("loadTestResults.dependencyLimitedStarts")}
               value={metrics.dependencyLimitedStarts}
+              color="text-warning"
+            />
+          )}
+          {typeof metrics.dispatcherLaggedStarts === "number" && (
+            <MetricCard
+              icon={AlertTriangle}
+              label={t("loadTestResults.dispatcherLaggedStarts")}
+              value={metrics.dispatcherLaggedStarts}
               color="text-warning"
             />
           )}

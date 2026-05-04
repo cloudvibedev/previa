@@ -7,6 +7,7 @@ use crate::server::models::LoadProfile;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WaveDispatchSlot {
     pub elapsed_ms: u64,
+    pub expires_at_elapsed_ms: u64,
     pub planned_starts: usize,
     pub target_rps_limit: f64,
     pub scheduled_total: usize,
@@ -19,6 +20,25 @@ pub enum WaveSchedulerMetric {
     DispatchScheduled { count: usize },
     SchedulerLag { lag_ms: u64, missed_starts: usize },
     SlotBackpressure { dropped_starts: usize },
+}
+
+pub fn build_dispatch_slot(
+    tick: crate::server::load_dispatch::DispatchTick,
+    tick_ms: u64,
+) -> WaveDispatchSlot {
+    WaveDispatchSlot {
+        elapsed_ms: tick.elapsed_ms,
+        expires_at_elapsed_ms: tick.elapsed_ms.saturating_add(tick_ms),
+        planned_starts: tick.scheduled_starts,
+        target_rps_limit: tick.target_rps,
+        scheduled_total: tick.scheduled_total,
+        scheduler_lag_ms: tick.scheduler_lag_ms,
+        missed_due_to_scheduler_lag: tick.missed_due_to_scheduler_lag,
+    }
+}
+
+pub fn slot_is_expired(slot: &WaveDispatchSlot, actual_elapsed_ms: u64) -> bool {
+    actual_elapsed_ms > slot.expires_at_elapsed_ms
 }
 
 pub fn try_send_slot_or_metric(
@@ -42,7 +62,20 @@ pub fn try_send_slot_or_metric(
     }
 }
 
-pub async fn run_wave_scheduler(
+pub fn spawn_wave_scheduler_thread(
+    load: LoadProfile,
+    tick_ms: u64,
+    slot_tx: mpsc::Sender<WaveDispatchSlot>,
+    metric_tx: mpsc::UnboundedSender<WaveSchedulerMetric>,
+    token: CancellationToken,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("previa-wave-clock".to_owned())
+        .spawn(move || run_wave_scheduler_loop(load, tick_ms, slot_tx, metric_tx, token))
+        .expect("failed to spawn previa wave scheduler thread")
+}
+
+pub fn run_wave_scheduler_loop(
     load: LoadProfile,
     tick_ms: u64,
     slot_tx: mpsc::Sender<WaveDispatchSlot>,
@@ -52,6 +85,7 @@ pub async fn run_wave_scheduler(
     let started = std::time::Instant::now();
     let end_ms = crate::server::load_wave::timeline_end_ms(&load);
     let mut clock = DispatchClock::new(tick_ms);
+    let mut next_wake = started;
 
     loop {
         if token.is_cancelled() {
@@ -65,21 +99,15 @@ pub async fn run_wave_scheduler(
 
         let target_rps_limit = crate::server::load_wave::local_rps_limit(&load, elapsed_ms);
         let tick = clock.plan_tick(elapsed_ms, target_rps_limit);
+        let _ = try_send_slot_or_metric(&slot_tx, &metric_tx, build_dispatch_slot(tick, tick_ms));
 
-        let _ = try_send_slot_or_metric(
-            &slot_tx,
-            &metric_tx,
-            WaveDispatchSlot {
-                elapsed_ms: tick.elapsed_ms,
-                planned_starts: tick.scheduled_starts,
-                target_rps_limit,
-                scheduled_total: tick.scheduled_total,
-                scheduler_lag_ms: tick.scheduler_lag_ms,
-                missed_due_to_scheduler_lag: tick.missed_due_to_scheduler_lag,
-            },
-        );
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(tick_ms)).await;
+        next_wake += std::time::Duration::from_millis(tick_ms);
+        let now = std::time::Instant::now();
+        if next_wake > now {
+            std::thread::sleep(next_wake - now);
+        } else {
+            next_wake = now;
+        }
     }
 }
 
@@ -91,18 +119,78 @@ mod tests {
     fn build_slot_from_clock_tick_uses_tick_window_only() {
         let mut clock = DispatchClock::new(100);
         let tick = clock.plan_tick(500, 100.0);
-        let slot = WaveDispatchSlot {
-            elapsed_ms: tick.elapsed_ms,
-            planned_starts: tick.scheduled_starts,
-            target_rps_limit: tick.target_rps,
-            scheduled_total: tick.scheduled_total,
-            scheduler_lag_ms: tick.scheduler_lag_ms,
-            missed_due_to_scheduler_lag: tick.missed_due_to_scheduler_lag,
-        };
+        let slot = build_dispatch_slot(tick, 100);
 
         assert_eq!(slot.planned_starts, 10);
         assert_eq!(slot.elapsed_ms, 500);
+        assert_eq!(slot.expires_at_elapsed_ms, 600);
         assert_eq!(slot.target_rps_limit, 100.0);
+    }
+
+    #[test]
+    fn dispatch_slot_is_fresh_until_expiration_elapsed_ms() {
+        let slot = WaveDispatchSlot {
+            elapsed_ms: 500,
+            expires_at_elapsed_ms: 600,
+            planned_starts: 10,
+            target_rps_limit: 100.0,
+            scheduled_total: 20,
+            scheduler_lag_ms: 0,
+            missed_due_to_scheduler_lag: 0,
+        };
+
+        assert!(!slot_is_expired(&slot, 599));
+        assert!(!slot_is_expired(&slot, 600));
+        assert!(slot_is_expired(&slot, 601));
+    }
+
+    #[test]
+    fn build_slot_from_clock_tick_sets_expiration_to_next_tick_boundary() {
+        let mut clock = DispatchClock::new(100);
+        let tick = clock.plan_tick(500, 100.0);
+        let slot = build_dispatch_slot(tick, 100);
+
+        assert_eq!(slot.elapsed_ms, 500);
+        assert_eq!(slot.expires_at_elapsed_ms, 600);
+        assert_eq!(slot.planned_starts, 10);
+        assert_eq!(slot.target_rps_limit, 100.0);
+    }
+
+    fn short_flat_load() -> LoadProfile {
+        LoadProfile {
+            points: vec![
+                crate::server::models::LoadPoint {
+                    at_ms: 0,
+                    intensity: 50.0,
+                },
+                crate::server::models::LoadPoint {
+                    at_ms: 250,
+                    intensity: 50.0,
+                },
+            ],
+            interpolation: crate::server::models::LoadInterpolation::Linear,
+            runner_max_rps: 1000.0,
+            grace_period_ms: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn scheduler_thread_emits_slots_without_tokio_spawn() {
+        let (slot_tx, mut slot_rx) = mpsc::channel(8);
+        let (metric_tx, _metric_rx) = mpsc::unbounded_channel();
+        let token = CancellationToken::new();
+
+        let handle = spawn_wave_scheduler_thread(short_flat_load(), 100, slot_tx, metric_tx, token);
+
+        let first = tokio::time::timeout(std::time::Duration::from_millis(300), slot_rx.recv())
+            .await
+            .expect("scheduler thread should emit a slot")
+            .expect("slot channel should stay open while scheduler runs");
+
+        assert!(first.planned_starts > 0);
+        assert_eq!(first.expires_at_elapsed_ms, first.elapsed_ms + 100);
+
+        handle.join().expect("scheduler thread should exit cleanly");
     }
 
     #[tokio::test]
@@ -113,6 +201,7 @@ mod tests {
         slot_tx
             .send(WaveDispatchSlot {
                 elapsed_ms: 0,
+                expires_at_elapsed_ms: 100,
                 planned_starts: 1,
                 target_rps_limit: 10.0,
                 scheduled_total: 1,
@@ -127,6 +216,7 @@ mod tests {
             &metric_tx,
             WaveDispatchSlot {
                 elapsed_ms: 100,
+                expires_at_elapsed_ms: 200,
                 planned_starts: 7,
                 target_rps_limit: 70.0,
                 scheduled_total: 8,

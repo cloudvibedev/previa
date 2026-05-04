@@ -41,6 +41,7 @@ pub fn parse_runner_load_metrics(payload: &Value) -> Option<RunnerLoadMetricsPoi
         http_send_returned: get_usize_field(payload, "httpSendReturned"),
         response_body_completed: get_usize_field(payload, "responseBodyCompleted"),
         dependency_limited_starts: get_usize_field(payload, "dependencyLimitedStarts"),
+        dispatcher_lagged_starts: get_usize_field(payload, "dispatcherLaggedStarts"),
         runtime_lagged_starts: get_usize_field(payload, "runtimeLaggedStarts"),
         scheduler_lag_ms: get_u64_field(payload, "schedulerLagMs"),
         scheduler_lagged_starts: get_usize_field(payload, "schedulerLaggedStarts"),

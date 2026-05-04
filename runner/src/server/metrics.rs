@@ -33,6 +33,7 @@ pub struct MetricsAccumulator {
     http_send_returned: usize,
     response_body_completed: usize,
     dependency_limited_starts: usize,
+    dispatcher_lagged_starts: usize,
     runtime_lagged_starts: usize,
     scheduler_lag_ms: u64,
     scheduler_lagged_starts: usize,
@@ -59,6 +60,7 @@ impl MetricsAccumulator {
             http_send_returned: 0,
             response_body_completed: 0,
             dependency_limited_starts: 0,
+            dispatcher_lagged_starts: 0,
             runtime_lagged_starts: 0,
             scheduler_lag_ms: 0,
             scheduler_lagged_starts: 0,
@@ -121,6 +123,10 @@ impl MetricsAccumulator {
 
     pub fn record_dependency_limited_starts_count(&mut self, count: usize) {
         self.dependency_limited_starts = self.dependency_limited_starts.saturating_add(count);
+    }
+
+    pub fn record_dispatcher_lagged_starts_count(&mut self, count: usize) {
+        self.dispatcher_lagged_starts = self.dispatcher_lagged_starts.saturating_add(count);
     }
 
     pub fn record_runtime_lagged_start(&mut self) {
@@ -222,6 +228,8 @@ impl MetricsAccumulator {
                 .then_some(self.response_body_completed),
             dependency_limited_starts: (self.dependency_limited_starts > 0)
                 .then_some(self.dependency_limited_starts),
+            dispatcher_lagged_starts: (self.dispatcher_lagged_starts > 0)
+                .then_some(self.dispatcher_lagged_starts),
             runtime_lagged_starts: (self.runtime_lagged_starts > 0)
                 .then_some(self.runtime_lagged_starts),
             scheduler_lag_ms: (self.scheduler_lag_ms > 0).then_some(self.scheduler_lag_ms),
@@ -417,6 +425,18 @@ mod tests {
 
         assert_eq!(snapshot.scheduler_lag_ms, Some(400));
         assert_eq!(snapshot.scheduler_lagged_starts, Some(12));
+    }
+
+    #[test]
+    fn snapshot_includes_dispatcher_lagged_starts() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.record_dispatcher_lagged_starts_count(12);
+        metrics.record_dispatcher_lagged_starts_count(5);
+
+        let snapshot = metrics.snapshot(None, None);
+
+        assert_eq!(snapshot.dispatcher_lagged_starts, Some(17));
     }
 
     #[test]

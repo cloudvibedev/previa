@@ -361,6 +361,7 @@ describe("LoadTestResultsPanel", () => {
           schedulerLagMs: 400,
           schedulerLaggedStarts: 12,
           outstandingRequests: 90,
+          dispatcherLaggedStarts: 9,
           runtimeLaggedStarts: 7,
           dependencyLimitedStarts: 3,
         }}
@@ -383,6 +384,8 @@ describe("LoadTestResultsPanel", () => {
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.observerBacklog")).toBeInTheDocument();
     expect(screen.getByText("90")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.dispatcherLaggedStarts")).toBeInTheDocument();
+    expect(screen.getByText("9")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.runtimeLaggedStarts")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.dependencyLimitedStarts")).toBeInTheDocument();
