@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LoadTestResultsPanel } from "@/components/LoadTestResultsPanel";
+import { buildLifecycleChartData } from "@/lib/load-lifecycle-chart";
 import { buildRpsChartData } from "@/lib/load-rps-chart";
 import type { LoadTestMetrics, WaveLoadConfig } from "@/types/load-test";
 
@@ -90,6 +91,117 @@ describe("LoadTestResultsPanel", () => {
     expect(screen.queryByText(/elapsed/i)).not.toBeInTheDocument();
   });
 
+  it("builds lifecycle chart rows from cumulative counters", () => {
+    const metrics: LoadTestMetrics = {
+      ...emptyMetrics,
+      rpsHistory: [
+        {
+          timestamp: 1_000,
+          elapsedMs: 0,
+          rps: 0,
+          scheduledStarts: 0,
+          sendStarted: 0,
+          httpStarted: 0,
+          httpSendReturned: 0,
+          responseBodyCompleted: 0,
+        },
+        {
+          timestamp: 2_000,
+          elapsedMs: 1_000,
+          rps: 0,
+          scheduledStarts: 100,
+          sendStarted: 98,
+          httpStarted: 97,
+          httpSendReturned: 40,
+          responseBodyCompleted: 10,
+        },
+        {
+          timestamp: 3_000,
+          elapsedMs: 2_000,
+          rps: 0,
+          scheduledStarts: 250,
+          sendStarted: 245,
+          httpStarted: 244,
+          httpSendReturned: 90,
+          responseBodyCompleted: 20,
+        },
+      ],
+    };
+
+    expect(buildLifecycleChartData(metrics)).toEqual({
+      data: [
+        {
+          time: 1,
+          planned: 100,
+          sendStarted: 98,
+          httpStarted: 97,
+          httpSendReturned: 40,
+          responseBodyCompleted: 10,
+        },
+        {
+          time: 2,
+          planned: 150,
+          sendStarted: 147,
+          httpStarted: 147,
+          httpSendReturned: 50,
+          responseBodyCompleted: 10,
+        },
+      ],
+      series: [
+        { key: "planned", labelKey: "loadTestResults.lifecyclePlanned", tone: "planned" },
+        { key: "sendStarted", labelKey: "loadTestResults.lifecycleSendStarted", tone: "send" },
+        { key: "httpStarted", labelKey: "loadTestResults.lifecycleHttpStarted", tone: "http" },
+        { key: "httpSendReturned", labelKey: "loadTestResults.lifecycleHttpSendReturned", tone: "returned" },
+        { key: "responseBodyCompleted", labelKey: "loadTestResults.lifecycleBodyCompleted", tone: "body" },
+      ],
+    });
+  });
+
+  it("uses direct dispatch buckets for the HTTP started lifecycle line when available", () => {
+    const metrics: LoadTestMetrics = {
+      ...emptyMetrics,
+      rpsHistory: [
+        {
+          timestamp: 1_000,
+          elapsedMs: 0,
+          rps: 0,
+          scheduledStarts: 100,
+          dispatchBucket: 99,
+          sendStarted: 100,
+          httpStarted: 10_000,
+        },
+        {
+          timestamp: 2_000,
+          elapsedMs: 1_000,
+          rps: 0,
+          scheduledStarts: 200,
+          dispatchBucket: 125,
+          sendStarted: 200,
+          httpStarted: 20_000,
+        },
+      ],
+    };
+
+    expect(buildLifecycleChartData(metrics).data).toEqual([
+      {
+        time: 0,
+        planned: 100,
+        sendStarted: 100,
+        httpStarted: 99,
+        httpSendReturned: 0,
+        responseBodyCompleted: 0,
+      },
+      {
+        time: 1,
+        planned: 100,
+        sendStarted: 100,
+        httpStarted: 125,
+        httpSendReturned: 0,
+        responseBodyCompleted: 0,
+      },
+    ]);
+  });
+
   it("renders load error samples", () => {
     render(
       <LoadTestResultsPanel
@@ -106,6 +218,41 @@ describe("LoadTestResultsPanel", () => {
 
     expect(screen.getByText("loadTestResults.errorSamples")).toBeInTheDocument();
     expect(screen.getByText(/create_user HTTP 409/)).toBeInTheDocument();
+  });
+
+  it("renders wave lifecycle chart when lifecycle history exists", () => {
+    const metrics: LoadTestMetrics = {
+      ...emptyMetrics,
+      rpsHistory: [
+        {
+          timestamp: 1_000,
+          elapsedMs: 0,
+          rps: 0,
+          scheduledStarts: 0,
+          sendStarted: 0,
+          httpStarted: 0,
+          httpSendReturned: 0,
+          responseBodyCompleted: 0,
+        },
+        {
+          timestamp: 2_000,
+          elapsedMs: 1_000,
+          rps: 0,
+          scheduledStarts: 100,
+          sendStarted: 99,
+          httpStarted: 99,
+          httpSendReturned: 30,
+          responseBodyCompleted: 5,
+        },
+      ],
+    };
+
+    render(<LoadTestResultsPanel metrics={metrics} state="running" totalRequests={0} />);
+
+    expect(screen.getByTestId("wave-lifecycle-chart")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.waveLifecycle")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.lifecyclePlanned")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.lifecycleHttpStarted")).toBeInTheDocument();
   });
 
   it("shows the configured wave profile on wave load results", () => {

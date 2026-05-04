@@ -3,6 +3,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Activity, Zap, AlertCircle, CheckCircle2, Clock, TrendingUp, Server, Gauge, AlertTriangle, ListChecks } from "lucide-react";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { buildLifecycleChartData, type LifecycleSeriesTone } from "@/lib/load-lifecycle-chart";
 import { buildRpsChartData } from "@/lib/load-rps-chart";
 import { isWaveLoadConfig } from "@/types/load-test";
 import type { LoadInterpolation, LoadPoint, LoadRunConfig, LoadTestMetrics, LoadTestState, RunnerResourcePoint, WaveLoadConfig } from "@/types/load-test";
@@ -17,6 +18,14 @@ const RUNNER_RESOURCE_COLORS = [
   "#f97316",
   "#84cc16",
 ];
+
+const LIFECYCLE_COLORS: Record<LifecycleSeriesTone, string> = {
+  planned: "hsl(var(--primary))",
+  send: "hsl(var(--status-running))",
+  http: "hsl(var(--status-success))",
+  returned: "hsl(var(--warning))",
+  body: "hsl(var(--muted-foreground))",
+};
 
 function formatCompact(value: string | number): { display: string; full: string; needsTooltip: boolean } {
   const raw = typeof value === "string" ? value : String(value);
@@ -136,6 +145,8 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
 
   const rpsChart = buildRpsChartData(metrics, waveConfig);
   const rpsChartData = rpsChart.data;
+  const lifecycleChart = buildLifecycleChartData(metrics);
+  const lifecycleChartData = lifecycleChart.data;
   const hasTargetRpsLine = rpsChartData.some((point) => typeof point.targetRpsLimit === "number");
   const runnerResourceHistory = metrics.runnerResourceHistory ?? [];
   const runnerNames = getRunnerNames(runnerResourceHistory);
@@ -551,6 +562,59 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
                 />
               )}
             </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {lifecycleChartData.length > 0 && (
+        <div data-testid="wave-lifecycle-chart" className="glass rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              {t("loadTestResults.waveLifecycle")}
+            </p>
+            <div className="flex items-center gap-2 text-[9px] text-muted-foreground flex-wrap justify-end">
+              {lifecycleChart.series.map((series) => (
+                <span key={series.key} className="inline-flex items-center gap-1">
+                  <span
+                    className="h-0 w-3 border-t"
+                    style={{ borderColor: LIFECYCLE_COLORS[series.tone] }}
+                  />
+                  {t(series.labelKey)}
+                </span>
+              ))}
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={120}>
+            <LineChart data={lifecycleChartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="time" tick={{ fontSize: 9 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `${v}s`} />
+              <YAxis tick={{ fontSize: 9 }} stroke="hsl(var(--muted-foreground))" />
+              <RechartsTooltip
+                contentStyle={{
+                  background: "hsl(var(--popover))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "var(--radius)",
+                  fontSize: 11,
+                }}
+                formatter={(v: number, name: string) => [
+                  typeof v === "number" ? v.toFixed(1) : v,
+                  t(lifecycleChart.series.find((series) => series.key === name)?.labelKey ?? name),
+                ]}
+                labelFormatter={(v) => `${v}s`}
+              />
+              {lifecycleChart.series.map((series) => (
+                <Line
+                  key={series.key}
+                  type="monotone"
+                  dataKey={series.key}
+                  stroke={LIFECYCLE_COLORS[series.tone]}
+                  strokeWidth={series.key === "planned" || series.key === "httpStarted" ? 1.75 : 1.4}
+                  strokeDasharray={series.key === "planned" ? "2 4" : undefined}
+                  dot={lifecycleChartData.length === 1}
+                  connectNulls
+                />
+              ))}
+            </LineChart>
           </ResponsiveContainer>
         </div>
       )}

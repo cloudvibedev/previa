@@ -244,6 +244,12 @@
   "loadTestResults.observerBacklog": "Respostas em observação",
   "loadTestResults.errorSamples": "Amostras de erro",
   "loadTestResults.configuredWave": "Onda configurada",
+  "loadTestResults.waveLifecycle": "Ciclo da wave",
+  "loadTestResults.lifecyclePlanned": "Planejado",
+  "loadTestResults.lifecycleSendStarted": "Envio iniciado",
+  "loadTestResults.lifecycleHttpStarted": "HTTP iniciado",
+  "loadTestResults.lifecycleHttpSendReturned": "Send retornado",
+  "loadTestResults.lifecycleBodyCompleted": "Body concluído",
 
   "pipeline.editPipeline": "Editar pipeline",
   "pipeline.duplicatePipeline": "Duplicar pipeline",
