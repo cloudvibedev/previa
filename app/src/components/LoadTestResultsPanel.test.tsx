@@ -295,6 +295,49 @@ describe("LoadTestResultsPanel", () => {
     });
   });
 
+  it("uses runner dispatch buckets instead of cumulative snapshot deltas when available", () => {
+    const metrics: LoadTestMetrics = {
+      ...emptyMetrics,
+      rpsHistory: [
+        {
+          timestamp: 1_000,
+          elapsedMs: 0,
+          rps: 0,
+          dispatchStarted: 0,
+          dispatchBucket: 12,
+          runners: [
+            { runnerId: "runner-a", dispatchStarted: 0, dispatchBucket: 5 },
+            { runnerId: "runner-b", dispatchStarted: 0, dispatchBucket: 7 },
+          ],
+        },
+        {
+          timestamp: 3_000,
+          elapsedMs: 2_000,
+          rps: 0,
+          dispatchStarted: 1_000,
+          dispatchBucket: 20,
+          targetRpsLimit: 20,
+          runners: [
+            { runnerId: "runner-a", dispatchStarted: 400, dispatchBucket: 8 },
+            { runnerId: "runner-b", dispatchStarted: 600, dispatchBucket: 12 },
+          ],
+        },
+      ],
+    };
+
+    expect(buildRpsChartData(metrics, null)).toEqual({
+      data: [
+        { time: 0, rpsTotal: 12, runner0: 5, runner1: 7, targetRpsLimit: undefined },
+        { time: 2, rpsTotal: 20, runner0: 8, runner1: 12, targetRpsLimit: 20 },
+      ],
+      runnerSeries: [
+        { key: "runner0", label: "runner-a" },
+        { key: "runner1", label: "runner-b" },
+      ],
+      usesHttpRps: true,
+    });
+  });
+
   it("prefers dispatch started counters over HTTP started counters", () => {
     const metrics: LoadTestMetrics = {
       ...emptyMetrics,

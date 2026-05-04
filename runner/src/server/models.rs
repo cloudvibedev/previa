@@ -95,6 +95,13 @@ pub struct LoadLatencyBucket {
 
 #[derive(Debug, Serialize, Clone, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct LoadDispatchBucket {
+    pub elapsed_ms: u64,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize, Clone, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct LoadErrorSample {
     pub step_id: String,
     pub http_status: Option<u16>,
@@ -158,6 +165,8 @@ pub struct LoadTestMetrics {
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub latency_buckets: Vec<LoadLatencyBucket>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dispatch_buckets: Vec<LoadDispatchBucket>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_sample_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -202,6 +211,7 @@ impl Default for LoadTestMetrics {
             curve_adherence: None,
             duration_ms: None,
             latency_buckets: Vec::new(),
+            dispatch_buckets: Vec::new(),
             latency_sample_count: None,
             latency_total_duration_ms: None,
             error_samples: Vec::new(),

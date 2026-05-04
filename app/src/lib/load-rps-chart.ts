@@ -48,6 +48,11 @@ function runnerStarted(point: RunnerRpsSample | undefined) {
   return point ? dispatchStarted(point) : undefined;
 }
 
+function hasDirectDispatchBucket(point: RpsPoint) {
+  return typeof point.dispatchBucket === "number"
+    || point.runners?.some((runner) => typeof runner.dispatchBucket === "number") === true;
+}
+
 function sampleWaveIntensity(config: WaveLoadConfig, elapsedMs: number) {
   const points = [...config.points].sort((a, b) => a.atMs - b.atMs);
   const last = points[points.length - 1];
@@ -96,7 +101,10 @@ export function buildRpsChartData(metrics: LoadTestMetrics, waveConfig: WaveLoad
   const history = metrics.rpsHistory ?? [];
   const usesHttpRps = history.some((point) =>
     typeof dispatchStarted(point) === "number"
-    || point.runners?.some((runner) => typeof dispatchStarted(runner) === "number"),
+    || typeof point.dispatchBucket === "number"
+    || point.runners?.some((runner) =>
+      typeof dispatchStarted(runner) === "number" || typeof runner.dispatchBucket === "number"
+    ),
   );
   const runnerIds = usesHttpRps
     ? Array.from(
@@ -127,15 +135,48 @@ export function buildRpsChartData(metrics: LoadTestMetrics, waveConfig: WaveLoad
   }
 
   const rows = new Map<number, RpsChartRow>();
-  ensureRow(rows, bucketSecondForPoint(history[0], metrics), history[0]);
+  const firstPoint = history[0];
+  const firstRow = ensureRow(rows, bucketSecondForPoint(firstPoint, metrics), firstPoint);
+  if (hasDirectDispatchBucket(firstPoint)) {
+    if (firstPoint.runners && firstPoint.runners.length > 0) {
+      for (const runner of firstPoint.runners) {
+        const key = runnerKeyById.get(runner.runnerId);
+        if (!key || typeof runner.dispatchBucket !== "number") continue;
+        firstRow[key] = (firstRow[key] ?? 0) + runner.dispatchBucket;
+        firstRow.rpsTotal += runner.dispatchBucket;
+      }
+    } else if (typeof firstPoint.dispatchBucket === "number") {
+      firstRow.rpsTotal += firstPoint.dispatchBucket;
+    }
+  }
 
   for (let index = 1; index < history.length; index += 1) {
     const point = history[index];
+    const directBucket = hasDirectDispatchBucket(point);
     const previous = history[index - 1];
     const previousBucket = bucketSecondForPoint(previous, metrics);
     const currentBucket = bucketSecondForPoint(point, metrics);
     const span = bucketSpan(previousBucket, currentBucket);
     const startBucket = firstBucketToUpdate(previousBucket, currentBucket);
+
+    if (directBucket && point.runners && point.runners.length > 0) {
+      const row = ensureRow(rows, currentBucket, point);
+      for (const runner of point.runners) {
+        const key = runnerKeyById.get(runner.runnerId);
+        if (!key || typeof runner.dispatchBucket !== "number") continue;
+        row[key] = (row[key] ?? 0) + runner.dispatchBucket;
+        row.rpsTotal += runner.dispatchBucket;
+      }
+      if (typeof point.dispatchBucket === "number" && row.rpsTotal === 0) {
+        row.rpsTotal += point.dispatchBucket;
+      }
+      continue;
+    }
+
+    if (directBucket && typeof point.dispatchBucket === "number") {
+      ensureRow(rows, currentBucket, point).rpsTotal += point.dispatchBucket;
+      continue;
+    }
 
     if (point.runners && point.runners.length > 0) {
       for (const runner of point.runners) {

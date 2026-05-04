@@ -236,6 +236,7 @@ function extractRemoteMetrics(value: unknown): RemoteMetricsEvent | null {
     rps: rps ?? 0,
     startTime: toNumber(value.startTime) ?? Date.now(),
     elapsedMs: toNumber(value.elapsedMs) ?? 0,
+    dispatchBuckets: extractDispatchBuckets(value.dispatchBuckets),
     targetIntensity: toNumber(value.targetIntensity),
     targetRpsLimit: toNumber(value.targetRpsLimit),
     inFlight: toNumber(value.inFlight),
@@ -249,6 +250,20 @@ function extractRemoteMetrics(value: unknown): RemoteMetricsEvent | null {
     curveAdherence: toNumber(value.curveAdherence),
     runtime: extractRunnerRuntime(value.runtime),
   };
+}
+
+function extractDispatchBuckets(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  const buckets = value
+    .map((item) => {
+      if (!isSseObject(item)) return null;
+      const elapsedMs = toNumber(item.elapsedMs);
+      const count = toNumber(item.count);
+      return elapsedMs !== undefined && count !== undefined ? { elapsedMs, count } : null;
+    })
+    .filter((item): item is { elapsedMs: number; count: number } => item !== null);
+
+  return buckets.length > 0 ? buckets : undefined;
 }
 
 function extractRunnerRuntime(value: unknown): RunnerRuntimeInfo | undefined {
@@ -317,6 +332,11 @@ function computeCurveAdherence(scheduledStarts?: number, missedStarts?: number):
   return Math.round(((scheduledStarts - (missedStarts ?? 0)) / scheduledStarts) * 10_000) / 100;
 }
 
+function dispatchBucketFor(metrics: RemoteMetricsEvent) {
+  const bucketMs = Math.floor(metrics.elapsedMs / 1000) * 1000;
+  return metrics.dispatchBuckets?.find((bucket) => bucket.elapsedMs === bucketMs)?.count;
+}
+
 function appendRunnerResourceHistory(history: RunnerResourcePoint[], lines: unknown[] | undefined) {
   if (!lines) return;
   const points = extractRunnerResourcePoints(lines);
@@ -383,6 +403,7 @@ function aggregateLineMetrics(lines: unknown[]): RemoteMetricsEvent | null {
         schedulerLaggedStarts: item.schedulerLaggedStarts !== undefined
           ? (acc.schedulerLaggedStarts ?? 0) + item.schedulerLaggedStarts
           : acc.schedulerLaggedStarts,
+        dispatchBuckets: undefined,
         rps: acc.rps + item.rps,
         startTime: Math.min(acc.startTime, item.startTime),
         elapsedMs: Math.max(acc.elapsedMs, item.elapsedMs),
@@ -1009,29 +1030,39 @@ function buildRpsHistoryPoint(
   const startTime = consolidated?.startTime ?? event.startTime;
   const elapsedMs = consolidated?.elapsedMs ?? event.elapsedMs;
   const runners = nodes
-    ? Array.from(nodes.entries()).map(([runnerId, metrics]) => ({
-      runnerId,
-      httpStarted: metrics.httpStarted,
-      httpCompleted: metrics.httpCompleted,
-      dispatchSubmitted: metrics.dispatchSubmitted,
-      dispatchStarted: metrics.dispatchStarted,
-      httpSendReturned: metrics.httpSendReturned,
-      responseBodyCompleted: metrics.responseBodyCompleted,
-      dependencyLimitedStarts: metrics.dependencyLimitedStarts,
-      dispatcherLaggedStarts: metrics.dispatcherLaggedStarts,
-      runtimeLaggedStarts: metrics.runtimeLaggedStarts,
-      schedulerLagMs: metrics.schedulerLagMs,
-      schedulerLaggedStarts: metrics.schedulerLaggedStarts,
-      totalStarted: metrics.totalStarted,
-      totalSent: metrics.totalSent,
-      rps: metrics.rps,
-      scheduledStarts: metrics.scheduledStarts,
-      missedStarts: metrics.missedStarts,
-      readyRequests: metrics.readyRequests,
-      activePipelines: metrics.activePipelines,
-      outstandingRequests: metrics.outstandingRequests,
-      curveAdherence: metrics.curveAdherence,
-    }))
+    ? Array.from(nodes.entries()).map(([runnerId, metrics]) => {
+      const dispatchBucket = dispatchBucketFor(metrics);
+      return {
+        runnerId,
+        dispatchBucket,
+        httpStarted: metrics.httpStarted,
+        httpCompleted: metrics.httpCompleted,
+        dispatchSubmitted: metrics.dispatchSubmitted,
+        dispatchStarted: metrics.dispatchStarted,
+        httpSendReturned: metrics.httpSendReturned,
+        responseBodyCompleted: metrics.responseBodyCompleted,
+        dependencyLimitedStarts: metrics.dependencyLimitedStarts,
+        dispatcherLaggedStarts: metrics.dispatcherLaggedStarts,
+        runtimeLaggedStarts: metrics.runtimeLaggedStarts,
+        schedulerLagMs: metrics.schedulerLagMs,
+        schedulerLaggedStarts: metrics.schedulerLaggedStarts,
+        totalStarted: metrics.totalStarted,
+        totalSent: metrics.totalSent,
+        rps: metrics.rps,
+        scheduledStarts: metrics.scheduledStarts,
+        missedStarts: metrics.missedStarts,
+        readyRequests: metrics.readyRequests,
+        activePipelines: metrics.activePipelines,
+        outstandingRequests: metrics.outstandingRequests,
+        curveAdherence: metrics.curveAdherence,
+      };
+    })
+    : undefined;
+  const dispatchBuckets = runners
+    ?.map((runner) => runner.dispatchBucket)
+    .filter((value): value is number => typeof value === "number");
+  const dispatchBucket = dispatchBuckets && dispatchBuckets.length > 0
+    ? dispatchBuckets.reduce((sum, value) => sum + value, 0)
     : undefined;
 
   return {
@@ -1040,6 +1071,7 @@ function buildRpsHistoryPoint(
       : fallbackTimestamp,
     elapsedMs,
     rps: consolidated?.rps ?? event.rps,
+    dispatchBucket: dispatchBucket !== undefined ? dispatchBucket : undefined,
     totalStarted: consolidated?.totalStarted ?? event.totalStarted,
     totalSent: consolidated?.totalSent ?? event.totalSent,
     httpStarted: consolidated?.httpStarted ?? event.httpStarted,

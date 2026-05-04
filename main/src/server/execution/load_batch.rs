@@ -378,10 +378,19 @@ fn build_rps_history_sample(
     metrics: &ConsolidatedLoadMetrics,
     latest_by_node: &HashMap<String, RunnerLoadLine>,
 ) -> Value {
+    let mut dispatch_bucket_total = 0usize;
+    let mut has_dispatch_bucket = false;
     let mut runners = latest_by_node
         .values()
         .filter_map(|line| {
             let metrics = parse_runner_load_metrics(&line.payload)?;
+            let runner_elapsed_ms = timestamp.saturating_sub(metrics.start_time);
+            let runner_bucket_ms = rps_history_elapsed_bucket_ms(runner_elapsed_ms);
+            let dispatch_bucket = metrics
+                .dispatch_buckets
+                .iter()
+                .find(|bucket| bucket.elapsed_ms == runner_bucket_ms)
+                .map(|bucket| bucket.count);
             let mut runner = Map::new();
             runner.insert("runnerId".to_owned(), Value::String(line.node.clone()));
             insert_optional(&mut runner, "httpStarted", metrics.http_started);
@@ -428,6 +437,11 @@ fn build_rps_history_sample(
                 metrics.outstanding_requests,
             );
             insert_optional(&mut runner, "curveAdherence", metrics.curve_adherence);
+            if let Some(count) = dispatch_bucket {
+                dispatch_bucket_total = dispatch_bucket_total.saturating_add(count);
+                has_dispatch_bucket = true;
+                runner.insert("dispatchBucket".to_owned(), json!(count));
+            }
             Some(Value::Object(runner))
         })
         .collect::<Vec<_>>();
@@ -477,6 +491,9 @@ fn build_rps_history_sample(
         "schedulerLaggedStarts",
         metrics.scheduler_lagged_starts,
     );
+    if has_dispatch_bucket {
+        sample.insert("dispatchBucket".to_owned(), json!(dispatch_bucket_total));
+    }
     insert_optional(&mut sample, "targetIntensity", metrics.target_intensity);
     insert_optional(&mut sample, "targetRpsLimit", metrics.target_rps_limit);
     insert_optional(&mut sample, "scheduledStarts", metrics.scheduled_starts);
@@ -1332,6 +1349,10 @@ mod tests {
                     "totalError": 2,
                     "httpStarted": 60,
                     "httpCompleted": 58,
+                    "dispatchBuckets": [
+                        { "elapsedMs": 1_000, "count": 20 },
+                        { "elapsedMs": 2_000, "count": 40 }
+                    ],
                     "rps": 21.5,
                     "startTime": 1_000,
                     "elapsedMs": 2_000
@@ -1351,6 +1372,7 @@ mod tests {
                 "totalSent": 42,
                 "httpStarted": 60,
                 "httpCompleted": 58,
+                "dispatchBucket": 40,
                 "targetIntensity": 75.0,
                 "targetRpsLimit": 150.0,
                 "runners": [{
@@ -1359,6 +1381,7 @@ mod tests {
                     "httpCompleted": 58,
                     "totalStarted": 45,
                     "totalSent": 42,
+                    "dispatchBucket": 40,
                     "rps": 21.5
                 }]
             })

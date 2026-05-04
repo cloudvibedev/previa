@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::server::models::{
-    LoadErrorSample, LoadLatencyBucket, LoadTestMetrics, RunnerInfoResponse,
+    LoadDispatchBucket, LoadErrorSample, LoadLatencyBucket, LoadTestMetrics, RunnerInfoResponse,
 };
 use crate::server::utils::{now_ms, round2};
 use previa_runner::{StepExecutionResult, StepRequest, StepResponse};
@@ -43,6 +43,7 @@ pub struct MetricsAccumulator {
     latency_sample_count: usize,
     latency_total_duration_ms: u64,
     latency_histogram: BTreeMap<u64, usize>,
+    dispatch_buckets: BTreeMap<u64, usize>,
     error_samples: Vec<LoadErrorSample>,
 }
 
@@ -70,6 +71,7 @@ impl MetricsAccumulator {
             latency_sample_count: 0,
             latency_total_duration_ms: 0,
             latency_histogram: BTreeMap::new(),
+            dispatch_buckets: BTreeMap::new(),
             error_samples: Vec::new(),
         }
     }
@@ -111,6 +113,9 @@ impl MetricsAccumulator {
 
     pub fn record_dispatch_started(&mut self) {
         self.dispatch_started = self.dispatch_started.saturating_add(1);
+        let elapsed_ms = now_ms().saturating_sub(self.start_time);
+        let bucket_ms = (elapsed_ms / 1000).saturating_mul(1000);
+        *self.dispatch_buckets.entry(bucket_ms).or_insert(0) += 1;
     }
 
     pub fn record_http_send_returned(&mut self) {
@@ -258,6 +263,14 @@ impl MetricsAccumulator {
                     count: *count,
                 })
                 .collect(),
+            dispatch_buckets: self
+                .dispatch_buckets
+                .iter()
+                .map(|(elapsed_ms, count)| LoadDispatchBucket {
+                    elapsed_ms: *elapsed_ms,
+                    count: *count,
+                })
+                .collect(),
             latency_sample_count: (self.latency_sample_count > 0)
                 .then_some(self.latency_sample_count),
             latency_total_duration_ms: (self.latency_sample_count > 0)
@@ -358,6 +371,32 @@ mod tests {
         assert_eq!(snapshot.latency_buckets[1].count, 1);
         assert_eq!(snapshot.latency_buckets[2].duration_ms, 31);
         assert_eq!(snapshot.latency_buckets[2].count, 1);
+    }
+
+    #[test]
+    fn snapshot_includes_dispatch_buckets() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.record_dispatch_started();
+        metrics.record_dispatch_started();
+
+        let snapshot = metrics.snapshot(None, None);
+
+        assert_eq!(snapshot.dispatch_started, Some(2));
+        assert_eq!(
+            snapshot
+                .dispatch_buckets
+                .iter()
+                .map(|bucket| bucket.count)
+                .sum::<usize>(),
+            2
+        );
+        assert!(
+            snapshot
+                .dispatch_buckets
+                .iter()
+                .all(|bucket| bucket.elapsed_ms % 1000 == 0)
+        );
     }
 
     #[test]

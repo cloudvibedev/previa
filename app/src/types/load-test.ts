@@ -33,6 +33,7 @@ export interface RpsPoint {
   timestamp: number;
   elapsedMs?: number;
   rps: number;
+  dispatchBucket?: number;
   totalStarted?: number;
   totalSent?: number;
   httpStarted?: number;
@@ -59,6 +60,7 @@ export interface RpsPoint {
 
 export interface RunnerRpsSample {
   runnerId: string;
+  dispatchBucket?: number;
   httpStarted?: number;
   httpCompleted?: number;
   dispatchSubmitted?: number;
@@ -104,6 +106,11 @@ export interface RunnerResourcePoint {
   networkTotalKb: number;
 }
 
+export interface DispatchBucket {
+  elapsedMs: number;
+  count: number;
+}
+
 /** Slim payload sent by the backend SSE (no latency history/percentiles). */
 export interface RemoteMetricsEvent {
   totalStarted?: number;
@@ -124,6 +131,7 @@ export interface RemoteMetricsEvent {
   rps: number;
   startTime: number;
   elapsedMs: number;
+  dispatchBuckets?: DispatchBucket[];
   targetIntensity?: number;
   targetRpsLimit?: number;
   inFlight?: number;

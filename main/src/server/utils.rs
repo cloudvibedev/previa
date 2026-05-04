@@ -2,7 +2,9 @@ use chrono::{SecondsFormat, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::server::models::{RunnerLoadLatencyBucket, RunnerLoadMetricsPoint};
+use crate::server::models::{
+    RunnerLoadDispatchBucket, RunnerLoadLatencyBucket, RunnerLoadMetricsPoint,
+};
 
 pub fn now_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -62,6 +64,7 @@ pub fn parse_runner_load_metrics(payload: &Value) -> Option<RunnerLoadMetricsPoi
         latency_sample_count: get_usize_field(payload, "latencySampleCount"),
         latency_total_duration_ms: get_u64_field(payload, "latencyTotalDurationMs"),
         latency_buckets: parse_latency_buckets(payload),
+        dispatch_buckets: parse_dispatch_buckets(payload),
     })
 }
 
@@ -95,6 +98,23 @@ fn parse_latency_buckets(payload: &Value) -> Vec<RunnerLoadLatencyBucket> {
                     let duration_ms = get_u64_field(item, "durationMs")?;
                     let count = get_usize_field(item, "count")?;
                     Some(RunnerLoadLatencyBucket { duration_ms, count })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_dispatch_buckets(payload: &Value) -> Vec<RunnerLoadDispatchBucket> {
+    payload
+        .get("dispatchBuckets")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let elapsed_ms = get_u64_field(item, "elapsedMs")?;
+                    let count = get_usize_field(item, "count")?;
+                    Some(RunnerLoadDispatchBucket { elapsed_ms, count })
                 })
                 .collect()
         })

@@ -756,6 +756,12 @@ pub struct RunnerLoadLatencyBucket {
 }
 
 #[derive(Debug, Clone)]
+pub struct RunnerLoadDispatchBucket {
+    pub elapsed_ms: u64,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct NodePlan {
     pub requested_nodes: usize,
     pub nodes_found: usize,
@@ -821,6 +827,7 @@ pub struct RunnerLoadMetricsPoint {
     pub latency_sample_count: Option<usize>,
     pub latency_total_duration_ms: Option<u64>,
     pub latency_buckets: Vec<RunnerLoadLatencyBucket>,
+    pub dispatch_buckets: Vec<RunnerLoadDispatchBucket>,
 }
 
 #[derive(Debug, Clone)]
