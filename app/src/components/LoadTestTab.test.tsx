@@ -179,7 +179,7 @@ describe("LoadTestTab", () => {
 
     const collapsedRegion = screen.getByTestId("mobile-load-test-history");
     expect(collapsedRegion).toHaveClass("max-h-10", "border-t");
-    expect(screen.getByTitle("Show history")).toBeInTheDocument();
+    expect(screen.getByTitle("Show history").querySelector(".lucide-history")).toBeInTheDocument();
     expect(screen.queryByText("1 reqs")).not.toBeInTheDocument();
   });
 });

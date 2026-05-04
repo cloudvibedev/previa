@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-import { Play, Plus, Workflow, FileCode2, FileText, PlayCircle, Menu, Zap, RotateCcw, Server, Square, X, Sparkles, ArrowDown, ListChecks, List, MousePointerClick, PanelRightClose, PanelRightOpen, PanelLeftOpen, PanelBottomOpen, History, LayoutGrid, ListOrdered } from "lucide-react";
+import { Play, Plus, Workflow, FileCode2, FileText, PlayCircle, Menu, Zap, RotateCcw, Server, Square, X, Sparkles, ArrowDown, ListChecks, List, MousePointerClick, PanelRightClose, PanelRightOpen, PanelLeftOpen, History, LayoutGrid, ListOrdered } from "lucide-react";
 import { useStepAutoScroll, useStepVisibility } from "@/hooks/useStepAutoScroll";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getPipelineOrder, savePipelineOrder, applyOrder } from "@/lib/pipeline-order";
@@ -1205,7 +1205,7 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
                                     onClick={() => setHistoryCollapsed(false)}
                                     title="Show history"
                                   >
-                                    <PanelBottomOpen className="h-4 w-4" />
+                                    <History className="h-4 w-4" />
                                   </Button>
                                 </div>
                               ) : (

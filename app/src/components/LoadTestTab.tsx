@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { AlertTriangle, History, PanelBottomOpen, X } from "lucide-react";
+import { AlertTriangle, History, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Pipeline } from "@/types/pipeline";
 import { isWaveLoadConfig, type LoadRunConfig, type LoadTestState } from "@/types/load-test";
@@ -151,7 +151,7 @@ export function LoadTestTab({ pipeline, projectId, pipelineIndex, onStateChange,
             onClick={() => setHistoryCollapsed(false)}
             title="Show history"
           >
-            <PanelBottomOpen className="h-4 w-4" />
+            <History className="h-4 w-4" />
           </Button>
         </div>
       ) : (
