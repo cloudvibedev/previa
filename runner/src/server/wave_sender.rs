@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 use reqwest::Client;
 use tokio::sync::mpsc;
@@ -34,6 +35,7 @@ pub struct WaveObserverEvent<C> {
 
 pub struct WaveSender<C> {
     client: Arc<Client>,
+    started: Instant,
     metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
     response_in_flight: Arc<AtomicUsize>,
     ready_to_send: Arc<AtomicUsize>,
@@ -48,6 +50,7 @@ where
 {
     pub fn new(
         client: Arc<Client>,
+        started: Instant,
         metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
         response_in_flight: Arc<AtomicUsize>,
         ready_to_send: Arc<AtomicUsize>,
@@ -57,6 +60,7 @@ where
     ) -> Self {
         Self {
             client,
+            started,
             metric_tx,
             response_in_flight,
             ready_to_send,
@@ -78,6 +82,7 @@ where
 
     fn spawn_observer(&self, request: ReadyWaveRequest<C>) {
         self.response_in_flight.fetch_add(1, Ordering::SeqCst);
+        let dispatch_elapsed_ms = self.started.elapsed().as_millis() as u64;
 
         let client = Arc::clone(&self.client);
         let metric_tx = self.metric_tx.clone();
@@ -88,7 +93,9 @@ where
         let token = self.token.clone();
 
         tokio::spawn(async move {
-            let _ = metric_tx.send(WaveMetricEvent::DispatchStarted);
+            let _ = metric_tx.send(WaveMetricEvent::DispatchStarted {
+                elapsed_ms: dispatch_elapsed_ms,
+            });
             let _ = metric_tx.send(WaveMetricEvent::HttpStarted);
 
             let result = send_prepared_http_step_with_hooks(
@@ -177,7 +184,7 @@ pub async fn run_test_sender_with_metric_events<T, F, Fut>(
     let mut tasks = JoinSet::new();
     while let Some(request) = rx.recv().await {
         started.fetch_add(1, Ordering::SeqCst);
-        let _ = metric_tx.send(WaveMetricEvent::DispatchStarted);
+        let _ = metric_tx.send(WaveMetricEvent::DispatchStarted { elapsed_ms: 0 });
         tasks.spawn(send(request.payload));
     }
     while tasks.join_next().await.is_some() {}
@@ -289,7 +296,7 @@ mod tests {
         while let Ok(event) = metric_rx.try_recv() {
             if matches!(
                 event,
-                crate::server::wave_metrics_actor::WaveMetricEvent::DispatchStarted
+                crate::server::wave_metrics_actor::WaveMetricEvent::DispatchStarted { .. }
             ) {
                 dispatch_started += 1;
             }

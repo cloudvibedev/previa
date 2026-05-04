@@ -111,9 +111,8 @@ impl MetricsAccumulator {
         self.dispatch_submitted = self.dispatch_submitted.saturating_add(count);
     }
 
-    pub fn record_dispatch_started(&mut self) {
+    pub fn record_dispatch_started_at(&mut self, elapsed_ms: u64) {
         self.dispatch_started = self.dispatch_started.saturating_add(1);
-        let elapsed_ms = now_ms().saturating_sub(self.start_time);
         let bucket_ms = (elapsed_ms / 1000).saturating_mul(1000);
         *self.dispatch_buckets.entry(bucket_ms).or_insert(0) += 1;
     }
@@ -377,8 +376,8 @@ mod tests {
     fn snapshot_includes_dispatch_buckets() {
         let mut metrics = MetricsAccumulator::new();
 
-        metrics.record_dispatch_started();
-        metrics.record_dispatch_started();
+        metrics.record_dispatch_started_at(0);
+        metrics.record_dispatch_started_at(0);
 
         let snapshot = metrics.snapshot(None, None);
 
@@ -482,8 +481,8 @@ mod tests {
     fn snapshot_includes_dispatch_started_counter() {
         let mut metrics = MetricsAccumulator::new();
 
-        metrics.record_dispatch_started();
-        metrics.record_dispatch_started();
+        metrics.record_dispatch_started_at(0);
+        metrics.record_dispatch_started_at(0);
 
         let snapshot = metrics.snapshot(None, None);
 

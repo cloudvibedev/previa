@@ -108,6 +108,7 @@ pub async fn run_wave_load(
     );
     let sender = WaveSender::new(
         Arc::clone(&http_client),
+        started,
         metric_tx.clone(),
         Arc::clone(&response_in_flight),
         Arc::clone(&ready_to_send),

@@ -332,8 +332,8 @@ function computeCurveAdherence(scheduledStarts?: number, missedStarts?: number):
   return Math.round(((scheduledStarts - (missedStarts ?? 0)) / scheduledStarts) * 10_000) / 100;
 }
 
-function dispatchBucketFor(metrics: RemoteMetricsEvent) {
-  const bucketMs = Math.floor(metrics.elapsedMs / 1000) * 1000;
+function dispatchBucketFor(metrics: RemoteMetricsEvent, elapsedMs: number) {
+  const bucketMs = Math.floor(elapsedMs / 1000) * 1000;
   return metrics.dispatchBuckets?.find((bucket) => bucket.elapsedMs === bucketMs)?.count;
 }
 
@@ -1031,7 +1031,7 @@ function buildRpsHistoryPoint(
   const elapsedMs = consolidated?.elapsedMs ?? event.elapsedMs;
   const runners = nodes
     ? Array.from(nodes.entries()).map(([runnerId, metrics]) => {
-      const dispatchBucket = dispatchBucketFor(metrics);
+      const dispatchBucket = dispatchBucketFor(metrics, elapsedMs);
       return {
         runnerId,
         dispatchBucket,

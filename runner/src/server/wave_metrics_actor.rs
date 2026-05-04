@@ -8,7 +8,9 @@ use crate::server::wave_scheduler::WaveSchedulerMetric;
 pub enum WaveMetricEvent {
     Scheduler(WaveSchedulerMetric),
     PipelineStarted,
-    DispatchStarted,
+    DispatchStarted {
+        elapsed_ms: u64,
+    },
     HttpStarted,
     HttpSendReturned,
     HttpCompleted(usize),
@@ -64,7 +66,9 @@ pub async fn run_wave_metrics_actor(
                 accumulator.record_scheduler_lagged_starts_count(dropped_starts);
             }
             WaveMetricEvent::PipelineStarted => accumulator.record_start(),
-            WaveMetricEvent::DispatchStarted => accumulator.record_dispatch_started(),
+            WaveMetricEvent::DispatchStarted { elapsed_ms } => {
+                accumulator.record_dispatch_started_at(elapsed_ms);
+            }
             WaveMetricEvent::HttpStarted => accumulator.record_http_start(),
             WaveMetricEvent::HttpSendReturned => accumulator.record_http_send_returned(),
             WaveMetricEvent::HttpCompleted(count) => {
@@ -151,8 +155,12 @@ mod tests {
                 WaveSchedulerMetric::DispatchScheduled { count: 3 },
             ))
             .unwrap();
-        event_tx.send(WaveMetricEvent::DispatchStarted).unwrap();
-        event_tx.send(WaveMetricEvent::DispatchStarted).unwrap();
+        event_tx
+            .send(WaveMetricEvent::DispatchStarted { elapsed_ms: 42_000 })
+            .unwrap();
+        event_tx
+            .send(WaveMetricEvent::DispatchStarted { elapsed_ms: 42_000 })
+            .unwrap();
         event_tx
             .send(WaveMetricEvent::Scheduler(
                 WaveSchedulerMetric::SchedulerLag {
@@ -171,6 +179,9 @@ mod tests {
 
         assert_eq!(snapshot.dispatch_submitted, Some(3));
         assert_eq!(snapshot.dispatch_started, Some(2));
+        assert_eq!(snapshot.dispatch_buckets.len(), 1);
+        assert_eq!(snapshot.dispatch_buckets[0].elapsed_ms, 42_000);
+        assert_eq!(snapshot.dispatch_buckets[0].count, 2);
         assert_eq!(snapshot.scheduler_lag_ms, Some(25));
         assert_eq!(snapshot.scheduler_lagged_starts, Some(4));
         assert_eq!(snapshot.dispatcher_lagged_starts, Some(6));

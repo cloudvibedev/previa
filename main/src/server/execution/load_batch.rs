@@ -378,18 +378,18 @@ fn build_rps_history_sample(
     metrics: &ConsolidatedLoadMetrics,
     latest_by_node: &HashMap<String, RunnerLoadLine>,
 ) -> Value {
+    let sample_elapsed_ms = timestamp.saturating_sub(metrics.start_time);
+    let sample_bucket_ms = rps_history_elapsed_bucket_ms(sample_elapsed_ms);
     let mut dispatch_bucket_total = 0usize;
     let mut has_dispatch_bucket = false;
     let mut runners = latest_by_node
         .values()
         .filter_map(|line| {
             let metrics = parse_runner_load_metrics(&line.payload)?;
-            let runner_elapsed_ms = timestamp.saturating_sub(metrics.start_time);
-            let runner_bucket_ms = rps_history_elapsed_bucket_ms(runner_elapsed_ms);
             let dispatch_bucket = metrics
                 .dispatch_buckets
                 .iter()
-                .find(|bucket| bucket.elapsed_ms == runner_bucket_ms)
+                .find(|bucket| bucket.elapsed_ms == sample_bucket_ms)
                 .map(|bucket| bucket.count);
             let mut runner = Map::new();
             runner.insert("runnerId".to_owned(), Value::String(line.node.clone()));
@@ -1354,7 +1354,7 @@ mod tests {
                         { "elapsedMs": 2_000, "count": 40 }
                     ],
                     "rps": 21.5,
-                    "startTime": 1_000,
+                    "startTime": 1_500,
                     "elapsedMs": 2_000
                 }),
             },
