@@ -180,6 +180,8 @@ mod tests {
         event_tx.send(WaveMetricEvent::RequestEnqueued).unwrap();
         event_tx.send(WaveMetricEvent::SendTaskSpawned).unwrap();
         event_tx.send(WaveMetricEvent::SendStarted).unwrap();
+        event_tx.send(WaveMetricEvent::HttpStarted).unwrap();
+        event_tx.send(WaveMetricEvent::HttpSendReturned).unwrap();
         event_tx
             .send(WaveMetricEvent::Scheduler(
                 WaveSchedulerMetric::SchedulerLag {
@@ -209,5 +211,7 @@ mod tests {
         assert_eq!(snapshot.request_enqueued, Some(1));
         assert_eq!(snapshot.send_task_spawned, Some(1));
         assert_eq!(snapshot.send_started, Some(1));
+        assert_eq!(snapshot.http_started, 1);
+        assert_eq!(snapshot.http_send_returned, Some(1));
     }
 }

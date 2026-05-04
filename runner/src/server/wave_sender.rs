@@ -44,6 +44,20 @@ pub struct WaveSender<C> {
     token: tokio_util::sync::CancellationToken,
 }
 
+pub struct WaveSenderHandle {
+    token: tokio_util::sync::CancellationToken,
+    join: std::thread::JoinHandle<()>,
+}
+
+impl WaveSenderHandle {
+    pub fn stop(self) {
+        self.token.cancel();
+        if let Err(err) = self.join.join() {
+            tracing::error!("wave sender thread panicked: {:?}", err);
+        }
+    }
+}
+
 impl<C> WaveSender<C>
 where
     C: Send + 'static,
@@ -71,20 +85,28 @@ where
     }
 
     pub async fn run(mut self) {
-        while let Some(request) = self.request_rx.recv().await {
-            self.ready_to_send.fetch_sub(1, Ordering::SeqCst);
-            if self.token.is_cancelled() {
-                break;
+        loop {
+            tokio::select! {
+                _ = self.token.cancelled() => break,
+                maybe_request = self.request_rx.recv() => {
+                    let Some(request) = maybe_request else {
+                        break;
+                    };
+                    self.ready_to_send.fetch_sub(1, Ordering::SeqCst);
+                    if self.token.is_cancelled() {
+                        break;
+                    }
+                    self.spawn_observer(request);
+                }
             }
-            self.spawn_observer(request);
         }
     }
 
     fn spawn_observer(&self, request: ReadyWaveRequest<C>) {
         self.response_in_flight.fetch_add(1, Ordering::SeqCst);
-        let dispatch_elapsed_ms = self.started.elapsed().as_millis() as u64;
 
         let client = Arc::clone(&self.client);
+        let started = self.started;
         let metric_tx = self.metric_tx.clone();
         let metrics_for_send = self.metric_tx.clone();
         let metrics_for_body = self.metric_tx.clone();
@@ -94,6 +116,7 @@ where
 
         let _ = metric_tx.send(WaveMetricEvent::SendTaskSpawned);
         tokio::spawn(async move {
+            let dispatch_elapsed_ms = started.elapsed().as_millis() as u64;
             let _ = metric_tx.send(WaveMetricEvent::SendStarted);
             let _ = metric_tx.send(WaveMetricEvent::DispatchStarted {
                 elapsed_ms: dispatch_elapsed_ms,
@@ -147,6 +170,44 @@ where
     }
 }
 
+pub fn spawn_wave_sender_thread<C>(sender: WaveSender<C>) -> WaveSenderHandle
+where
+    C: Send + 'static,
+{
+    let sender_token = sender.token.clone();
+    let join = std::thread::Builder::new()
+        .name("previa-wave-sender".to_owned())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(sender_worker_threads())
+                .thread_name("previa-wave-http")
+                .enable_all()
+                .build()
+                .expect("failed to build previa wave sender runtime");
+
+            runtime.block_on(sender.run());
+        })
+        .expect("failed to spawn previa wave sender thread");
+
+    WaveSenderHandle {
+        token: sender_token,
+        join,
+    }
+}
+
+fn sender_worker_threads() -> usize {
+    std::env::var("RUNNER_WAVE_SENDER_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|value| value.get())
+                .unwrap_or(2)
+                .clamp(2, 8)
+        })
+}
+
 #[cfg(test)]
 #[derive(Debug)]
 pub struct TestReadyWaveRequest<T> {
@@ -198,6 +259,44 @@ mod tests {
     use tokio::sync::Notify;
     use tokio::time::{Duration, timeout};
 
+    static SENDER_THREADS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn restore_sender_threads_env(previous: Option<String>) {
+        unsafe {
+            if let Some(value) = previous {
+                std::env::set_var("RUNNER_WAVE_SENDER_THREADS", value);
+            } else {
+                std::env::remove_var("RUNNER_WAVE_SENDER_THREADS");
+            }
+        }
+    }
+
+    #[test]
+    fn sender_worker_threads_uses_positive_env_value() {
+        let _guard = SENDER_THREADS_ENV_LOCK.lock().unwrap();
+        let previous = std::env::var("RUNNER_WAVE_SENDER_THREADS").ok();
+        unsafe {
+            std::env::set_var("RUNNER_WAVE_SENDER_THREADS", "3");
+        }
+
+        assert_eq!(sender_worker_threads(), 3);
+
+        restore_sender_threads_env(previous);
+    }
+
+    #[test]
+    fn sender_worker_threads_ignores_zero_env_value() {
+        let _guard = SENDER_THREADS_ENV_LOCK.lock().unwrap();
+        let previous = std::env::var("RUNNER_WAVE_SENDER_THREADS").ok();
+        unsafe {
+            std::env::set_var("RUNNER_WAVE_SENDER_THREADS", "0");
+        }
+
+        assert!(sender_worker_threads() >= 2);
+
+        restore_sender_threads_env(previous);
+    }
+
     #[tokio::test]
     async fn sender_starts_later_requests_without_waiting_for_prior_response_task() {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -234,6 +333,62 @@ mod tests {
 
         drop(tx);
         sender.abort();
+    }
+
+    #[tokio::test]
+    async fn dedicated_sender_thread_stops_when_cancelled() {
+        let (_request_tx, request_rx) = mpsc::unbounded_channel::<ReadyWaveRequest<()>>();
+        let (observer_tx, _observer_rx) = mpsc::unbounded_channel::<WaveObserverEvent<()>>();
+        let (metric_tx, _metric_rx) = mpsc::unbounded_channel();
+        let response_in_flight = Arc::new(AtomicUsize::new(0));
+        let ready_to_send = Arc::new(AtomicUsize::new(0));
+        let token = tokio_util::sync::CancellationToken::new();
+
+        let sender = WaveSender::new(
+            Arc::new(Client::new()),
+            Instant::now(),
+            metric_tx,
+            Arc::clone(&response_in_flight),
+            Arc::clone(&ready_to_send),
+            request_rx,
+            observer_tx,
+            token,
+        );
+
+        let handle = spawn_wave_sender_thread(sender);
+        handle.stop();
+
+        assert_eq!(response_in_flight.load(Ordering::SeqCst), 0);
+        assert_eq!(ready_to_send.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn sender_records_dispatch_start_inside_send_task() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (metric_tx, mut metric_rx) = mpsc::unbounded_channel();
+        let started = Arc::new(AtomicUsize::new(0));
+
+        let sender_started = Arc::clone(&started);
+        let sender = tokio::spawn(run_test_sender_with_metric_events(
+            rx,
+            metric_tx,
+            sender_started,
+            move |_payload: usize| async move {},
+        ));
+
+        tx.send(TestReadyWaveRequest { payload: 1 }).unwrap();
+        drop(tx);
+        sender.await.unwrap();
+
+        let mut dispatch_started = 0usize;
+        while let Ok(event) = metric_rx.try_recv() {
+            if matches!(event, WaveMetricEvent::DispatchStarted { .. }) {
+                dispatch_started += 1;
+            }
+        }
+
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+        assert_eq!(dispatch_started, 1);
     }
 
     #[tokio::test]

@@ -438,6 +438,23 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_bucket_uses_elapsed_time_from_event() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.record_dispatch_started_at(74_999);
+        metrics.record_dispatch_started_at(75_000);
+        metrics.record_dispatch_started_at(75_999);
+
+        let snapshot = metrics.snapshot(None, None);
+
+        assert_eq!(snapshot.dispatch_buckets.len(), 2);
+        assert_eq!(snapshot.dispatch_buckets[0].elapsed_ms, 74_000);
+        assert_eq!(snapshot.dispatch_buckets[0].count, 1);
+        assert_eq!(snapshot.dispatch_buckets[1].elapsed_ms, 75_000);
+        assert_eq!(snapshot.dispatch_buckets[1].count, 2);
+    }
+
+    #[test]
     fn snapshot_includes_deduped_error_samples() {
         let mut metrics = MetricsAccumulator::new();
 

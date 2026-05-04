@@ -22,7 +22,7 @@ use crate::server::wave_dispatcher::{
 };
 use crate::server::wave_metrics_actor::{WaveMetricEvent, run_wave_metrics_actor};
 use crate::server::wave_scheduler::{WaveSchedulerMetric, spawn_wave_scheduler_thread};
-use crate::server::wave_sender::{ReadyWaveRequest, WaveSender};
+use crate::server::wave_sender::{ReadyWaveRequest, WaveSender, spawn_wave_sender_thread};
 
 pub async fn run_wave_load(
     load: LoadProfile,
@@ -120,7 +120,7 @@ pub async fn run_wave_load(
         event_tx,
         observer_token.clone(),
     );
-    let sender_task = tokio::spawn(sender.run());
+    let sender_handle = spawn_wave_sender_thread(sender);
 
     while !token.is_cancelled() && started.elapsed().as_millis() as u64 <= end_ms {
         let dispatcher_snapshot = *dispatcher_snapshot_rx.borrow();
@@ -195,11 +195,7 @@ pub async fn run_wave_load(
             tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
         }
     }
-    if let Err(err) = sender_task.await {
-        if !err.is_cancelled() {
-            error!("wave sender task failed: {err}");
-        }
-    }
+    sender_handle.stop();
 
     let scheduled_total = snapshot_rx.borrow().scheduled_starts.unwrap_or_default();
     let ready_requests = dispatcher_snapshot_rx.borrow().ready_requests();
