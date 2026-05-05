@@ -150,6 +150,11 @@ describe("remote execution snapshot parsing", () => {
             rps: 5,
             startTime: 100,
             elapsedMs: 2000,
+            senderLaggedStarts: 2,
+            senderQueueDepth: 4,
+            lifecycleBuckets: [
+              { elapsedMs: 2000, planned: 10, httpStarted: 8, senderLagged: 1 },
+            ],
           },
         },
         {
@@ -162,6 +167,11 @@ describe("remote execution snapshot parsing", () => {
             rps: 7,
             startTime: 90,
             elapsedMs: 2200,
+            senderLaggedStarts: 3,
+            senderQueueDepth: 6,
+            lifecycleBuckets: [
+              { elapsedMs: 2000, planned: 12, httpStarted: 9, senderLagged: 2 },
+            ],
           },
         },
       ],
@@ -176,6 +186,12 @@ describe("remote execution snapshot parsing", () => {
       rps: 12,
       startTime: 90,
       elapsedMs: 2200,
+      senderLaggedStarts: 5,
+      senderQueueDepth: 10,
+    });
+    expect(snapshot?.metrics.lifecycleBuckets?.[0]).toMatchObject({
+      elapsedMs: 2000,
+      senderLagged: 3,
     });
     expect(snapshot?.nodesInfo?.nodeNames).toEqual(["runner-a", "runner-b"]);
   });

@@ -60,6 +60,13 @@ pub enum WaveMetricEvent {
     RuntimeLaggedStart {
         elapsed_ms: u64,
     },
+    SenderLaggedStarts {
+        elapsed_ms: u64,
+        count: usize,
+    },
+    SenderQueueDepth {
+        depth: usize,
+    },
     DependencyLimitedStarts(usize),
     Snapshot {
         wave: WaveMetricsSnapshot,
@@ -152,6 +159,12 @@ pub async fn run_wave_metrics_actor(
             }
             WaveMetricEvent::RuntimeLaggedStart { elapsed_ms } => {
                 accumulator.record_runtime_lagged_start_at(elapsed_ms);
+            }
+            WaveMetricEvent::SenderLaggedStarts { elapsed_ms, count } => {
+                accumulator.record_sender_lagged_starts_at(elapsed_ms, count);
+            }
+            WaveMetricEvent::SenderQueueDepth { depth } => {
+                accumulator.record_sender_queue_depth(depth);
             }
             WaveMetricEvent::DependencyLimitedStarts(count) => {
                 accumulator.record_dependency_limited_starts_count(count);
@@ -349,6 +362,52 @@ mod tests {
         assert_eq!(snapshot.lifecycle_buckets.len(), 1);
         assert_eq!(snapshot.lifecycle_buckets[0].elapsed_ms, 1_000);
         assert_eq!(snapshot.lifecycle_buckets[0].planned, 20);
+
+        drop(event_tx);
+        actor.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn metrics_actor_records_sender_saturation() {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (snapshot_tx, mut snapshot_rx) = watch::channel(LoadTestMetrics::default());
+
+        let actor = tokio::spawn(run_wave_metrics_actor(event_rx, snapshot_tx));
+
+        event_tx
+            .send(WaveMetricEvent::SenderLaggedStarts {
+                elapsed_ms: 2_000,
+                count: 3,
+            })
+            .unwrap();
+        event_tx
+            .send(WaveMetricEvent::SenderQueueDepth { depth: 9 })
+            .unwrap();
+        event_tx
+            .send(WaveMetricEvent::Snapshot {
+                wave: WaveMetricsSnapshot {
+                    target_intensity: 50.0,
+                    target_rps_limit: 500.0,
+                    in_flight: 0,
+                    runner_max_rps: 1_000.0,
+                    tick_ms: 100,
+                    scheduled_starts: 10,
+                    missed_starts: 3,
+                    ready_requests: 9,
+                    active_pipelines: 9,
+                    outstanding_requests: 0,
+                },
+                runtime: None,
+                duration_ms: None,
+                scope: MetricsSnapshotScope::Full,
+            })
+            .unwrap();
+
+        snapshot_rx.changed().await.unwrap();
+        let snapshot = snapshot_rx.borrow().clone();
+
+        assert_eq!(snapshot.sender_lagged_starts, Some(3));
+        assert_eq!(snapshot.sender_queue_depth, Some(9));
 
         drop(event_tx);
         actor.await.unwrap();

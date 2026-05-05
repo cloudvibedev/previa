@@ -698,6 +698,10 @@ pub struct ConsolidatedLoadMetrics {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_lagged_starts: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_queue_depth: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduler_lag_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduler_lagged_starts: Option<usize>,
@@ -759,6 +763,7 @@ pub struct ConsolidatedLoadLifecycleBucket {
     pub response_body_completed: usize,
     pub dispatcher_lagged: usize,
     pub runtime_lagged: usize,
+    pub sender_lagged: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -810,6 +815,7 @@ pub struct RunnerLoadLifecycleBucket {
     pub response_body_completed: usize,
     pub dispatcher_lagged: usize,
     pub runtime_lagged: usize,
+    pub sender_lagged: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -860,6 +866,8 @@ pub struct RunnerLoadMetricsPoint {
     pub dependency_limited_starts: Option<usize>,
     pub dispatcher_lagged_starts: Option<usize>,
     pub runtime_lagged_starts: Option<usize>,
+    pub sender_lagged_starts: Option<usize>,
+    pub sender_queue_depth: Option<usize>,
     pub scheduler_lag_ms: Option<u64>,
     pub scheduler_lagged_starts: Option<usize>,
     pub slot_enqueued: Option<usize>,

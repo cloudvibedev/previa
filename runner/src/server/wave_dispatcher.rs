@@ -39,6 +39,8 @@ pub type ObserverEvent = WaveObserverEvent<PipelineCursor>;
 #[derive(Debug)]
 pub struct WavePrepareIntent {
     pub cursor: PipelineCursor,
+    pub scheduled_elapsed_ms: u64,
+    pub expires_at_elapsed_ms: u64,
 }
 
 pub struct WavePrepareError {
@@ -192,7 +194,15 @@ pub async fn dispatch_slot_prepare_intents(args: DispatchSlotPrepareArgs<'_>) {
             });
         }
 
-        if args.prepare_tx.send(WavePrepareIntent { cursor }).is_err() {
+        if args
+            .prepare_tx
+            .send(WavePrepareIntent {
+                cursor,
+                scheduled_elapsed_ms: args.slot.elapsed_ms,
+                expires_at_elapsed_ms: args.slot.expires_at_elapsed_ms,
+            })
+            .is_err()
+        {
             error!("wave prepare workers stopped before accepting cursor");
             break;
         }
@@ -272,6 +282,7 @@ async fn prepare_and_enqueue_wave_request(
         elapsed_ms: prepared_elapsed_ms,
     });
 
+    let enqueue_elapsed_ms = config.started.elapsed().as_millis() as u64;
     config.ready_to_send.fetch_add(1, Ordering::SeqCst);
     if config
         .request_tx
@@ -283,6 +294,9 @@ async fn prepare_and_enqueue_wave_request(
             specs: Arc::clone(&config.specs),
             env_groups: Arc::clone(&config.env_groups),
             selected_env_group_slug: config.selected_env_group_slug.clone(),
+            scheduled_elapsed_ms: intent.scheduled_elapsed_ms,
+            expires_at_elapsed_ms: intent.expires_at_elapsed_ms,
+            sender_enqueued_elapsed_ms: enqueue_elapsed_ms,
         })
         .is_err()
     {
@@ -291,7 +305,6 @@ async fn prepare_and_enqueue_wave_request(
         return;
     }
 
-    let enqueue_elapsed_ms = config.started.elapsed().as_millis() as u64;
     let _ = config.metric_tx.send(WaveMetricEvent::RequestEnqueued {
         elapsed_ms: enqueue_elapsed_ms,
     });
@@ -739,6 +752,59 @@ mod tests {
 
         assert_eq!(count, 500);
         assert_eq!(missed_starts.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn prepared_request_carries_slot_deadline_to_sender() {
+        let pipeline = Pipeline {
+            id: Some("p".to_owned()),
+            name: "pipeline".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "s1".to_owned(),
+                name: "GET".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: "http://example.test/users".to_owned(),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: Vec::new(),
+            }],
+        };
+        let (prepare_tx, mut prepare_rx) = mpsc::unbounded_channel();
+        let (metric_tx, _metric_rx) = mpsc::unbounded_channel();
+        let missed_starts = Arc::new(AtomicUsize::new(0));
+        let token = tokio_util::sync::CancellationToken::new();
+        let mut ready = VecDeque::new();
+        let started = Instant::now();
+
+        dispatch_slot_prepare_intents(DispatchSlotPrepareArgs {
+            slot: WaveDispatchSlot {
+                elapsed_ms: 4_200,
+                expires_at_elapsed_ms: 4_300,
+                planned_starts: 1,
+                target_rps_limit: 10.0,
+                scheduled_total: 1,
+                scheduler_lag_ms: 0,
+                missed_due_to_scheduler_lag: 0,
+            },
+            ready: &mut ready,
+            pipeline: &pipeline,
+            prepare_tx: &prepare_tx,
+            metric_tx: &metric_tx,
+            missed_starts: &missed_starts,
+            started,
+            tick_ms: 100,
+            token: &token,
+        })
+        .await;
+
+        let intent = prepare_rx.try_recv().expect("prepare intent should exist");
+        assert_eq!(intent.scheduled_elapsed_ms, 4_200);
+        assert_eq!(intent.expires_at_elapsed_ms, 4_300);
     }
 
     #[tokio::test]

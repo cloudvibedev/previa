@@ -415,6 +415,12 @@ fn build_rps_history_sample(
                 "runtimeLaggedStarts",
                 metrics.runtime_lagged_starts,
             );
+            insert_optional(
+                &mut runner,
+                "senderLaggedStarts",
+                metrics.sender_lagged_starts,
+            );
+            insert_optional(&mut runner, "senderQueueDepth", metrics.sender_queue_depth);
             insert_optional(&mut runner, "schedulerLagMs", metrics.scheduler_lag_ms);
             insert_optional(
                 &mut runner,
@@ -460,6 +466,7 @@ fn build_rps_history_sample(
                         "responseBodyCompleted": bucket.response_body_completed,
                         "dispatcherLagged": bucket.dispatcher_lagged,
                         "runtimeLagged": bucket.runtime_lagged,
+                        "senderLagged": bucket.sender_lagged,
                     }),
                 );
             }
@@ -506,6 +513,12 @@ fn build_rps_history_sample(
         "runtimeLaggedStarts",
         metrics.runtime_lagged_starts,
     );
+    insert_optional(
+        &mut sample,
+        "senderLaggedStarts",
+        metrics.sender_lagged_starts,
+    );
+    insert_optional(&mut sample, "senderQueueDepth", metrics.sender_queue_depth);
     insert_optional(&mut sample, "schedulerLagMs", metrics.scheduler_lag_ms);
     insert_optional(
         &mut sample,
@@ -711,6 +724,7 @@ fn payload_with_merged_buckets(
                         "responseBodyCompleted": bucket.response_body_completed,
                         "dispatcherLagged": bucket.dispatcher_lagged,
                         "runtimeLagged": bucket.runtime_lagged,
+                        "senderLagged": bucket.sender_lagged,
                     })
                 })
                 .collect(),
@@ -791,6 +805,10 @@ pub fn consolidate_load_metrics(
     let mut dispatcher_lagged_starts_nodes = 0usize;
     let mut runtime_lagged_starts = 0usize;
     let mut runtime_lagged_starts_nodes = 0usize;
+    let mut sender_lagged_starts = 0usize;
+    let mut sender_lagged_starts_nodes = 0usize;
+    let mut sender_queue_depth = 0usize;
+    let mut sender_queue_depth_nodes = 0usize;
     let mut scheduler_lag_ms = 0u64;
     let mut scheduler_lag_ms_nodes = 0usize;
     let mut scheduler_lagged_starts = 0usize;
@@ -848,6 +866,7 @@ pub fn consolidate_load_metrics(
                     response_body_completed: 0,
                     dispatcher_lagged: 0,
                     runtime_lagged: 0,
+                    sender_lagged: 0,
                 });
             entry.planned = entry.planned.saturating_add(bucket.planned);
             entry.slot_enqueued = entry.slot_enqueued.saturating_add(bucket.slot_enqueued);
@@ -872,6 +891,7 @@ pub fn consolidate_load_metrics(
                 .dispatcher_lagged
                 .saturating_add(bucket.dispatcher_lagged);
             entry.runtime_lagged = entry.runtime_lagged.saturating_add(bucket.runtime_lagged);
+            entry.sender_lagged = entry.sender_lagged.saturating_add(bucket.sender_lagged);
         }
 
         if let Some(value) = metrics.total_started {
@@ -916,6 +936,14 @@ pub fn consolidate_load_metrics(
         if let Some(value) = metrics.runtime_lagged_starts {
             runtime_lagged_starts = runtime_lagged_starts.saturating_add(value);
             runtime_lagged_starts_nodes += 1;
+        }
+        if let Some(value) = metrics.sender_lagged_starts {
+            sender_lagged_starts = sender_lagged_starts.saturating_add(value);
+            sender_lagged_starts_nodes += 1;
+        }
+        if let Some(value) = metrics.sender_queue_depth {
+            sender_queue_depth = sender_queue_depth.saturating_add(value);
+            sender_queue_depth_nodes += 1;
         }
         if let Some(value) = metrics.scheduler_lag_ms {
             scheduler_lag_ms = scheduler_lag_ms.saturating_add(value);
@@ -1009,6 +1037,8 @@ pub fn consolidate_load_metrics(
         dispatcher_lagged_starts: (dispatcher_lagged_starts_nodes > 0)
             .then_some(dispatcher_lagged_starts),
         runtime_lagged_starts: (runtime_lagged_starts_nodes > 0).then_some(runtime_lagged_starts),
+        sender_lagged_starts: (sender_lagged_starts_nodes > 0).then_some(sender_lagged_starts),
+        sender_queue_depth: (sender_queue_depth_nodes > 0).then_some(sender_queue_depth),
         scheduler_lag_ms: (scheduler_lag_ms_nodes > 0).then_some(scheduler_lag_ms),
         scheduler_lagged_starts: (scheduler_lagged_starts_nodes > 0)
             .then_some(scheduler_lagged_starts),
@@ -1475,6 +1505,8 @@ mod tests {
                         "dependencyLimitedStarts": 1,
                         "dispatcherLaggedStarts": 5,
                         "runtimeLaggedStarts": 2,
+                        "senderLaggedStarts": 3,
+                        "senderQueueDepth": 11,
                         "schedulerLagMs": 30,
                         "schedulerLaggedStarts": 4,
                         "slotEnqueued": 100,
@@ -1485,7 +1517,10 @@ mod tests {
                         "readyRequests": 20,
                         "activePipelines": 50,
                         "outstandingRequests": 30,
-                        "curveAdherence": 95.0
+                        "curveAdherence": 95.0,
+                        "lifecycleBuckets": [
+                            {"elapsedMs": 1_000, "planned": 10, "httpStarted": 7, "senderLagged": 2}
+                        ]
                     }),
                 },
             ),
@@ -1511,6 +1546,8 @@ mod tests {
                         "dependencyLimitedStarts": 3,
                         "dispatcherLaggedStarts": 7,
                         "runtimeLaggedStarts": 4,
+                        "senderLaggedStarts": 9,
+                        "senderQueueDepth": 13,
                         "schedulerLagMs": 50,
                         "schedulerLaggedStarts": 6,
                         "slotEnqueued": 100,
@@ -1521,7 +1558,10 @@ mod tests {
                         "readyRequests": 30,
                         "activePipelines": 60,
                         "outstandingRequests": 40,
-                        "curveAdherence": 85.0
+                        "curveAdherence": 85.0,
+                        "lifecycleBuckets": [
+                            {"elapsedMs": 1_000, "planned": 20, "httpStarted": 14, "senderLagged": 5}
+                        ]
                     }),
                 },
             ),
@@ -1539,6 +1579,8 @@ mod tests {
         assert_eq!(consolidated.dependency_limited_starts, Some(4));
         assert_eq!(consolidated.dispatcher_lagged_starts, Some(12));
         assert_eq!(consolidated.runtime_lagged_starts, Some(6));
+        assert_eq!(consolidated.sender_lagged_starts, Some(12));
+        assert_eq!(consolidated.sender_queue_depth, Some(24));
         assert_eq!(consolidated.scheduler_lag_ms, Some(80));
         assert_eq!(consolidated.scheduler_lagged_starts, Some(10));
         assert_eq!(consolidated.slot_enqueued, Some(200));
@@ -1549,7 +1591,8 @@ mod tests {
         assert_eq!(consolidated.ready_requests, Some(50));
         assert_eq!(consolidated.active_pipelines, Some(110));
         assert_eq!(consolidated.outstanding_requests, Some(70));
-        assert_eq!(consolidated.curve_adherence, Some(90.0));
+        assert_eq!(consolidated.lifecycle_buckets[0].sender_lagged, 7);
+        assert_eq!(consolidated.curve_adherence, Some(70.0));
     }
 
     #[test]
@@ -1664,6 +1707,8 @@ mod tests {
             dependency_limited_starts: None,
             dispatcher_lagged_starts: None,
             runtime_lagged_starts: None,
+            sender_lagged_starts: None,
+            sender_queue_depth: None,
             scheduler_lag_ms: None,
             scheduler_lagged_starts: None,
             slot_enqueued: None,
@@ -1759,6 +1804,8 @@ mod tests {
             dependency_limited_starts: None,
             dispatcher_lagged_starts: None,
             runtime_lagged_starts: None,
+            sender_lagged_starts: None,
+            sender_queue_depth: None,
             scheduler_lag_ms: None,
             scheduler_lagged_starts: None,
             slot_enqueued: None,
@@ -1851,6 +1898,8 @@ mod tests {
             dependency_limited_starts: None,
             dispatcher_lagged_starts: None,
             runtime_lagged_starts: None,
+            sender_lagged_starts: None,
+            sender_queue_depth: None,
             scheduler_lag_ms: None,
             scheduler_lagged_starts: None,
             slot_enqueued: None,

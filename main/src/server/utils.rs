@@ -47,6 +47,8 @@ pub fn parse_runner_load_metrics(payload: &Value) -> Option<RunnerLoadMetricsPoi
         dependency_limited_starts: get_usize_field(payload, "dependencyLimitedStarts"),
         dispatcher_lagged_starts: get_usize_field(payload, "dispatcherLaggedStarts"),
         runtime_lagged_starts: get_usize_field(payload, "runtimeLaggedStarts"),
+        sender_lagged_starts: get_usize_field(payload, "senderLaggedStarts"),
+        sender_queue_depth: get_usize_field(payload, "senderQueueDepth"),
         scheduler_lag_ms: get_u64_field(payload, "schedulerLagMs"),
         scheduler_lagged_starts: get_usize_field(payload, "schedulerLaggedStarts"),
         slot_enqueued: get_usize_field(payload, "slotEnqueued"),
@@ -159,6 +161,7 @@ fn parse_lifecycle_buckets(payload: &Value) -> Vec<RunnerLoadLifecycleBucket> {
                             .unwrap_or(0),
                         dispatcher_lagged: get_usize_field(item, "dispatcherLagged").unwrap_or(0),
                         runtime_lagged: get_usize_field(item, "runtimeLagged").unwrap_or(0),
+                        sender_lagged: get_usize_field(item, "senderLagged").unwrap_or(0),
                     })
                 })
                 .collect()

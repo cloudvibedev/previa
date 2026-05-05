@@ -52,6 +52,8 @@ pub struct MetricsAccumulator {
     request_enqueued: usize,
     send_task_spawned: usize,
     send_started: usize,
+    sender_lagged_starts: usize,
+    sender_queue_depth: usize,
     start_time: u64,
     network_tx_bytes: u64,
     network_rx_bytes: u64,
@@ -86,6 +88,8 @@ impl MetricsAccumulator {
             request_enqueued: 0,
             send_task_spawned: 0,
             send_started: 0,
+            sender_lagged_starts: 0,
+            sender_queue_depth: 0,
             start_time: now_ms(),
             network_tx_bytes: 0,
             network_rx_bytes: 0,
@@ -202,6 +206,16 @@ impl MetricsAccumulator {
         self.record_runtime_lagged_start();
         let bucket = self.lifecycle_bucket_mut(elapsed_ms);
         bucket.runtime_lagged = bucket.runtime_lagged.saturating_add(1);
+    }
+
+    pub fn record_sender_lagged_starts_at(&mut self, elapsed_ms: u64, count: usize) {
+        self.sender_lagged_starts = self.sender_lagged_starts.saturating_add(count);
+        let bucket = self.lifecycle_bucket_mut(elapsed_ms);
+        bucket.sender_lagged = bucket.sender_lagged.saturating_add(count);
+    }
+
+    pub fn record_sender_queue_depth(&mut self, depth: usize) {
+        self.sender_queue_depth = depth;
     }
 
     pub fn record_http_send_returned(&mut self) {
@@ -369,6 +383,9 @@ impl MetricsAccumulator {
             request_enqueued: (self.request_enqueued > 0).then_some(self.request_enqueued),
             send_task_spawned: (self.send_task_spawned > 0).then_some(self.send_task_spawned),
             send_started: (self.send_started > 0).then_some(self.send_started),
+            sender_lagged_starts: (self.sender_lagged_starts > 0)
+                .then_some(self.sender_lagged_starts),
+            sender_queue_depth: (self.sender_queue_depth > 0).then_some(self.sender_queue_depth),
             rps,
             start_time: self.start_time,
             elapsed_ms,
@@ -576,10 +593,12 @@ mod tests {
                 .sum::<usize>(),
             2
         );
-        assert!(snapshot
-            .dispatch_buckets
-            .iter()
-            .all(|bucket| bucket.elapsed_ms % 1000 == 0));
+        assert!(
+            snapshot
+                .dispatch_buckets
+                .iter()
+                .all(|bucket| bucket.elapsed_ms % 1000 == 0)
+        );
     }
 
     #[test]
@@ -631,6 +650,23 @@ mod tests {
         assert_eq!(bucket.response_body_completed, 1);
         assert_eq!(bucket.dispatcher_lagged, 2);
         assert_eq!(bucket.runtime_lagged, 1);
+    }
+
+    #[test]
+    fn snapshot_includes_sender_lagged_starts_and_bucket() {
+        let mut metrics = MetricsAccumulator::new();
+
+        metrics.record_planned_at(10_000, 5);
+        metrics.record_sender_lagged_starts_at(10_000, 2);
+        metrics.record_sender_queue_depth(17);
+
+        let snapshot = metrics.snapshot_with_wave(None, None, None);
+
+        assert_eq!(snapshot.sender_lagged_starts, Some(2));
+        assert_eq!(snapshot.sender_queue_depth, Some(17));
+        assert_eq!(snapshot.lifecycle_buckets.len(), 1);
+        assert_eq!(snapshot.lifecycle_buckets[0].elapsed_ms, 10_000);
+        assert_eq!(snapshot.lifecycle_buckets[0].sender_lagged, 2);
     }
 
     #[test]

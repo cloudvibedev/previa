@@ -798,6 +798,8 @@ export function loadRecordToRun(r: LoadHistoryRecord): LoadTestRunRecord {
     dependencyLimitedStarts: consolidated?.dependencyLimitedStarts,
     dispatcherLaggedStarts: consolidated?.dispatcherLaggedStarts,
     runtimeLaggedStarts: consolidated?.runtimeLaggedStarts,
+    senderLaggedStarts: consolidated?.senderLaggedStarts,
+    senderQueueDepth: consolidated?.senderQueueDepth,
     schedulerLagMs: consolidated?.schedulerLagMs,
     schedulerLaggedStarts: consolidated?.schedulerLaggedStarts,
     slotEnqueued: consolidated?.slotEnqueued,

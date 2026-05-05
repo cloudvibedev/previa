@@ -2046,6 +2046,7 @@ version = "1.0.0-alpha.20"
 dependencies = [
  "axum",
  "dotenvy",
+ "futures-util",
  "http-body-util",
  "httpmock",
  "previa-engine",

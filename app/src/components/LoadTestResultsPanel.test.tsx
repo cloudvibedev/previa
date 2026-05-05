@@ -688,6 +688,8 @@ describe("LoadTestResultsPanel", () => {
           outstandingRequests: 90,
           dispatcherLaggedStarts: 9,
           runtimeLaggedStarts: 7,
+          senderLaggedStarts: 5,
+          senderQueueDepth: 11,
           dependencyLimitedStarts: 3,
           slotEnqueued: 118,
           requestPrepared: 117,
@@ -718,6 +720,10 @@ describe("LoadTestResultsPanel", () => {
     expect(screen.getByText("9")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.runtimeLaggedStarts")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.senderLaggedStarts")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.senderQueueDepth")).toBeInTheDocument();
+    expect(screen.getByText("11")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.dependencyLimitedStarts")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.slotEnqueued")).toBeInTheDocument();

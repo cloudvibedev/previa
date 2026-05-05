@@ -133,6 +133,8 @@ pub struct LoadLifecycleBucket {
     pub dispatcher_lagged: usize,
     #[serde(skip_serializing_if = "is_zero")]
     pub runtime_lagged: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub sender_lagged: usize,
 }
 
 fn is_zero(value: &usize) -> bool {
@@ -187,6 +189,10 @@ pub struct LoadTestMetrics {
     pub send_task_spawned: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub send_started: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_queue_depth: Option<usize>,
     pub rps: f64,
     pub start_time: u64,
     pub elapsed_ms: u64,
@@ -254,6 +260,8 @@ impl Default for LoadTestMetrics {
             request_enqueued: None,
             send_task_spawned: None,
             send_started: None,
+            sender_lagged_starts: None,
+            sender_queue_depth: None,
             rps: 0.0,
             start_time: crate::server::utils::now_ms(),
             elapsed_ms: 0,

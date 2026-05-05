@@ -279,6 +279,8 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
         typeof metrics.dependencyLimitedStarts === "number" ||
         typeof metrics.dispatcherLaggedStarts === "number" ||
         typeof metrics.runtimeLaggedStarts === "number" ||
+        typeof metrics.senderLaggedStarts === "number" ||
+        typeof metrics.senderQueueDepth === "number" ||
         typeof metrics.schedulerLagMs === "number" ||
         typeof metrics.schedulerLaggedStarts === "number" ||
         typeof metrics.slotEnqueued === "number" ||
@@ -380,6 +382,22 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
               label={t("loadTestResults.runtimeLaggedStarts")}
               value={metrics.runtimeLaggedStarts}
               color="text-warning"
+            />
+          )}
+          {typeof metrics.senderLaggedStarts === "number" && (
+            <MetricCard
+              icon={AlertTriangle}
+              label={t("loadTestResults.senderLaggedStarts")}
+              value={metrics.senderLaggedStarts}
+              color="text-warning"
+            />
+          )}
+          {typeof metrics.senderQueueDepth === "number" && (
+            <MetricCard
+              icon={ListChecks}
+              label={t("loadTestResults.senderQueueDepth")}
+              value={metrics.senderQueueDepth}
+              color="text-primary"
             />
           )}
           {typeof metrics.schedulerLagMs === "number" && (

@@ -46,6 +46,8 @@ export interface RpsPoint {
   dependencyLimitedStarts?: number;
   dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
+  senderLaggedStarts?: number;
+  senderQueueDepth?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
   slotEnqueued?: number;
@@ -77,6 +79,8 @@ export interface RunnerRpsSample {
   dependencyLimitedStarts?: number;
   dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
+  senderLaggedStarts?: number;
+  senderQueueDepth?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
   slotEnqueued?: number;
@@ -136,6 +140,7 @@ export interface LoadLifecycleBucket {
   responseBodyCompleted?: number;
   dispatcherLagged?: number;
   runtimeLagged?: number;
+  senderLagged?: number;
 }
 
 /** Slim payload sent by the backend SSE (no latency history/percentiles). */
@@ -154,6 +159,8 @@ export interface RemoteMetricsEvent {
   dependencyLimitedStarts?: number;
   dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
+  senderLaggedStarts?: number;
+  senderQueueDepth?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
   slotEnqueued?: number;
@@ -196,6 +203,8 @@ export interface LoadTestMetrics {
   dependencyLimitedStarts?: number;
   dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
+  senderLaggedStarts?: number;
+  senderQueueDepth?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
   slotEnqueued?: number;
@@ -242,6 +251,8 @@ export interface ConsolidatedLoadMetrics {
   dependencyLimitedStarts?: number;
   dispatcherLaggedStarts?: number;
   runtimeLaggedStarts?: number;
+  senderLaggedStarts?: number;
+  senderQueueDepth?: number;
   schedulerLagMs?: number;
   schedulerLaggedStarts?: number;
   slotEnqueued?: number;
