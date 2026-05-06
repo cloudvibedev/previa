@@ -10,8 +10,8 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use previa_runner::{
-    PipelineStep, PreparedHttpStep, RuntimeEnvGroup, RuntimeSpec, StepExecutionResult,
-    send_prepared_http_step_with_hooks,
+    PipelineStep, PreparedHttpStep, RuntimeEnvGroup, RuntimeSpec, StartedHttpStep,
+    StepExecutionResult, complete_started_http_step_with_hook, start_prepared_http_step_with_hooks,
 };
 
 use crate::server::metrics::estimate_results_network_bytes;
@@ -39,8 +39,15 @@ struct SenderWorkerCommand<C> {
     request: ReadyWaveRequest<C>,
 }
 
-struct ObserverCommand<C> {
-    request: ReadyWaveRequest<C>,
+enum ObserverCommand<C> {
+    Started {
+        request: ReadyWaveRequest<C>,
+        started: StartedHttpStep,
+    },
+    StartError {
+        cursor: C,
+        result: StepExecutionResult,
+    },
 }
 
 pub struct WaveSender<C> {
@@ -64,6 +71,18 @@ impl WaveSenderHandle {
         self.token.cancel();
         if let Err(err) = self.join.join() {
             tracing::error!("wave sender thread panicked: {:?}", err);
+        }
+    }
+}
+
+struct WaveObserverHandle {
+    join: std::thread::JoinHandle<()>,
+}
+
+impl WaveObserverHandle {
+    fn stop(self) {
+        if let Err(err) = self.join.join() {
+            tracing::error!("wave observer thread panicked: {:?}", err);
         }
     }
 }
@@ -99,20 +118,20 @@ where
         let mut workers = Vec::with_capacity(worker_count);
         let mut worker_txs = Vec::with_capacity(worker_count);
         let (observer_command_tx, observer_command_rx) = mpsc::unbounded_channel();
-        let observer = tokio::spawn(run_observer_loop(
-            Arc::clone(&self.client),
+        let observer = spawn_wave_observer_thread(
             self.started,
             self.metric_tx.clone(),
             Arc::clone(&self.response_in_flight),
             observer_command_rx,
             self.observer_tx.clone(),
             self.token.clone(),
-        ));
+        );
 
         for _ in 0..worker_count {
             let (worker_tx, worker_rx) = mpsc::unbounded_channel();
             worker_txs.push(worker_tx);
             workers.push(tokio::spawn(run_sender_worker(
+                Arc::clone(&self.client),
                 self.started,
                 self.metric_tx.clone(),
                 Arc::clone(&self.response_in_flight),
@@ -158,10 +177,7 @@ where
             let _ = worker.await;
         }
         drop(observer_command_tx);
-        if cancelled {
-            observer.abort();
-        }
-        let _ = observer.await;
+        observer.stop();
     }
 }
 
@@ -186,27 +202,25 @@ fn record_if_sender_late(args: SenderDeadlineCheck<'_>) -> bool {
     true
 }
 
-async fn observe_ready_request<C>(
+async fn start_ready_request<C>(
     client: Arc<Client>,
     started: Instant,
     metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
     request: ReadyWaveRequest<C>,
+    response_in_flight: Arc<AtomicUsize>,
+    observer_tx: mpsc::UnboundedSender<ObserverCommand<C>>,
     token: tokio_util::sync::CancellationToken,
-) -> Option<WaveObserverEvent<C>>
-where
+) where
     C: Send + 'static,
 {
     let metrics_for_start = metric_tx.clone();
     let metrics_for_send = metric_tx.clone();
-    let metrics_for_body = metric_tx.clone();
-    let result = send_prepared_http_step_with_hooks(
+    let prepared = request.prepared.clone();
+    let step = request.step.clone();
+    let started_result = start_prepared_http_step_with_hooks(
         client.as_ref(),
-        request.prepared,
-        &request.step,
-        &request.context,
-        Some(request.specs.as_slice()),
-        Some(request.env_groups.as_slice()),
-        request.selected_env_group_slug.as_deref(),
+        prepared,
+        &step,
         || token.is_cancelled(),
         move || {
             let metric_tx = metrics_for_start.clone();
@@ -224,6 +238,46 @@ where
                 });
             }
         },
+    )
+    .await;
+
+    let Some(started_result) = started_result else {
+        response_in_flight.fetch_sub(1, Ordering::SeqCst);
+        return;
+    };
+
+    let command = match started_result {
+        Ok(started) => ObserverCommand::Started { request, started },
+        Err(result) => ObserverCommand::StartError {
+            cursor: request.cursor,
+            result,
+        },
+    };
+
+    if observer_tx.send(command).is_err() {
+        response_in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+async fn observe_started_request<C>(
+    started: Instant,
+    metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
+    request: ReadyWaveRequest<C>,
+    started_http: StartedHttpStep,
+    token: tokio_util::sync::CancellationToken,
+) -> Option<WaveObserverEvent<C>>
+where
+    C: Send + 'static,
+{
+    let metrics_for_body = metric_tx.clone();
+    let result = complete_started_http_step_with_hook(
+        started_http,
+        &request.step,
+        &request.context,
+        Some(request.specs.as_slice()),
+        Some(request.env_groups.as_slice()),
+        request.selected_env_group_slug.as_deref(),
+        || token.is_cancelled(),
         move || {
             let metric_tx = metrics_for_body.clone();
             async move {
@@ -252,18 +306,46 @@ where
     })
 }
 
+async fn observe_start_error<C>(
+    metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
+    cursor: C,
+    result: StepExecutionResult,
+) -> Option<WaveObserverEvent<C>>
+where
+    C: Send + 'static,
+{
+    let (network_tx_bytes, network_rx_bytes) =
+        estimate_results_network_bytes(std::slice::from_ref(&result));
+    if result.request.is_some() {
+        let _ = metric_tx.send(WaveMetricEvent::HttpCompleted(1));
+    }
+    let _ = metric_tx.send(WaveMetricEvent::NetworkBytes {
+        tx: network_tx_bytes,
+        rx: network_rx_bytes,
+    });
+
+    Some(WaveObserverEvent { cursor, result })
+}
+
 async fn run_observer_request<C>(
-    client: Arc<Client>,
     started: Instant,
     metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
     response_in_flight: Arc<AtomicUsize>,
     observer_tx: mpsc::UnboundedSender<WaveObserverEvent<C>>,
-    request: ReadyWaveRequest<C>,
+    command: ObserverCommand<C>,
     token: tokio_util::sync::CancellationToken,
 ) where
     C: Send + 'static,
 {
-    let result = observe_ready_request(client, started, metric_tx, request, token).await;
+    let result = match command {
+        ObserverCommand::Started {
+            request,
+            started: started_http,
+        } => observe_started_request(started, metric_tx, request, started_http, token).await,
+        ObserverCommand::StartError { cursor, result } => {
+            observe_start_error(metric_tx, cursor, result).await
+        }
+    };
 
     response_in_flight.fetch_sub(1, Ordering::SeqCst);
     if let Some(event) = result {
@@ -272,7 +354,6 @@ async fn run_observer_request<C>(
 }
 
 async fn run_observer_loop<C>(
-    client: Arc<Client>,
     started: Instant,
     metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
     response_in_flight: Arc<AtomicUsize>,
@@ -300,12 +381,11 @@ async fn run_observer_loop<C>(
             maybe_command = observer_rx.recv(), if !observer_closed => {
                 if let Some(command) = maybe_command {
                     join_set.spawn(run_observer_request(
-                        Arc::clone(&client),
                         started,
                         metric_tx.clone(),
                         Arc::clone(&response_in_flight),
                         observer_tx.clone(),
-                        command.request,
+                        command,
                         token.clone(),
                     ));
                 } else {
@@ -320,6 +400,7 @@ async fn run_observer_loop<C>(
 }
 
 async fn run_sender_worker<C>(
+    client: Arc<Client>,
     started: Instant,
     metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
     response_in_flight: Arc<AtomicUsize>,
@@ -331,9 +412,10 @@ async fn run_sender_worker<C>(
     C: Send + 'static,
 {
     let mut worker_closed = false;
+    let mut start_tasks = JoinSet::new();
 
     loop {
-        if worker_closed {
+        if worker_closed && start_tasks.is_empty() {
             break;
         }
 
@@ -371,17 +453,26 @@ async fn run_sender_worker<C>(
                     elapsed_ms: dispatch_elapsed_ms,
                 });
 
-                if observer_tx.send(ObserverCommand { request }).is_err() {
-                    response_in_flight.fetch_sub(1, Ordering::SeqCst);
-                    break;
-                }
+                start_tasks.spawn(start_ready_request(
+                    Arc::clone(&client),
+                    started,
+                    metric_tx.clone(),
+                    request,
+                    Arc::clone(&response_in_flight),
+                    observer_tx.clone(),
+                    token.clone(),
+                ));
             }
+            Some(_) = start_tasks.join_next(), if !start_tasks.is_empty() => {}
         }
     }
+
+    while start_tasks.join_next().await.is_some() {}
 }
 
 #[cfg(test)]
 async fn run_fire_only_sender_for_test<C>(
+    client: Arc<Client>,
     started: Instant,
     metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
     response_in_flight: Arc<AtomicUsize>,
@@ -394,6 +485,7 @@ async fn run_fire_only_sender_for_test<C>(
 {
     let (worker_tx, worker_rx) = mpsc::unbounded_channel();
     let worker = tokio::spawn(run_sender_worker(
+        client,
         started,
         metric_tx,
         response_in_flight,
@@ -437,9 +529,58 @@ where
     }
 }
 
+fn spawn_wave_observer_thread<C>(
+    started: Instant,
+    metric_tx: mpsc::UnboundedSender<WaveMetricEvent>,
+    response_in_flight: Arc<AtomicUsize>,
+    observer_rx: mpsc::UnboundedReceiver<ObserverCommand<C>>,
+    observer_tx: mpsc::UnboundedSender<WaveObserverEvent<C>>,
+    token: tokio_util::sync::CancellationToken,
+) -> WaveObserverHandle
+where
+    C: Send + 'static,
+{
+    let join = std::thread::Builder::new()
+        .name("previa-wave-observer".to_owned())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(observer_worker_count())
+                .thread_name("previa-wave-observer")
+                .enable_all()
+                .build()
+                .expect("failed to build previa wave observer runtime");
+
+            runtime.block_on(run_observer_loop(
+                started,
+                metric_tx,
+                response_in_flight,
+                observer_rx,
+                observer_tx,
+                token,
+            ));
+        })
+        .expect("failed to spawn previa wave observer thread");
+
+    WaveObserverHandle { join }
+}
+
 fn sender_worker_count() -> usize {
     std::env::var("RUNNER_WAVE_SENDER_WORKERS")
         .or_else(|_| std::env::var("RUNNER_WAVE_SENDER_THREADS"))
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|value| value.get())
+                .unwrap_or(2)
+                .clamp(2, 16)
+        })
+}
+
+fn observer_worker_count() -> usize {
+    std::env::var("RUNNER_WAVE_OBSERVER_WORKERS")
+        .or_else(|_| std::env::var("RUNNER_WAVE_OBSERVER_THREADS"))
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
@@ -515,7 +656,7 @@ mod tests {
             name: "GET".to_owned(),
             description: None,
             method: "GET".to_owned(),
-            url: "http://127.0.0.1/test".to_owned(),
+            url: "http://127.0.0.1:9/test".to_owned(),
             headers: HashMap::new(),
             body: None,
             operation_id: None,
@@ -632,6 +773,7 @@ mod tests {
         drop(request_tx);
 
         run_fire_only_sender_for_test(
+            Arc::new(Client::new()),
             started,
             metric_tx,
             Arc::clone(&response_in_flight),
@@ -739,6 +881,7 @@ mod tests {
         drop(request_tx);
 
         run_fire_only_sender_for_test(
+            Arc::new(Client::new()),
             started,
             metric_tx.clone(),
             Arc::clone(&response_in_flight),
@@ -767,7 +910,7 @@ mod tests {
 
         assert_eq!(observer_commands, 128);
         assert_eq!(send_started, 128);
-        assert_eq!(http_started, 0);
+        assert_eq!(http_started, 128);
         assert_eq!(ready_to_send.load(Ordering::SeqCst), 0);
         assert_eq!(response_in_flight.load(Ordering::SeqCst), 128);
     }
@@ -805,13 +948,27 @@ mod tests {
         )
         .expect("mock request should prepare");
 
+        let started_http = previa_runner::start_prepared_http_step_with_hooks(
+            client.as_ref(),
+            request.prepared.clone(),
+            &request.step,
+            || false,
+            || async {},
+            || async {},
+        )
+        .await
+        .expect("start should not be cancelled")
+        .expect("mock request should start");
+
         observer_command_tx
-            .send(ObserverCommand { request })
+            .send(ObserverCommand::Started {
+                request,
+                started: started_http,
+            })
             .expect("observer command should enqueue");
         drop(observer_command_tx);
 
         run_observer_loop(
-            client,
             started,
             metric_tx,
             Arc::clone(&response_in_flight),
@@ -915,6 +1072,7 @@ mod tests {
         drop(request_tx);
 
         run_fire_only_sender_for_test(
+            Arc::new(Client::new()),
             started,
             metric_tx,
             Arc::clone(&response_in_flight),
@@ -950,7 +1108,7 @@ mod tests {
 
         assert_eq!(observer_commands, 2);
         assert_eq!(dispatch_started, 2);
-        assert_eq!(http_started, 0);
+        assert_eq!(http_started, 2);
         assert_eq!(send_started, 2);
     }
 }

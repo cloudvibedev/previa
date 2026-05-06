@@ -11,6 +11,7 @@ pub use engine::{
     execute_pipeline_with_specs_hooks,
 };
 pub use http_step::{
-    PreparedHttpStep, prepare_http_step, send_prepared_http_step,
-    send_prepared_http_step_with_hooks,
+    PreparedHttpStep, StartedHttpStep, complete_started_http_step_with_hook, prepare_http_step,
+    send_prepared_http_step, send_prepared_http_step_with_hooks,
+    start_prepared_http_step_with_hooks,
 };
