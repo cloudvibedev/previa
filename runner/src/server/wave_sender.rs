@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use reqwest::Client;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -202,6 +203,16 @@ fn record_if_sender_late(args: SenderDeadlineCheck<'_>) -> bool {
     true
 }
 
+fn decrement_response_in_flight(counter: &AtomicUsize) {
+    let mut current = counter.load(Ordering::SeqCst);
+    while current > 0 {
+        match counter.compare_exchange(current, current - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return,
+            Err(next) => current = next,
+        }
+    }
+}
+
 async fn start_ready_request<C>(
     client: Arc<Client>,
     started: Instant,
@@ -242,7 +253,7 @@ async fn start_ready_request<C>(
     .await;
 
     let Some(started_result) = started_result else {
-        response_in_flight.fetch_sub(1, Ordering::SeqCst);
+        decrement_response_in_flight(&response_in_flight);
         return;
     };
 
@@ -255,7 +266,7 @@ async fn start_ready_request<C>(
     };
 
     if observer_tx.send(command).is_err() {
-        response_in_flight.fetch_sub(1, Ordering::SeqCst);
+        decrement_response_in_flight(&response_in_flight);
     }
 }
 
@@ -347,7 +358,7 @@ async fn run_observer_request<C>(
         }
     };
 
-    response_in_flight.fetch_sub(1, Ordering::SeqCst);
+    decrement_response_in_flight(&response_in_flight);
     if let Some(event) = result {
         let _ = observer_tx.send(event);
     }
@@ -412,7 +423,7 @@ async fn run_sender_worker<C>(
     C: Send + 'static,
 {
     let mut worker_closed = false;
-    let mut start_tasks = JoinSet::new();
+    let mut start_tasks = FuturesUnordered::new();
 
     loop {
         if worker_closed && start_tasks.is_empty() {
@@ -453,7 +464,7 @@ async fn run_sender_worker<C>(
                     elapsed_ms: dispatch_elapsed_ms,
                 });
 
-                start_tasks.spawn(start_ready_request(
+                start_tasks.push(start_ready_request(
                     Arc::clone(&client),
                     started,
                     metric_tx.clone(),
@@ -463,11 +474,11 @@ async fn run_sender_worker<C>(
                     token.clone(),
                 ));
             }
-            Some(_) = start_tasks.join_next(), if !start_tasks.is_empty() => {}
+            Some(_) = start_tasks.next(), if !start_tasks.is_empty() => {}
         }
     }
 
-    while start_tasks.join_next().await.is_some() {}
+    while start_tasks.next().await.is_some() {}
 }
 
 #[cfg(test)]
@@ -756,6 +767,22 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn response_in_flight_decrement_does_not_underflow() {
+        let counter = AtomicUsize::new(0);
+
+        decrement_response_in_flight(&counter);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+
+        counter.store(2, Ordering::SeqCst);
+        decrement_response_in_flight(&counter);
+        decrement_response_in_flight(&counter);
+        decrement_response_in_flight(&counter);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn sender_forwards_expired_request_after_recording_late_start() {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
@@ -913,6 +940,86 @@ mod tests {
         assert_eq!(http_started, 128);
         assert_eq!(ready_to_send.load(Ordering::SeqCst), 0);
         assert_eq!(response_in_flight.load(Ordering::SeqCst), 128);
+    }
+
+    #[tokio::test]
+    async fn sender_fixed_workers_start_http_without_waiting_for_body_observation() {
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (metric_tx, mut metric_rx) = mpsc::unbounded_channel();
+        let (observer_tx, mut observer_rx) = mpsc::unbounded_channel();
+        let ready_to_send = Arc::new(AtomicUsize::new(0));
+        let response_in_flight = Arc::new(AtomicUsize::new(0));
+        let token = tokio_util::sync::CancellationToken::new();
+        let started = Instant::now();
+
+        for index in 0..32usize {
+            ready_to_send.fetch_add(1, Ordering::SeqCst);
+            request_tx
+                .send(test_ready_wave_request(index, started, 0, 60_000))
+                .expect("request should enqueue");
+        }
+        drop(request_tx);
+
+        run_fire_only_sender_for_test(
+            Arc::new(Client::new()),
+            started,
+            metric_tx,
+            Arc::clone(&response_in_flight),
+            Arc::clone(&ready_to_send),
+            request_rx,
+            observer_tx,
+            token,
+        )
+        .await;
+
+        let mut observer_commands = 0usize;
+        while observer_rx.try_recv().is_ok() {
+            observer_commands += 1;
+        }
+
+        let mut send_started = 0usize;
+        let mut http_started = 0usize;
+        while let Ok(event) = metric_rx.try_recv() {
+            if matches!(event, WaveMetricEvent::SendStarted { .. }) {
+                send_started += 1;
+            }
+            if matches!(event, WaveMetricEvent::HttpStarted { .. }) {
+                http_started += 1;
+            }
+        }
+
+        assert_eq!(observer_commands, 32);
+        assert_eq!(send_started, 32);
+        assert_eq!(http_started, 32);
+        assert_eq!(ready_to_send.load(Ordering::SeqCst), 0);
+        assert_eq!(response_in_flight.load(Ordering::SeqCst), 32);
+    }
+
+    #[tokio::test]
+    async fn cancelled_start_after_observer_shutdown_does_not_underflow_in_flight() {
+        let (observer_tx, observer_rx) = mpsc::unbounded_channel::<ObserverCommand<usize>>();
+        drop(observer_rx);
+
+        let (metric_tx, _metric_rx) = mpsc::unbounded_channel::<WaveMetricEvent>();
+        let response_in_flight = Arc::new(AtomicUsize::new(0));
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+
+        let started = Instant::now();
+        let request = test_ready_wave_request(1, started, 0, 60_000);
+
+        start_ready_request(
+            Arc::new(Client::new()),
+            started,
+            metric_tx,
+            request,
+            Arc::clone(&response_in_flight),
+            observer_tx,
+            token,
+        )
+        .await;
+
+        assert_eq!(response_in_flight.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

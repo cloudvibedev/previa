@@ -696,6 +696,7 @@ describe("LoadTestResultsPanel", () => {
           requestEnqueued: 116,
           sendTaskSpawned: 115,
           sendStarted: 114,
+          httpStarted: 113,
         }}
         state="running"
         totalRequests={0}
@@ -736,6 +737,8 @@ describe("LoadTestResultsPanel", () => {
     expect(screen.getByText("115")).toBeInTheDocument();
     expect(screen.getByText("loadTestResults.sendStarted")).toBeInTheDocument();
     expect(screen.getByText("114")).toBeInTheDocument();
+    expect(screen.getByText("loadTestResults.httpStarted")).toBeInTheDocument();
+    expect(screen.getByText("113")).toBeInTheDocument();
   });
 
   it("shows actual and target RPS legend when target data exists", () => {

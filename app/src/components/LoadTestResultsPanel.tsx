@@ -288,6 +288,7 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
         typeof metrics.requestEnqueued === "number" ||
         typeof metrics.sendTaskSpawned === "number" ||
         typeof metrics.sendStarted === "number" ||
+        typeof metrics.httpStarted === "number" ||
         typeof metrics.outstandingRequests === "number") && (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-5">
           {typeof metrics.dispatchSubmitted === "number" && (
@@ -343,6 +344,14 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
               icon={Activity}
               label={t("loadTestResults.sendStarted")}
               value={metrics.sendStarted}
+              color="text-primary"
+            />
+          )}
+          {typeof metrics.httpStarted === "number" && (
+            <MetricCard
+              icon={Activity}
+              label={t("loadTestResults.httpStarted")}
+              value={metrics.httpStarted}
               color="text-primary"
             />
           )}
