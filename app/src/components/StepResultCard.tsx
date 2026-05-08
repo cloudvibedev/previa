@@ -234,9 +234,9 @@ function RerunFromStepButton({
         <TooltipTrigger asChild>
           <Button
             type="button"
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+            variant="outline"
+            size="sm"
+            className="h-6 shrink-0 gap-1.5 border-primary/30 bg-primary/10 px-2 text-[10px] font-medium text-primary hover:bg-primary/15 hover:text-primary"
             disabled={disabled}
             aria-label="Rerun from here"
             onClick={(e) => {
@@ -246,6 +246,7 @@ function RerunFromStepButton({
             }}
           >
             <RotateCcw className="h-3.5 w-3.5" />
+            <span>Run here</span>
           </Button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">Rerun from here</TooltipContent>

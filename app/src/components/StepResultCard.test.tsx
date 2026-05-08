@@ -32,6 +32,8 @@ describe("StepResultCard", () => {
       />,
     );
 
+    expect(screen.getByText("Run here")).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "Rerun from here" }));
 
     expect(onRerunFromStep).toHaveBeenCalledWith(step.id);
