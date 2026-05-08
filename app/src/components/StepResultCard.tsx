@@ -234,9 +234,9 @@ function RerunFromStepButton({
         <TooltipTrigger asChild>
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0 border-primary bg-primary text-white hover:bg-primary/90 hover:text-white"
+            className="h-6 w-6 shrink-0 bg-transparent p-0 text-white shadow-none hover:bg-transparent hover:text-white"
             disabled={disabled}
             aria-label="Rerun from here"
             onClick={(e) => {
