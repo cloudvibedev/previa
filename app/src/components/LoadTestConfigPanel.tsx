@@ -103,21 +103,26 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
   const [durationMs, setDurationMs] = useState(Math.max(initialWave.points.at(-1)?.atMs ?? 120_000, 100));
   const [selectedPointIndex, setSelectedPointIndex] = useState(0);
   const [interpolation, setInterpolation] = useState<LoadInterpolation>(initialWave.interpolation);
+  const [runnerMaxRpsInput, setRunnerMaxRpsInput] = useState(
+    typeof initialWave.runnerMaxRps === "number" ? String(initialWave.runnerMaxRps) : "",
+  );
   const [gracePeriodMs, setGracePeriodMs] = useState(initialWave.gracePeriodMs ?? 30_000);
   const [selectedEnv, setSelectedEnv] = useState<string | undefined>(undefined);
 
   const selectedEnvGroup = envGroups.find((group) => group.slug === selectedEnvGroupSlug);
   const sortedPoints = normalizeWavePoints(points, durationMs);
   const selectedPoint = sortedPoints[selectedPointIndex] ?? sortedPoints[0];
+  const runnerMaxRps = parseOptionalPositiveNumber(runnerMaxRpsInput);
   const waveConfig: WaveLoadConfig = {
     points: sortedPoints,
     interpolation,
+    ...(typeof runnerMaxRps === "number" ? { runnerMaxRps } : {}),
     gracePeriodMs,
   };
 
   useEffect(() => {
     onConfigChange?.(waveConfig, selectedEnv);
-  }, [points, durationMs, interpolation, gracePeriodMs, selectedEnv, onConfigChange]);
+  }, [points, durationMs, interpolation, runnerMaxRpsInput, gracePeriodMs, selectedEnv, onConfigChange]);
 
   const setPoint = (index: number, patch: Partial<LoadPoint>) => {
     setPoints((current) =>
@@ -180,6 +185,25 @@ export function LoadTestConfigPanel({ pipeline, onStart, onConfigChange, lastAvg
               <SelectItem value="step">{t("loadTest.interpolationStep")}</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <div className="grid grid-cols-[1fr_auto] items-end gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="load-runner-max-rps" className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t("loadTest.runnerMaxRps")}
+            </Label>
+            <Input
+              id="load-runner-max-rps"
+              type="number"
+              min={1}
+              step={1}
+              value={runnerMaxRpsInput}
+              onChange={(event) => setRunnerMaxRpsInput(event.target.value)}
+              className="h-8 text-xs"
+              aria-label={t("loadTest.runnerMaxRps")}
+            />
+          </div>
+          <span className="pb-2 text-[10px] text-muted-foreground">RPS</span>
         </div>
 
         <WaveEditor
@@ -436,6 +460,12 @@ function defaultWaveConfig(): WaveLoadConfig {
     interpolation: "smooth",
     gracePeriodMs: 30_000,
   };
+}
+
+function parseOptionalPositiveNumber(value: string): number | undefined {
+  if (value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function normalizeWavePoints(points: LoadPoint[], durationMs: number): LoadPoint[] {

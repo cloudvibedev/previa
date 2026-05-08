@@ -215,6 +215,7 @@
   "loadTest.interpolationSmooth": "Suave",
   "loadTest.interpolationLinear": "Linear",
   "loadTest.interpolationStep": "Degrau",
+  "loadTest.runnerMaxRps": "Limite RPS por runner",
   "loadTest.gracePeriod": "Período de espera",
   "loadTest.wavePreview": "Prévia da onda",
   "loadTest.previewIntensityAxis": "Intensidade (%)",

@@ -24,6 +24,7 @@ vi.mock("react-i18next", () => ({
         "loadTest.interpolationSmooth": "Smooth",
         "loadTest.interpolationLinear": "Linear",
         "loadTest.interpolationStep": "Step",
+        "loadTest.runnerMaxRps": "RPS limit per runner",
         "loadTest.gracePeriod": "Grace period",
         "loadTest.wavePreview": "Wave editor",
         "loadTest.previewIntensityAxis": "Intensity (%)",
@@ -118,6 +119,38 @@ describe("LoadTestConfigPanel", () => {
     await waitFor(() => {
       const latest = onConfigChange.mock.calls.at(-1)?.[0] as Record<string, unknown>;
       expect(latest).not.toHaveProperty("maxInFlight");
+    });
+  });
+
+  it("emits runner max RPS when configured for the wave test", async () => {
+    const onConfigChange = renderPanel();
+
+    fireEvent.change(screen.getByLabelText("RPS limit per runner"), { target: { value: "750" } });
+
+    await waitFor(() => {
+      const latest = onConfigChange.mock.calls.at(-1)?.[0] as WaveLoadConfig;
+      expect(latest.runnerMaxRps).toBe(750);
+    });
+  });
+
+  it("keeps runner max RPS unset when the field is blank", async () => {
+    const onConfigChange = renderPanel(vi.fn(), {
+      points: [
+        { atMs: 0, intensity: 10 },
+        { atMs: 120_000, intensity: 80 },
+      ],
+      interpolation: "smooth",
+      runnerMaxRps: 500,
+      gracePeriodMs: 30_000,
+    });
+
+    expect(screen.getByLabelText("RPS limit per runner")).toHaveValue(500);
+
+    fireEvent.change(screen.getByLabelText("RPS limit per runner"), { target: { value: "" } });
+
+    await waitFor(() => {
+      const latest = onConfigChange.mock.calls.at(-1)?.[0] as WaveLoadConfig;
+      expect(latest).not.toHaveProperty("runnerMaxRps");
     });
   });
 

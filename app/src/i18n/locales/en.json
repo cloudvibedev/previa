@@ -215,6 +215,7 @@
   "loadTest.interpolationSmooth": "Smooth",
   "loadTest.interpolationLinear": "Linear",
   "loadTest.interpolationStep": "Step",
+  "loadTest.runnerMaxRps": "RPS limit per runner",
   "loadTest.gracePeriod": "Grace period",
   "loadTest.wavePreview": "Wave preview",
   "loadTest.previewIntensityAxis": "Intensity (%)",
