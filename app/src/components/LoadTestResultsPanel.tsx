@@ -189,6 +189,7 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
       runnerMaxRps: waveConfig.runnerMaxRps ?? metrics.runnerMaxRps,
     })
     : [];
+  const visibleWaveSecondMarkers = waveSecondMarkers.filter((marker) => marker.showLabel);
   const lifecycleChart = buildLifecycleChartData(metrics);
   const lifecycleChartData = lifecycleChart.data;
   const waveDiagnostics = deriveWaveDiagnostics(metrics);
@@ -427,7 +428,7 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
                       return `${formatWaveMarkerSecond(marker.second)} - ${formatPlannedRequests(marker.plannedRequests)}`;
                     }}
                   />
-                  {waveSecondMarkers.map((marker) => (
+                  {visibleWaveSecondMarkers.map((marker) => (
                     <ReferenceLine
                       key={`wave-second-${marker.second}`}
                       x={marker.second}
@@ -435,14 +436,12 @@ export function LoadTestResultsPanel({ metrics, state, totalRequests, config, no
                       strokeDasharray="2 4"
                       strokeOpacity={0.42}
                       ifOverflow="extendDomain"
-                      label={marker.showLabel
-                        ? {
-                          value: formatPlannedRequests(marker.plannedRequests),
-                          position: "top",
-                          fontSize: 9,
-                          fill: "hsl(var(--muted-foreground))",
-                        }
-                        : undefined}
+                      label={{
+                        value: formatPlannedRequests(marker.plannedRequests),
+                        position: "top",
+                        fontSize: 9,
+                        fill: "hsl(var(--muted-foreground))",
+                      }}
                     />
                   ))}
                   <Area

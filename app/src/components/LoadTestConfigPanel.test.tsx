@@ -157,6 +157,21 @@ describe("LoadTestConfigPanel", () => {
     expect(screen.getAllByText("900 req")).toHaveLength(2);
   });
 
+  it("keeps planned request markers sparse on long wave previews", () => {
+    renderPanel(vi.fn(), {
+      points: [
+        { atMs: 0, intensity: 10 },
+        { atMs: 120_000, intensity: 80 },
+      ],
+      interpolation: "smooth",
+      runnerMaxRps: 600,
+      gracePeriodMs: 30_000,
+    }, 3);
+
+    expect(screen.getAllByTestId(/^wave-second-marker-/)).toHaveLength(6);
+    expect(screen.getAllByText(/ req$/)).toHaveLength(6);
+  });
+
   it("clamps runner max RPS manual values between 1 and 1000", async () => {
     const onConfigChange = renderPanel(vi.fn(), {
       points: [

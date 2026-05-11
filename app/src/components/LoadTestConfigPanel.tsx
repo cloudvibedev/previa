@@ -333,8 +333,9 @@ function WaveEditor({
   const pathData = buildWavePath(graphPoints, interpolation);
   const secondMarkers = buildWaveSecondMarkers(
     { points, interpolation, runnerMaxRps },
-    { runnerCount, maxLabels: 8 },
+    { runnerCount, maxLabels: 5 },
   );
+  const visibleSecondMarkers = secondMarkers.filter((marker) => marker.showLabel);
 
   const pointFromEvent = (event: MouseEvent<SVGSVGElement> | PointerEvent<SVGSVGElement>): LoadPoint => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -436,8 +437,17 @@ function WaveEditor({
               strokeWidth="0.5"
             />
           ))}
-          {secondMarkers.map((marker) => {
+          {visibleSecondMarkers.map((marker) => {
             const x = (marker.second * 1000 / Math.max(durationMs, 1)) * plotWidth;
+            const label = formatPlannedRequests(marker.plannedRequests);
+            const labelX = clamp(x, 2, plotWidth - 2);
+            const textAnchor = x >= plotWidth - 4 ? "end" : x <= 4 ? "start" : "middle";
+            const labelWidth = label.length * 2.1 + 1.2;
+            const labelRectX = textAnchor === "middle"
+              ? labelX - labelWidth / 2
+              : textAnchor === "end"
+                ? labelX - labelWidth
+                : labelX;
             return (
               <g key={`second-marker-${marker.second}`} data-testid={`wave-second-marker-${marker.second}`} pointerEvents="none">
                 <line
@@ -450,18 +460,25 @@ function WaveEditor({
                   strokeWidth="0.45"
                   strokeDasharray="1 1.6"
                 />
-                {marker.showLabel && (
-                  <text
-                    x={clamp(x, 2, plotWidth - 2)}
-                    y="4.5"
-                    textAnchor={x >= plotWidth - 4 ? "end" : x <= 4 ? "start" : "middle"}
-                    fontSize="3.2"
-                    fill="currentColor"
-                    opacity="0.78"
-                  >
-                    {formatPlannedRequests(marker.plannedRequests)}
-                  </text>
-                )}
+                <rect
+                  x={clamp(labelRectX, 0.6, plotWidth - labelWidth - 0.6)}
+                  y="0.7"
+                  width={labelWidth}
+                  height="5.2"
+                  rx="1.2"
+                  fill="hsl(var(--background))"
+                  opacity="0.72"
+                />
+                <text
+                  x={labelX}
+                  y="4.7"
+                  textAnchor={textAnchor}
+                  fontSize="3.2"
+                  fill="currentColor"
+                  opacity="0.82"
+                >
+                  {label}
+                </text>
               </g>
             );
           })}
