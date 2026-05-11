@@ -12,15 +12,19 @@ use tokio::sync::mpsc;
 use tracing::error;
 use uuid::Uuid;
 
-use previa_runner::execute_pipeline_with_runtime_hooks;
+use previa_runner::{
+    Pipeline, RuntimeEnvGroup, RuntimeSpec, execute_pipeline_with_runtime_request_gate,
+};
 
 use crate::server::errors::{bad_request_message_response, bad_request_response};
+use crate::server::load_wave::validate_load_profile;
 use crate::server::metrics::{MetricsAccumulator, estimate_results_network_bytes};
 use crate::server::middleware::transaction::{extract_transaction_id, with_transaction_header};
-use crate::server::models::{ErrorResponse, LoadTestRequest};
+use crate::server::models::{ErrorResponse, LoadTestConfig, LoadTestRequest};
 use crate::server::runtime::RuntimeSampler;
 use crate::server::sse::{SseMessage, send_sse_or_cancel, sse_response};
 use crate::server::state::AppState;
+use crate::server::wave_executor::run_wave_load;
 
 #[utoipa::path(
     post,
@@ -62,6 +66,14 @@ pub async fn run_load_test(
     if payload.pipeline.steps.is_empty() {
         return bad_request_message_response("pipeline must contain at least one step");
     }
+    if payload.load.is_none() && payload.config.is_none() {
+        return bad_request_message_response("either load or config must be provided");
+    }
+    if let Some(load) = payload.load.as_ref() {
+        if let Err(message) = validate_load_profile(load) {
+            return bad_request_message_response(&message);
+        }
+    }
 
     let execution_id = Uuid::new_v4().to_string();
     let token = tokio_util::sync::CancellationToken::new();
@@ -78,7 +90,8 @@ pub async fn run_load_test(
     let env_groups = payload.env_groups.clone();
     let transaction_id = extract_transaction_id(&headers);
     let pipeline = with_transaction_header(payload.pipeline, transaction_id.as_deref());
-    let config = payload.config;
+    let config = payload.config.clone();
+    let load = payload.load.clone();
     let state_clone = state.clone();
     let execution_id_clone = execution_id.clone();
 
@@ -110,114 +123,34 @@ pub async fn run_load_test(
             return;
         }
 
-        let total_requests = config.total_requests.max(1);
-        let concurrency = config.concurrency.max(1).min(total_requests);
-        let ramp_interval_ms = if concurrency > 1 && config.ramp_up_seconds > 0.0 {
-            ((config.ramp_up_seconds * 1000.0) / ((concurrency - 1) as f64)).round() as u64
-        } else {
-            0
-        };
-
-        let counter = Arc::new(AtomicUsize::new(0));
-        let metrics = Arc::new(tokio::sync::Mutex::new(MetricsAccumulator::new()));
-        let runtime_sampler = Arc::new(tokio::sync::Mutex::new(RuntimeSampler::new()));
-
-        let mut handles = Vec::with_capacity(concurrency);
-
-        for worker_idx in 0..concurrency {
-            if token.is_cancelled() {
-                break;
+        match (load, config) {
+            (Some(load), _) => {
+                run_wave_load(
+                    load,
+                    pipeline,
+                    selected_key,
+                    selected_env_group_slug,
+                    specs,
+                    env_groups,
+                    tx.clone(),
+                    token.clone(),
+                )
+                .await;
             }
-
-            if worker_idx > 0 && ramp_interval_ms > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(ramp_interval_ms)).await;
+            (None, Some(config)) => {
+                run_classic_load(
+                    config,
+                    pipeline,
+                    selected_key,
+                    selected_env_group_slug,
+                    specs,
+                    env_groups,
+                    tx.clone(),
+                    token.clone(),
+                )
+                .await;
             }
-
-            let counter = Arc::clone(&counter);
-            let metrics = Arc::clone(&metrics);
-            let runtime_sampler = Arc::clone(&runtime_sampler);
-            let tx = tx.clone();
-            let token = token.clone();
-            let pipeline = pipeline.clone();
-            let selected_key = selected_key.clone();
-            let selected_env_group_slug = selected_env_group_slug.clone();
-            let specs = specs.clone();
-            let env_groups = env_groups.clone();
-
-            handles.push(tokio::spawn(async move {
-                loop {
-                    if token.is_cancelled() {
-                        break;
-                    }
-
-                    let idx = counter.fetch_add(1, Ordering::SeqCst);
-                    if idx >= total_requests {
-                        break;
-                    }
-
-                    let start = Instant::now();
-                    let results = execute_pipeline_with_runtime_hooks(
-                        &pipeline,
-                        selected_key.as_deref(),
-                        Some(specs.as_slice()),
-                        Some(env_groups.as_slice()),
-                        selected_env_group_slug.as_deref(),
-                        |_| {},
-                        |_| {},
-                        || token.is_cancelled(),
-                    )
-                    .await;
-                    let duration_ms = start.elapsed().as_millis() as u64;
-                    let duration = duration_ms as f64;
-                    let success = !results.iter().any(|r| r.status == "error");
-                    let (network_tx_bytes, network_rx_bytes) =
-                        estimate_results_network_bytes(&results);
-                    let runtime = {
-                        let mut lock = runtime_sampler.lock().await;
-                        lock.snapshot()
-                    };
-
-                    let snapshot = {
-                        let mut lock = metrics.lock().await;
-                        lock.update(duration, success);
-                        lock.add_network_bytes(network_tx_bytes, network_rx_bytes);
-                        lock.snapshot(Some(duration_ms), runtime)
-                    };
-
-                    if !send_sse_or_cancel(
-                        &tx,
-                        "metrics",
-                        serde_json::to_value(snapshot).unwrap_or(Value::Null),
-                        &token,
-                    ) {
-                        break;
-                    }
-                }
-            }));
-        }
-
-        for handle in handles {
-            if let Err(err) = handle.await {
-                error!("worker join error: {}", err);
-            }
-        }
-
-        let complete = {
-            let lock = metrics.lock().await;
-            let runtime = {
-                let mut sampler = runtime_sampler.lock().await;
-                sampler.snapshot()
-            };
-            lock.snapshot(None, runtime)
-        };
-
-        if !token.is_cancelled() {
-            let _ = send_sse_or_cancel(
-                &tx,
-                "complete",
-                serde_json::to_value(complete).unwrap_or(Value::Null),
-                &token,
-            );
+            (None, None) => {}
         }
 
         disconnect_watcher_stop_exec.cancel();
@@ -227,4 +160,144 @@ pub async fn run_load_test(
     });
 
     sse_response(rx)
+}
+
+async fn run_classic_load(
+    config: LoadTestConfig,
+    pipeline: Pipeline,
+    selected_key: Option<String>,
+    selected_env_group_slug: Option<String>,
+    specs: Vec<RuntimeSpec>,
+    env_groups: Vec<RuntimeEnvGroup>,
+    tx: mpsc::UnboundedSender<SseMessage>,
+    token: tokio_util::sync::CancellationToken,
+) {
+    let total_requests = config.total_requests.max(1);
+    let concurrency = config.concurrency.max(1).min(total_requests);
+    let ramp_interval_ms = if concurrency > 1 && config.ramp_up_seconds > 0.0 {
+        ((config.ramp_up_seconds * 1000.0) / ((concurrency - 1) as f64)).round() as u64
+    } else {
+        0
+    };
+
+    let counter = Arc::new(AtomicUsize::new(0));
+    let metrics = Arc::new(tokio::sync::Mutex::new(MetricsAccumulator::new()));
+    let runtime_sampler = Arc::new(tokio::sync::Mutex::new(RuntimeSampler::new()));
+
+    let mut handles = Vec::with_capacity(concurrency);
+
+    for worker_idx in 0..concurrency {
+        if token.is_cancelled() {
+            break;
+        }
+
+        if worker_idx > 0 && ramp_interval_ms > 0 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(ramp_interval_ms)).await;
+        }
+
+        let counter = Arc::clone(&counter);
+        let metrics = Arc::clone(&metrics);
+        let runtime_sampler = Arc::clone(&runtime_sampler);
+        let tx = tx.clone();
+        let token = token.clone();
+        let pipeline = pipeline.clone();
+        let selected_key = selected_key.clone();
+        let selected_env_group_slug = selected_env_group_slug.clone();
+        let specs = specs.clone();
+        let env_groups = env_groups.clone();
+
+        handles.push(tokio::spawn(async move {
+            loop {
+                if token.is_cancelled() {
+                    break;
+                }
+
+                let idx = counter.fetch_add(1, Ordering::SeqCst);
+                if idx >= total_requests {
+                    break;
+                }
+
+                {
+                    let mut lock = metrics.lock().await;
+                    lock.record_start();
+                }
+
+                let start = Instant::now();
+                let metrics_for_gate = Arc::clone(&metrics);
+                let results = execute_pipeline_with_runtime_request_gate(
+                    &pipeline,
+                    selected_key.as_deref(),
+                    Some(specs.as_slice()),
+                    Some(env_groups.as_slice()),
+                    selected_env_group_slug.as_deref(),
+                    |_| {},
+                    |_| {},
+                    || token.is_cancelled(),
+                    move |_| {
+                        let metrics = Arc::clone(&metrics_for_gate);
+                        Box::pin(async move {
+                            let mut lock = metrics.lock().await;
+                            lock.record_http_start();
+                            true
+                        })
+                    },
+                )
+                .await;
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let duration = duration_ms as f64;
+                let success = !results.iter().any(|r| r.status == "error");
+                let (network_tx_bytes, network_rx_bytes) = estimate_results_network_bytes(&results);
+                let runtime = {
+                    let mut lock = runtime_sampler.lock().await;
+                    lock.snapshot()
+                };
+
+                let snapshot = {
+                    let mut lock = metrics.lock().await;
+                    lock.update(duration, success);
+                    lock.record_http_completed_count(
+                        results
+                            .iter()
+                            .filter(|result| result.request.is_some())
+                            .count(),
+                    );
+                    lock.add_network_bytes(network_tx_bytes, network_rx_bytes);
+                    lock.snapshot(Some(duration_ms), runtime)
+                };
+
+                if !send_sse_or_cancel(
+                    &tx,
+                    "metrics",
+                    serde_json::to_value(snapshot).unwrap_or(Value::Null),
+                    &token,
+                ) {
+                    break;
+                }
+            }
+        }));
+    }
+
+    for handle in handles {
+        if let Err(err) = handle.await {
+            error!("worker join error: {}", err);
+        }
+    }
+
+    let complete = {
+        let lock = metrics.lock().await;
+        let runtime = {
+            let mut sampler = runtime_sampler.lock().await;
+            sampler.snapshot()
+        };
+        lock.snapshot(None, runtime)
+    };
+
+    if !token.is_cancelled() {
+        let _ = send_sse_or_cancel(
+            &tx,
+            "complete",
+            serde_json::to_value(complete).unwrap_or(Value::Null),
+            &token,
+        );
+    }
 }

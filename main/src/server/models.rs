@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use previa_runner::{Pipeline, RuntimeEnvGroup, RuntimeSpec};
+use previa_runner::{Pipeline, RuntimeEnvGroup, RuntimeSpec, StepExecutionResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -9,7 +9,10 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase")]
 pub struct LoadTestRequest {
     pub pipeline: Pipeline,
-    pub config: LoadTestConfig,
+    #[serde(default)]
+    pub config: Option<LoadTestConfig>,
+    #[serde(default)]
+    pub load: Option<LoadProfile>,
     pub selected_base_url_key: Option<String>,
     pub selected_env_group_slug: Option<String>,
     pub project_id: Option<String>,
@@ -28,6 +31,9 @@ pub struct E2eTestRequest {
     pub selected_env_group_slug: Option<String>,
     pub project_id: Option<String>,
     pub pipeline_index: Option<i64>,
+    pub start_step_id: Option<String>,
+    #[serde(default)]
+    pub prior_results: HashMap<String, StepExecutionResult>,
     #[serde(default)]
     pub specs: Vec<RuntimeSpec>,
     #[serde(default)]
@@ -39,6 +45,23 @@ pub struct E2eTestRequest {
 pub struct ProjectE2eTestRequest {
     pub pipeline_id: Option<String>,
     pub pipeline: Option<Pipeline>,
+    pub selected_base_url_key: Option<String>,
+    pub selected_env_group_slug: Option<String>,
+    pub pipeline_index: Option<i64>,
+    #[serde(default)]
+    pub specs: Vec<RuntimeSpec>,
+    #[serde(default)]
+    pub env_groups: Vec<RuntimeEnvGroup>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectE2eRerunFromStepRequest {
+    pub pipeline_id: Option<String>,
+    pub pipeline: Option<Pipeline>,
+    pub start_step_id: String,
+    #[serde(default)]
+    pub prior_results: HashMap<String, StepExecutionResult>,
     pub selected_base_url_key: Option<String>,
     pub selected_env_group_slug: Option<String>,
     pub pipeline_index: Option<i64>,
@@ -65,7 +88,10 @@ pub struct ProjectE2eQueueRequest {
 pub struct ProjectLoadTestRequest {
     pub pipeline_id: Option<String>,
     pub pipeline: Option<Pipeline>,
-    pub config: LoadTestConfig,
+    #[serde(default)]
+    pub config: Option<LoadTestConfig>,
+    #[serde(default)]
+    pub load: Option<LoadProfile>,
     pub selected_base_url_key: Option<String>,
     pub selected_env_group_slug: Option<String>,
     pub pipeline_index: Option<i64>,
@@ -81,6 +107,39 @@ pub struct LoadTestConfig {
     pub total_requests: usize,
     pub concurrency: usize,
     pub ramp_up_seconds: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadProfile {
+    pub points: Vec<LoadPoint>,
+    #[serde(default)]
+    pub interpolation: LoadInterpolation,
+    #[serde(default)]
+    pub runner_max_rps: Option<f64>,
+    #[serde(default)]
+    pub grace_period_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadPoint {
+    pub at_ms: u64,
+    pub intensity: f64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LoadInterpolation {
+    Smooth,
+    Linear,
+    Step,
+}
+
+impl Default for LoadInterpolation {
+    fn default() -> Self {
+        Self::Smooth
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -132,6 +191,8 @@ pub struct ProxyRequest {
 pub struct ProjectUpsertRequest {
     pub name: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
     #[schema(value_type = Object, nullable = true)]
@@ -145,6 +206,8 @@ pub struct ProjectUpsertRequest {
 pub struct ProjectMetadataUpsertRequest {
     pub name: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -153,6 +216,7 @@ pub struct ProjectRecord {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -306,6 +370,8 @@ pub struct ProjectExportProject {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
     #[schema(value_type = Object, nullable = true)]
@@ -626,19 +692,128 @@ pub struct RunnerLoadLine {
     pub payload: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunnerLoadSnapshotMode {
+    Live,
+    Final,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConsolidatedLoadMetrics {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_started: Option<usize>,
     pub total_sent: usize,
     pub total_success: usize,
     pub total_error: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_started: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_completed: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatch_submitted: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatch_started: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_send_returned: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_body_completed: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_limited_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatcher_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_queue_depth: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_start_lag_avg_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_start_lag_p95_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_start_lag_p99_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_start_lag_max_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_send_duration_avg_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_send_duration_p95_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_send_duration_p99_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_observation_duration_avg_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_observation_duration_p95_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_observation_duration_p99_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_lag_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_lagged_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_enqueued: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_prepared: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_enqueued: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_task_spawned: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_started: Option<usize>,
     pub rps: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_intensity: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_rps_limit: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_flight: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_max_rps: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tick_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduled_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missed_starts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready_requests: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_pipelines: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outstanding_requests: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub curve_adherence: Option<f64>,
     pub avg_latency: u64,
     pub p95: u64,
     pub p99: u64,
     pub start_time: u64,
     pub elapsed_ms: u64,
     pub nodes_reporting: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lifecycle_buckets: Vec<ConsolidatedLoadLifecycleBucket>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsolidatedLoadLifecycleBucket {
+    pub elapsed_ms: u64,
+    pub planned: usize,
+    pub slot_enqueued: usize,
+    pub request_prepared: usize,
+    pub request_enqueued: usize,
+    pub send_task_spawned: usize,
+    pub send_started: usize,
+    pub http_started: usize,
+    pub http_send_returned: usize,
+    pub response_body_completed: usize,
+    pub dispatcher_lagged: usize,
+    pub runtime_lagged: usize,
+    pub sender_lagged: usize,
+    pub sender_start_lag_ms_max: u64,
+    pub http_send_duration_ms_max: u64,
+    pub response_observation_duration_ms_max: u64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -662,6 +837,38 @@ pub struct LoadLatencySummary {
     pub avg_latency: u64,
     pub p95: u64,
     pub p99: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunnerLoadLatencyBucket {
+    pub duration_ms: u64,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunnerLoadDispatchBucket {
+    pub elapsed_ms: u64,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RunnerLoadLifecycleBucket {
+    pub elapsed_ms: u64,
+    pub planned: usize,
+    pub slot_enqueued: usize,
+    pub request_prepared: usize,
+    pub request_enqueued: usize,
+    pub send_task_spawned: usize,
+    pub send_started: usize,
+    pub http_started: usize,
+    pub http_send_returned: usize,
+    pub response_body_completed: usize,
+    pub dispatcher_lagged: usize,
+    pub runtime_lagged: usize,
+    pub sender_lagged: usize,
+    pub sender_start_lag_ms_max: u64,
+    pub http_send_duration_ms_max: u64,
+    pub response_observation_duration_ms_max: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -698,12 +905,58 @@ pub struct E2eHistoryAccumulator {
 
 #[derive(Debug, Clone)]
 pub struct RunnerLoadMetricsPoint {
+    pub snapshot_mode: Option<RunnerLoadSnapshotMode>,
+    pub total_started: Option<usize>,
     pub total_sent: usize,
     pub total_success: usize,
     pub total_error: usize,
+    pub http_started: Option<usize>,
+    pub http_completed: Option<usize>,
+    pub dispatch_submitted: Option<usize>,
+    pub dispatch_started: Option<usize>,
+    pub http_send_returned: Option<usize>,
+    pub response_body_completed: Option<usize>,
+    pub dependency_limited_starts: Option<usize>,
+    pub dispatcher_lagged_starts: Option<usize>,
+    pub runtime_lagged_starts: Option<usize>,
+    pub sender_lagged_starts: Option<usize>,
+    pub sender_queue_depth: Option<usize>,
+    pub sender_start_lag_avg_ms: Option<f64>,
+    pub sender_start_lag_p95_ms: Option<u64>,
+    pub sender_start_lag_p99_ms: Option<u64>,
+    pub sender_start_lag_max_ms: Option<u64>,
+    pub http_send_duration_avg_ms: Option<f64>,
+    pub http_send_duration_p95_ms: Option<u64>,
+    pub http_send_duration_p99_ms: Option<u64>,
+    pub response_observation_duration_avg_ms: Option<f64>,
+    pub response_observation_duration_p95_ms: Option<u64>,
+    pub response_observation_duration_p99_ms: Option<u64>,
+    pub scheduler_lag_ms: Option<u64>,
+    pub scheduler_lagged_starts: Option<usize>,
+    pub slot_enqueued: Option<usize>,
+    pub request_prepared: Option<usize>,
+    pub request_enqueued: Option<usize>,
+    pub send_task_spawned: Option<usize>,
+    pub send_started: Option<usize>,
     pub rps: f64,
     pub start_time: u64,
     pub elapsed_ms: u64,
+    pub target_intensity: Option<f64>,
+    pub target_rps_limit: Option<f64>,
+    pub in_flight: Option<usize>,
+    pub runner_max_rps: Option<f64>,
+    pub tick_ms: Option<u64>,
+    pub scheduled_starts: Option<usize>,
+    pub missed_starts: Option<usize>,
+    pub ready_requests: Option<usize>,
+    pub active_pipelines: Option<usize>,
+    pub outstanding_requests: Option<usize>,
+    pub curve_adherence: Option<f64>,
+    pub latency_sample_count: Option<usize>,
+    pub latency_total_duration_ms: Option<u64>,
+    pub latency_buckets: Vec<RunnerLoadLatencyBucket>,
+    pub dispatch_buckets: Vec<RunnerLoadDispatchBucket>,
+    pub lifecycle_buckets: Vec<RunnerLoadLifecycleBucket>,
 }
 
 #[derive(Debug, Clone)]

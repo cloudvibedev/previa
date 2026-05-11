@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 interface TestModeSidebarProps {
   compact?: boolean;
   collapsed?: boolean;
+  hideWhenCollapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
 }
 
@@ -25,10 +26,15 @@ interface TooltipState {
 export function TestModeSidebar({
   compact = false,
   collapsed = false,
+  hideWhenCollapsed = false,
   onCollapsedChange,
 }: TestModeSidebarProps) {
-  const isCollapsed = collapsed;
+  const isCollapsed = compact ? false : collapsed;
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+
+  if (!compact && hideWhenCollapsed && isCollapsed) {
+    return null;
+  }
 
   const showTooltip = (label: string, element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
@@ -48,17 +54,19 @@ export function TestModeSidebar({
         !compact && (isCollapsed ? "w-14" : "w-[184px]"),
       )}
     >
-      <div className={cn("flex", compact ? "shrink-0" : "mb-2", isCollapsed ? "justify-center" : "justify-end")}>
-        <button
-          type="button"
-          aria-label={isCollapsed ? "Expand test mode sidebar" : "Collapse test mode sidebar"}
-          title={isCollapsed ? "Expand" : "Collapse"}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => onCollapsedChange?.(!isCollapsed)}
-        >
-          {isCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-        </button>
-      </div>
+      {!compact && (
+        <div className={cn("mb-2 flex", isCollapsed ? "justify-center" : "justify-end")}>
+          <button
+            type="button"
+            aria-label={isCollapsed ? "Expand test mode sidebar" : "Collapse test mode sidebar"}
+            title={isCollapsed ? "Expand" : "Collapse"}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => onCollapsedChange?.(!isCollapsed)}
+          >
+            {isCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </button>
+        </div>
+      )}
 
       <TabsList
         className={cn(

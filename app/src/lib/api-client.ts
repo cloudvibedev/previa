@@ -17,6 +17,7 @@ export interface ProjectRecord {
   id: string;
   name: string;
   description?: string | null;
+  tags?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -51,6 +52,7 @@ export interface PipelineInput {
 export interface ProjectUpsertRequest {
   name: string;
   description?: string | null;
+  tags?: string[];
   spec?: Record<string, unknown> | null;
   executionBackendUrl?: string | null;
   createdAt?: string | null;
@@ -60,6 +62,7 @@ export interface ProjectUpsertRequest {
 export interface ProjectUpdateRequest {
   name: string;
   description?: string | null;
+  tags?: string[];
   executionBackendUrl?: string | null;
 }
 
@@ -365,6 +368,7 @@ function projectRecordToLocal(
     id: r.id,
     name: r.name,
     description: r.description ?? undefined,
+    tags: r.tags ?? [],
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     spec,
@@ -784,9 +788,39 @@ export function loadRecordToRun(r: LoadHistoryRecord): LoadTestRunRecord {
   const consolidated = r.finalConsolidated as any;
 
   const metrics: LoadTestMetrics = {
+    snapshotMode: consolidated?.snapshotMode,
+    totalStarted: consolidated?.totalStarted,
     totalSent: consolidated?.totalSent ?? 0,
     totalSuccess: consolidated?.totalSuccess ?? 0,
     totalError: consolidated?.totalError ?? 0,
+    httpStarted: consolidated?.httpStarted,
+    httpCompleted: consolidated?.httpCompleted,
+    dispatchSubmitted: consolidated?.dispatchSubmitted,
+    dispatchStarted: consolidated?.dispatchStarted,
+    httpSendReturned: consolidated?.httpSendReturned,
+    responseBodyCompleted: consolidated?.responseBodyCompleted,
+    dependencyLimitedStarts: consolidated?.dependencyLimitedStarts,
+    dispatcherLaggedStarts: consolidated?.dispatcherLaggedStarts,
+    runtimeLaggedStarts: consolidated?.runtimeLaggedStarts,
+    senderLaggedStarts: consolidated?.senderLaggedStarts,
+    senderQueueDepth: consolidated?.senderQueueDepth,
+    senderStartLagAvgMs: consolidated?.senderStartLagAvgMs,
+    senderStartLagP95Ms: consolidated?.senderStartLagP95Ms,
+    senderStartLagP99Ms: consolidated?.senderStartLagP99Ms,
+    senderStartLagMaxMs: consolidated?.senderStartLagMaxMs,
+    httpSendDurationAvgMs: consolidated?.httpSendDurationAvgMs,
+    httpSendDurationP95Ms: consolidated?.httpSendDurationP95Ms,
+    httpSendDurationP99Ms: consolidated?.httpSendDurationP99Ms,
+    responseObservationDurationAvgMs: consolidated?.responseObservationDurationAvgMs,
+    responseObservationDurationP95Ms: consolidated?.responseObservationDurationP95Ms,
+    responseObservationDurationP99Ms: consolidated?.responseObservationDurationP99Ms,
+    schedulerLagMs: consolidated?.schedulerLagMs,
+    schedulerLaggedStarts: consolidated?.schedulerLaggedStarts,
+    slotEnqueued: consolidated?.slotEnqueued,
+    requestPrepared: consolidated?.requestPrepared,
+    requestEnqueued: consolidated?.requestEnqueued,
+    sendTaskSpawned: consolidated?.sendTaskSpawned,
+    sendStarted: consolidated?.sendStarted,
     avgLatency: consolidated?.avgLatency ?? 0,
     p95: consolidated?.p95 ?? 0,
     p99: consolidated?.p99 ?? 0,
@@ -794,8 +828,25 @@ export function loadRecordToRun(r: LoadHistoryRecord): LoadTestRunRecord {
     latencyHistory: consolidated?.latencyHistory ?? [],
     rpsHistory: consolidated?.rpsHistory ?? [],
     runnerResourceHistory: consolidated?.runnerResourceHistory ?? buildRunnerResourceHistoryFromLines(r.finalLines),
+    lifecycleBuckets: Array.isArray(consolidated?.lifecycleBuckets)
+      ? consolidated.lifecycleBuckets
+      : [],
+    errors: Array.isArray(r.errors)
+      ? r.errors.filter((item): item is string => typeof item === "string")
+      : [],
     startTime: consolidated?.startTime ?? r.startedAtMs,
     elapsedMs: consolidated?.elapsedMs ?? r.durationMs,
+    targetIntensity: consolidated?.targetIntensity,
+    targetRpsLimit: consolidated?.targetRpsLimit,
+    inFlight: consolidated?.inFlight,
+    runnerMaxRps: consolidated?.runnerMaxRps,
+    tickMs: consolidated?.tickMs,
+    scheduledStarts: consolidated?.scheduledStarts,
+    missedStarts: consolidated?.missedStarts,
+    readyRequests: consolidated?.readyRequests,
+    activePipelines: consolidated?.activePipelines,
+    outstandingRequests: consolidated?.outstandingRequests,
+    curveAdherence: consolidated?.curveAdherence,
   };
 
   const state: LoadTestState =
@@ -808,7 +859,7 @@ export function loadRecordToRun(r: LoadHistoryRecord): LoadTestRunRecord {
     projectId: r.projectId ?? "",
     pipelineIndex: r.pipelineIndex ?? 0,
     pipelineName: r.pipelineName,
-    config: {
+    config: cfg?.load ?? {
       totalRequests: cfg?.totalRequests ?? 0,
       concurrency: cfg?.concurrency ?? 1,
       rampUpSeconds: cfg?.rampUpSeconds ?? 0,

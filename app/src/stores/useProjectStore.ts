@@ -155,6 +155,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const record = await api.createProject(apiUrl, {
           name: data.name || "Novo Projeto",
           description: data.description ?? null,
+          tags: data.tags ?? [],
           spec: data.spec?.raw ? (data.spec as unknown as Record<string, unknown>) : null,
           
         });
@@ -206,6 +207,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           id: projectId,
           name: record.name,
           description: record.description ?? undefined,
+          tags: record.tags ?? data.tags ?? [],
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           pipelines: createdPipelines,
@@ -229,6 +231,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       id: generateUUID(),
       name: data.name || "Novo Projeto",
       description: data.description,
+      tags: data.tags ?? [],
       createdAt: now,
       updatedAt: now,
       pipelines: data.pipelines || [],
@@ -259,6 +262,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         api.upsertProject(apiUrl, id, {
           name: updated.name,
           description: updated.description ?? null,
+          tags: updated.tags ?? [],
           
         }).catch((err) => {
           console.warn("Failed to sync project to backend:", err);
@@ -306,13 +310,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     if (apiUrl) {
       try {
-        const source = get().projects.find((p) => p.id === id);
-        if (!source) return null;
+        const source = await api.getProject(apiUrl, id);
 
         // 1. Create project metadata
         const record = await api.createProject(apiUrl, {
           name: `${source.name} (cópia)`,
           description: source.description ?? null,
+          tags: source.tags ?? [],
           spec: source.spec?.raw ? (source.spec as unknown as Record<string, unknown>) : null,
           
         });
@@ -330,14 +334,49 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           }
         }
 
-        // 3. Create spec if source has one
-        if (source.spec?.raw) {
+        // 3. Create specs
+        const createdSpecs: ProjectSpec[] = [];
+        for (const spec of source.specs ?? []) {
           try {
-            await api.createSpec(apiUrl, projectId, {
-              spec: source.spec.raw as unknown as Record<string, unknown>,
+            const created = await api.createSpec(apiUrl, projectId, {
+              spec: (spec.spec.raw ?? spec.spec) as unknown as Record<string, unknown>,
+              sync: spec.sync,
+              url: spec.url ?? null,
+              slug: spec.slug,
+              servers: spec.servers,
+            });
+            createdSpecs.push({
+              id: created.id,
+              slug: created.slug ?? spec.slug,
+              name: spec.name,
+              spec: created.spec as unknown as OpenAPISpec,
+              url: created.url ?? undefined,
+              sync: created.sync,
+              servers: created.servers ?? {},
+              specMd5: (created as { specMd5?: string }).specMd5,
             });
           } catch (err) {
             console.warn("Failed to duplicate spec:", err);
+          }
+        }
+
+        if (createdSpecs.length === 0 && source.spec?.raw) {
+          try {
+            const created = await api.createSpec(apiUrl, projectId, {
+              spec: source.spec.raw as unknown as Record<string, unknown>,
+            });
+            createdSpecs.push({
+              id: created.id,
+              slug: created.slug ?? "default",
+              name: source.spec.title || "Default Spec",
+              spec: created.spec as unknown as OpenAPISpec,
+              url: created.url ?? undefined,
+              sync: created.sync,
+              servers: created.servers ?? {},
+              specMd5: (created as { specMd5?: string }).specMd5,
+            });
+          } catch (err) {
+            console.warn("Failed to duplicate legacy spec:", err);
           }
         }
 
@@ -359,11 +398,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           id: projectId,
           name: record.name,
           description: record.description ?? undefined,
+          tags: record.tags ?? source.tags ?? [],
           createdAt: record.createdAt,
           updatedAt: record.updatedAt,
           pipelines: createdPipelines,
-          spec: source.spec,
-          specs: source.specs || [],
+          spec: getMergedSpec(createdSpecs),
+          specs: createdSpecs,
           envGroups: createdEnvGroups,
         };
 

@@ -24,6 +24,8 @@ utoipa = { workspace = true }
 uuid = { workspace = true }
 http-body-util = "0.1"
 previa-engine = { workspace = true }
+futures-util = "0.3"
+reqwest = { workspace = true }
 sysinfo = "0.38.3"
 
 [dev-dependencies]

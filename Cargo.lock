@@ -1964,7 +1964,7 @@ dependencies = [
 
 [[package]]
 name = "previa"
-version = "1.0.0-alpha.20"
+version = "1.0.0-alpha.21"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1990,7 +1990,7 @@ dependencies = [
 
 [[package]]
 name = "previa-engine"
-version = "1.0.0-alpha.20"
+version = "1.0.0-alpha.21"
 dependencies = [
  "chrono",
  "fakeit",
@@ -2007,8 +2007,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "previa-load-target"
+version = "1.0.0-alpha.21"
+dependencies = [
+ "axum",
+ "dotenvy",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "previa-main"
-version = "1.0.0-alpha.20"
+version = "1.0.0-alpha.21"
 dependencies = [
  "async-stream",
  "axum",
@@ -2042,13 +2058,15 @@ dependencies = [
 
 [[package]]
 name = "previa-runner"
-version = "1.0.0-alpha.20"
+version = "1.0.0-alpha.21"
 dependencies = [
  "axum",
  "dotenvy",
+ "futures-util",
  "http-body-util",
  "httpmock",
  "previa-engine",
+ "reqwest",
  "serde",
  "serde_json",
  "sysinfo",

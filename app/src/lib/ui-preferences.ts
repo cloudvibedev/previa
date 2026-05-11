@@ -10,7 +10,11 @@ const KEYS = {
   THEME: "api-pipeline-studio:theme",
   PALETTE: "api-pipeline-studio:palette",
   REDUCE_GLASS: "api-pipeline-studio:reduce-glass",
+  TEST_HISTORY_COLLAPSED: "api-pipeline-studio:test-history-collapsed",
+  TEST_MODE_SIDEBAR_COLLAPSED: "api-pipeline-studio:test-mode-sidebar-collapsed",
 };
+
+export type TestHistoryKind = "integration" | "loadtest";
 
 export function getTheme(): "dark" | "light" {
   return (localStorage.getItem(KEYS.THEME) as "dark" | "light") || "dark";
@@ -37,4 +41,20 @@ export function getGlassLevel(): number {
 
 export function setGlassLevel(level: number): void {
   localStorage.setItem(KEYS.REDUCE_GLASS, String(level));
+}
+
+export function getTestHistoryCollapsed(kind: TestHistoryKind): boolean {
+  return localStorage.getItem(`${KEYS.TEST_HISTORY_COLLAPSED}:${kind}`) === "true";
+}
+
+export function setTestHistoryCollapsed(kind: TestHistoryKind, collapsed: boolean): void {
+  localStorage.setItem(`${KEYS.TEST_HISTORY_COLLAPSED}:${kind}`, String(collapsed));
+}
+
+export function getTestModeSidebarCollapsed(): boolean {
+  return localStorage.getItem(KEYS.TEST_MODE_SIDEBAR_COLLAPSED) === "true";
+}
+
+export function setTestModeSidebarCollapsed(collapsed: boolean): void {
+  localStorage.setItem(KEYS.TEST_MODE_SIDEBAR_COLLAPSED, String(collapsed));
 }

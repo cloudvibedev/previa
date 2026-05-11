@@ -1,6 +1,8 @@
 use reqwest::Client;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use crate::assertions::{evaluate_assertions, has_status_assertion};
@@ -11,6 +13,12 @@ use crate::execution::cancel::await_with_cancel;
 use crate::execution::http::{parse_absolute_http_url, parse_method};
 use crate::execution::logging::{log_step_request, log_step_response};
 use crate::template::resolve::resolve_template_variables;
+
+fn noop_request_start_gate<'a>(
+    _: &'a StepRequest,
+) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+    Box::pin(async { true })
+}
 
 pub async fn execute_pipeline(
     pipeline: &Pipeline,
@@ -27,6 +35,7 @@ pub async fn execute_pipeline(
         |_| {},
         |_| {},
         || false,
+        noop_request_start_gate,
     )
     .await
 }
@@ -46,6 +55,7 @@ pub async fn execute_pipeline_with_client(
         |_| {},
         |_| {},
         || false,
+        noop_request_start_gate,
     )
     .await
 }
@@ -73,6 +83,7 @@ where
         on_step_start,
         on_step_result,
         should_cancel,
+        noop_request_start_gate,
     )
     .await
 }
@@ -101,6 +112,7 @@ where
         on_step_start,
         on_step_result,
         should_cancel,
+        noop_request_start_gate,
     )
     .await
 }
@@ -131,6 +143,73 @@ where
         on_step_start,
         on_step_result,
         should_cancel,
+        noop_request_start_gate,
+    )
+    .await
+}
+
+pub async fn execute_pipeline_with_runtime_request_gate<FStart, FResult, FCancel, FGate>(
+    pipeline: &Pipeline,
+    selected_base_url_key: Option<&str>,
+    specs: Option<&[RuntimeSpec]>,
+    env_groups: Option<&[RuntimeEnvGroup]>,
+    selected_env_group_slug: Option<&str>,
+    on_step_start: FStart,
+    on_step_result: FResult,
+    should_cancel: FCancel,
+    on_request_start: FGate,
+) -> Vec<StepExecutionResult>
+where
+    FStart: FnMut(&str),
+    FResult: FnMut(&StepExecutionResult),
+    FCancel: FnMut() -> bool,
+    FGate: for<'a> FnMut(&'a StepRequest) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> + Send,
+{
+    let client = Client::new();
+    execute_pipeline_with_client_runtime_hooks(
+        &client,
+        pipeline,
+        selected_base_url_key,
+        specs,
+        env_groups,
+        selected_env_group_slug,
+        on_step_start,
+        on_step_result,
+        should_cancel,
+        on_request_start,
+    )
+    .await
+}
+
+pub async fn execute_pipeline_with_client_runtime_request_gate<FStart, FResult, FCancel, FGate>(
+    client: &Client,
+    pipeline: &Pipeline,
+    selected_base_url_key: Option<&str>,
+    specs: Option<&[RuntimeSpec]>,
+    env_groups: Option<&[RuntimeEnvGroup]>,
+    selected_env_group_slug: Option<&str>,
+    on_step_start: FStart,
+    on_step_result: FResult,
+    should_cancel: FCancel,
+    on_request_start: FGate,
+) -> Vec<StepExecutionResult>
+where
+    FStart: FnMut(&str),
+    FResult: FnMut(&StepExecutionResult),
+    FCancel: FnMut() -> bool,
+    FGate: for<'a> FnMut(&'a StepRequest) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> + Send,
+{
+    execute_pipeline_with_client_runtime_hooks(
+        client,
+        pipeline,
+        selected_base_url_key,
+        specs,
+        env_groups,
+        selected_env_group_slug,
+        on_step_start,
+        on_step_result,
+        should_cancel,
+        on_request_start,
     )
     .await
 }
@@ -158,6 +237,7 @@ where
         on_step_start,
         on_step_result,
         should_cancel,
+        noop_request_start_gate,
     )
     .await
 }
@@ -179,26 +259,107 @@ where
     should_stop_pipeline
 }
 
-async fn execute_pipeline_with_client_runtime_hooks<FStart, FResult, FCancel>(
+async fn execute_pipeline_with_client_runtime_hooks<FStart, FResult, FCancel, FGate>(
+    client: &Client,
+    pipeline: &Pipeline,
+    selected_base_url_key: Option<&str>,
+    specs: Option<&[RuntimeSpec]>,
+    env_groups: Option<&[RuntimeEnvGroup]>,
+    selected_env_group_slug: Option<&str>,
+    on_step_start: FStart,
+    on_step_result: FResult,
+    should_cancel: FCancel,
+    on_request_start: FGate,
+) -> Vec<StepExecutionResult>
+where
+    FStart: FnMut(&str),
+    FResult: FnMut(&StepExecutionResult),
+    FCancel: FnMut() -> bool,
+    FGate: for<'a> FnMut(&'a StepRequest) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> + Send,
+{
+    execute_pipeline_with_client_runtime_hooks_from_index(
+        client,
+        pipeline,
+        selected_base_url_key,
+        0,
+        HashMap::new(),
+        specs,
+        env_groups,
+        selected_env_group_slug,
+        on_step_start,
+        on_step_result,
+        should_cancel,
+        on_request_start,
+    )
+    .await
+}
+
+pub async fn execute_pipeline_from_step_with_client_runtime_hooks<FStart, FResult, FCancel, FGate>(
+    client: &Client,
+    pipeline: &Pipeline,
+    start_step_id: &str,
+    initial_context: HashMap<String, StepExecutionResult>,
+    specs: Option<&[RuntimeSpec]>,
+    env_groups: Option<&[RuntimeEnvGroup]>,
+    selected_env_group_slug: Option<&str>,
+    on_step_start: FStart,
+    on_step_result: FResult,
+    should_cancel: FCancel,
+    on_request_start: FGate,
+) -> Vec<StepExecutionResult>
+where
+    FStart: FnMut(&str),
+    FResult: FnMut(&StepExecutionResult),
+    FCancel: FnMut() -> bool,
+    FGate: for<'a> FnMut(&'a StepRequest) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> + Send,
+{
+    let start_index = pipeline
+        .steps
+        .iter()
+        .position(|step| step.id == start_step_id)
+        .unwrap_or(pipeline.steps.len());
+
+    execute_pipeline_with_client_runtime_hooks_from_index(
+        client,
+        pipeline,
+        None,
+        start_index,
+        initial_context,
+        specs,
+        env_groups,
+        selected_env_group_slug,
+        on_step_start,
+        on_step_result,
+        should_cancel,
+        on_request_start,
+    )
+    .await
+}
+
+async fn execute_pipeline_with_client_runtime_hooks_from_index<FStart, FResult, FCancel, FGate>(
     client: &Client,
     pipeline: &Pipeline,
     _selected_base_url_key: Option<&str>,
+    start_index: usize,
+    initial_context: HashMap<String, StepExecutionResult>,
     specs: Option<&[RuntimeSpec]>,
     env_groups: Option<&[RuntimeEnvGroup]>,
     selected_env_group_slug: Option<&str>,
     mut on_step_start: FStart,
     mut on_step_result: FResult,
     mut should_cancel: FCancel,
+    mut on_request_start: FGate,
 ) -> Vec<StepExecutionResult>
 where
     FStart: FnMut(&str),
     FResult: FnMut(&StepExecutionResult),
     FCancel: FnMut() -> bool,
+    FGate: for<'a> FnMut(&'a StepRequest) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> + Send,
 {
-    let mut context: HashMap<String, StepExecutionResult> = HashMap::new();
-    let mut results = Vec::with_capacity(pipeline.steps.len());
+    let mut context = initial_context;
+    let mut results = Vec::with_capacity(pipeline.steps.len().saturating_sub(start_index));
 
-    'steps: for step in &pipeline.steps {
+    'steps: for step in pipeline.steps.iter().skip(start_index) {
         if should_cancel() {
             break;
         }
@@ -366,6 +527,13 @@ where
                 body: resolved_body.clone(),
             };
             log_step_request(&step.id, &request);
+            let request_admitted = on_request_start(&request).await;
+            if !request_admitted {
+                break 'steps;
+            }
+            if should_cancel() {
+                break 'steps;
+            }
 
             let Some(send_result) =
                 await_with_cancel(request_builder.send(), &mut should_cancel).await
@@ -560,12 +728,114 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{Pipeline, PipelineStep, RuntimeSpec, StepAssertion};
+    use crate::core::types::{
+        Pipeline, PipelineStep, RuntimeSpec, StepAssertion, StepRequest, StepResponse,
+    };
     use httpmock::Method::{GET, POST};
     use httpmock::MockServer;
     use serde_json::json;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn executes_from_step_with_seeded_previous_results() {
+        let server = MockServer::start_async().await;
+        let protected = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/protected")
+                    .header("authorization", "Bearer abc123");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({ "ok": true }));
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: Some("pipe-1".to_owned()),
+            name: "Pipe".to_owned(),
+            description: None,
+            steps: vec![
+                PipelineStep {
+                    id: "login".to_owned(),
+                    name: "Login".to_owned(),
+                    description: None,
+                    method: "POST".to_owned(),
+                    url: format!("{}/login", server.base_url()),
+                    headers: HashMap::new(),
+                    body: None,
+                    operation_id: None,
+                    delay: None,
+                    retry: None,
+                    asserts: Vec::new(),
+                },
+                PipelineStep {
+                    id: "protected".to_owned(),
+                    name: "Protected".to_owned(),
+                    description: None,
+                    method: "GET".to_owned(),
+                    url: format!("{}/protected", server.base_url()),
+                    headers: HashMap::from([(
+                        "Authorization".to_owned(),
+                        "Bearer {{steps.login.token}}".to_owned(),
+                    )]),
+                    body: None,
+                    operation_id: None,
+                    delay: None,
+                    retry: None,
+                    asserts: Vec::new(),
+                },
+            ],
+        };
+
+        let seeded = HashMap::from([(
+            "login".to_owned(),
+            StepExecutionResult {
+                step_id: "login".to_owned(),
+                status: "success".to_owned(),
+                request: Some(StepRequest {
+                    method: "POST".to_owned(),
+                    url: format!("{}/login", server.base_url()),
+                    headers: HashMap::new(),
+                    body: None,
+                }),
+                response: Some(StepResponse {
+                    status: 200,
+                    status_text: "OK".to_owned(),
+                    headers: HashMap::new(),
+                    body: json!({ "token": "abc123" }),
+                }),
+                error: None,
+                duration: Some(1),
+                attempts: Some(1),
+                attempt: Some(1),
+                max_attempts: Some(1),
+                assert_results: None,
+            },
+        )]);
+
+        let mut started = Vec::new();
+        let results = execute_pipeline_from_step_with_client_runtime_hooks(
+            &reqwest::Client::new(),
+            &pipeline,
+            "protected",
+            seeded,
+            None,
+            None,
+            None,
+            |step_id| started.push(step_id.to_owned()),
+            |_| {},
+            || false,
+            |_| Box::pin(async { true }),
+        )
+        .await;
+
+        assert_eq!(started, vec!["protected"]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].step_id, "protected");
+        assert_eq!(results[0].status, "success");
+        protected.assert_async().await;
+    }
 
     #[tokio::test]
     async fn executes_pipeline_with_interpolation_and_assertions() {
@@ -728,6 +998,101 @@ mod tests {
             results[0].response.as_ref().map(|r| r.body.clone()),
             Some(Value::String("prod".to_owned()))
         );
+    }
+
+    #[tokio::test]
+    async fn request_gate_can_decline_before_http_send() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/blocked");
+                then.status(200).body("should not be called");
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Gate".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "blocked".to_owned(),
+                name: "Blocked".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/blocked", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: vec![],
+            }],
+        };
+
+        let results = execute_pipeline_with_runtime_request_gate(
+            &pipeline,
+            None,
+            None,
+            None,
+            None,
+            |_| {},
+            |_| {},
+            || false,
+            |_| Box::pin(async { false }),
+        )
+        .await;
+
+        assert!(results.is_empty());
+        call.assert_calls_async(0).await;
+    }
+
+    #[tokio::test]
+    async fn client_runtime_request_gate_uses_provided_client() {
+        let server = MockServer::start_async().await;
+        let call = server
+            .mock_async(|when, then| {
+                when.method(GET).path("/shared-client");
+                then.status(200).body("ok");
+            })
+            .await;
+
+        let pipeline = Pipeline {
+            id: None,
+            name: "Shared client".to_owned(),
+            description: None,
+            steps: vec![PipelineStep {
+                id: "shared".to_owned(),
+                name: "Shared".to_owned(),
+                description: None,
+                method: "GET".to_owned(),
+                url: format!("{}/shared-client", server.base_url()),
+                headers: HashMap::new(),
+                body: None,
+                operation_id: None,
+                delay: None,
+                retry: None,
+                asserts: vec![],
+            }],
+        };
+
+        let client = Client::new();
+        let results = execute_pipeline_with_client_runtime_request_gate(
+            &client,
+            &pipeline,
+            None,
+            None,
+            None,
+            None,
+            |_| {},
+            |_| {},
+            || false,
+            |_| Box::pin(async { true }),
+        )
+        .await;
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "success");
+        call.assert_calls_async(1).await;
     }
 
     #[tokio::test]

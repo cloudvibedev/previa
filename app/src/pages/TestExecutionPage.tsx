@@ -14,6 +14,7 @@ import { Play, Plus, Workflow, FileCode2, FileText, PlayCircle, Menu, Zap, Rotat
 import { useStepAutoScroll, useStepVisibility } from "@/hooks/useStepAutoScroll";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getPipelineOrder, savePipelineOrder, applyOrder } from "@/lib/pipeline-order";
+import { getTestHistoryCollapsed, getTestModeSidebarCollapsed, setTestHistoryCollapsed, setTestModeSidebarCollapsed as saveTestModeSidebarCollapsed } from "@/lib/ui-preferences";
 import { useOrchestratorStore } from "@/stores/useOrchestratorStore";
 import { DotsLoader } from "@/components/DotsLoader";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -24,6 +25,7 @@ import { StepFlowGraph } from "@/components/StepFlowGraph";
 import type { StepFlowGraphItem } from "@/components/StepFlowGraph";
 import { StepFlowList } from "@/components/StepFlowList";
 import { useStepViewStore } from "@/stores/useStepViewStore";
+import { useExperimentalFeaturesEnabled } from "@/stores/useExperimentalFeaturesStore";
 import { useExecutionHistoryStore } from "@/stores/useExecutionHistoryStore";
 import { useLoadTestHistoryStore } from "@/stores/useLoadTestHistoryStore";
 import type { ExecutionRun } from "@/lib/execution-store";
@@ -80,7 +82,7 @@ function SidebarContent({
   handleRunAll, handleBatchPause, handleBatchResume, handleBatchCancel, executionBackendUrl,
   dragTargetIndex, onDragStart, onDragOver, onDrop,
   selectedForBatch, onToggleBatchCheck, onToggleAllBatchCheck, showBatchCheckboxes,
-  queuePipelines, pipelineNames,
+  queuePipelines, pipelineNames, experimentalFeaturesEnabled,
 }: {
   spec?: OpenAPISpec; specs?: ProjectSpec[]; envGroups?: ProjectEnvGroup[]; pipelines: Pipeline[]; selectedIndex: number | null;
   pipelineStatuses: Record<number, "success" | "error" | "running" | "queued">; running: boolean;
@@ -106,56 +108,60 @@ function SidebarContent({
   showBatchCheckboxes: boolean;
   queuePipelines?: apiClient.E2eQueuePipelineRecord[];
   pipelineNames?: Record<string, string>;
+  experimentalFeaturesEnabled: boolean;
 }) {
   const { t } = useTranslation();
   const [deleteTarget, setDeleteTarget] = useState<{ type: "pipeline" | "spec"; idOrIndex: string | number; name: string } | null>(null);
   const hasSpecs = specs && specs.length > 0;
   const hasAnySpec = hasSpecs || !!spec;
+  const hasVisibleSpec = experimentalFeaturesEnabled && hasAnySpec;
   return (
     <>
-      <div className="border-border/50 px-4 py-3">
-        <SectionHeader title="API Specs">
-          {onEditSpec && (
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEditSpec()} title={t("testExecution.addSpec")}>
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </SectionHeader>
-        {hasSpecs ? (
-          <div className="mt-1 space-y-1">
-            {specs!.map((s) => (
-              <div key={s.id} className="group flex items-center gap-1.5 text-xs rounded-md px-1.5 py-1 hover:bg-accent/50 transition-colors">
-                <button
-                  className="flex-1 truncate text-left text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                  onClick={() => onEditSpec?.(s.id)}
-                >
-                  {s.name}
-                </button>
-                <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 shrink-0">
-                  {s.spec?.routes?.length ?? 0}
-                </Badge>
-                {onDeleteSpec && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                    onClick={() => setDeleteTarget({ type: "spec", idOrIndex: s.id, name: s.name })}
-                    title={t("testExecution.removeSpec")}
+      {experimentalFeaturesEnabled && (
+        <div className="border-border/50 px-4 py-3">
+          <SectionHeader title="API Specs">
+            {onEditSpec && (
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEditSpec()} title={t("testExecution.addSpec")}>
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </SectionHeader>
+          {hasSpecs ? (
+            <div className="mt-1 space-y-1">
+              {specs!.map((s) => (
+                <div key={s.id} className="group flex items-center gap-1.5 text-xs rounded-md px-1.5 py-1 hover:bg-accent/50 transition-colors">
+                  <button
+                    className="flex-1 truncate text-left text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    onClick={() => onEditSpec?.(s.id)}
                   >
-                    <X className="h-3 w-3" />
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : spec ? (
-          <button className="mt-1 truncate text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left w-full" onClick={() => onEditSpec?.()}>
-            {spec.title} v{spec.version}
-          </button>
-        ) : (
-          <p className="mt-1 text-xs text-muted-foreground">{t("testExecution.noSpecImported")}</p>
-        )}
-      </div>
+                    {s.name}
+                  </button>
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4 shrink-0">
+                    {s.spec?.routes?.length ?? 0}
+                  </Badge>
+                  {onDeleteSpec && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                      onClick={() => setDeleteTarget({ type: "spec", idOrIndex: s.id, name: s.name })}
+                      title={t("testExecution.removeSpec")}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : spec ? (
+            <button className="mt-1 truncate text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer text-left w-full" onClick={() => onEditSpec?.()}>
+              {spec.title} v{spec.version}
+            </button>
+          ) : (
+            <p className="mt-1 text-xs text-muted-foreground">{t("testExecution.noSpecImported")}</p>
+          )}
+        </div>
+      )}
 
       {onCreateEnvGroup && onUpdateEnvGroup && onDeleteEnvGroup && (
         <ProjectEnvGroupsPanel
@@ -184,7 +190,7 @@ function SidebarContent({
               </Button>
             </div>
           )}
-          {onCreateAIPipeline && (
+          {experimentalFeaturesEnabled && onCreateAIPipeline && (
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onCreateAIPipeline} title={hasAnySpec ? t("testExecution.createWithAI") : t("testExecution.importSpecFirst")} disabled={!hasAnySpec}>
               <Sparkles className="h-3.5 w-3.5" />
             </Button>
@@ -210,12 +216,14 @@ function SidebarContent({
 
       <ScrollArea className="flex-1">
         <div className="space-y-0">
-          {!hasAnySpec && pipelines.length === 0 && (
+          {!hasVisibleSpec && pipelines.length === 0 && (
             <div className="p-4 text-center">
-              <p className="text-sm text-muted-foreground">{t("testExecution.importSpecToCreate")}</p>
+              <p className="text-sm text-muted-foreground">
+                {experimentalFeaturesEnabled ? t("testExecution.importSpecToCreate") : t("testExecution.noPipelineCreated")}
+              </p>
             </div>
           )}
-          {hasAnySpec && pipelines.length === 0 && (
+          {hasVisibleSpec && pipelines.length === 0 && (
             <p className="p-4 text-center text-sm text-muted-foreground">{t("testExecution.noPipelineCreated")}</p>
           )}
           {pipelines.map((p, i) => (
@@ -263,10 +271,19 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const stepViewMode = useStepViewStore((s) => s.mode);
+  const experimentalFeaturesEnabled = useExperimentalFeaturesEnabled();
   const stepScrollContainerRef = useRef<HTMLDivElement>(null!);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [historyCollapsed, setHistoryCollapsed] = useState(false);
-  const [testModeSidebarCollapsed, setTestModeSidebarCollapsed] = useState(false);
+  const [historyCollapsed, setHistoryCollapsedState] = useState(() => getTestHistoryCollapsed("integration"));
+  const setHistoryCollapsed = useCallback((collapsed: boolean) => {
+    setTestHistoryCollapsed("integration", collapsed);
+    setHistoryCollapsedState(collapsed);
+  }, []);
+  const [testModeSidebarCollapsed, setTestModeSidebarCollapsedState] = useState(() => getTestModeSidebarCollapsed());
+  const setTestModeSidebarCollapsed = useCallback((collapsed: boolean) => {
+    saveTestModeSidebarCollapsed(collapsed);
+    setTestModeSidebarCollapsedState(collapsed);
+  }, []);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(
     initialSelectedIndex ?? (pipelines.length > 0 ? 0 : null)
   );
@@ -294,6 +311,7 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
   const loadExecutionHistory = useExecutionHistoryStore((state) => state.loadHistory);
   const fetchAllLatestStatuses = useExecutionHistoryStore((state) => state.fetchAllLatestStatuses);
   const runExecutionTest = useExecutionHistoryStore((state) => state.runTest);
+  const rerunExecutionFromStep = useExecutionHistoryStore((state) => state.rerunFromStep);
   const disconnectExecutionController = useExecutionHistoryStore((state) => state.disconnectController);
   const clearExecutionResults = useExecutionHistoryStore((state) => state.clearResults);
   const setExecutionRuns = useExecutionHistoryStore((state) => state.setRuns);
@@ -833,6 +851,25 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
     await executeSinglePipeline(selectedIndex);
   }, [selectedIndex, executeSinglePipeline]);
 
+  const handleRerunFromStep = useCallback(async (stepId: string) => {
+    if (!selectedPipeline || selectedIndex === null) return;
+    if (!executionBackendUrl) {
+      toast.error(t("testExecution.configureServerUrl"));
+      return;
+    }
+    await rerunExecutionFromStep(
+      selectedPipeline,
+      selectedIndex,
+      projectId,
+      stepId,
+      executionBackendUrl,
+      specs,
+      envGroups,
+      effectiveSelectedEnvGroupSlug,
+    );
+    setChartRefreshKey((prev) => prev + 1);
+  }, [selectedPipeline, selectedIndex, executionBackendUrl, t, rerunExecutionFromStep, projectId, specs, envGroups, effectiveSelectedEnvGroupSlug]);
+
   // Recover active queue on mount
   useEffect(() => {
     if (!executionBackendUrl || batchState !== "idle") return;
@@ -1044,6 +1081,7 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
     showBatchCheckboxes,
     queuePipelines,
     pipelineNames: pipelineNamesMap,
+    experimentalFeaturesEnabled,
   };
 
   /* ── Main content (right panel) ── */
@@ -1131,7 +1169,7 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
           <div className={cn("flex flex-1 min-h-0 overflow-hidden", isMobile ? "flex-col" : "flex-row")}>
             <TestModeSidebar
               compact={isMobile}
-              collapsed={testModeSidebarCollapsed}
+              collapsed={!isMobile && testModeSidebarCollapsed}
               onCollapsedChange={setTestModeSidebarCollapsed}
             />
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1172,20 +1210,55 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
                               ) && (results[step.id]?.status === "pending" || results[step.id]?.status === "running" || !results[step.id]);
                               return {
                                 key: step.id,
-                                content: <div data-step-id={step.id}><StepResultCard step={step} result={results[step.id]} shouldCountdown={!!shouldCountdown} onAnalyzeWithAI={onAnalyzeStepWithAI} onGoToCode={onEditPipeline ? handleGoToCode : undefined} /></div>,
+                                content: <div data-step-id={step.id}><StepResultCard step={step} result={results[step.id]} shouldCountdown={!!shouldCountdown} onAnalyzeWithAI={experimentalFeaturesEnabled ? onAnalyzeStepWithAI : undefined} onGoToCode={onEditPipeline ? handleGoToCode : undefined} onRerunFromStep={handleRerunFromStep} canRerunFromStep={!running && !isBatchActive && !!executionBackendUrl} /></div>,
                               };
                             })}
                           />
                           {runHistory.length > 0 && (
-                            <div className="mt-6 max-h-[250px]">
-                              <RunHistoryPanel
-                                onClear={() => setConfirmClearOpen(true)}
-                                isEmpty={runHistory.length === 0}
-                              >
-                                {runHistory.map((run) => (
-                                  <RunHistoryItem key={run.id} run={run} isActive={activeRunId === run.id} onClick={() => handleSelectRun(run)} />
-                                ))}
-                              </RunHistoryPanel>
+                            <div
+                              data-testid="mobile-integration-history"
+                              className={cn(
+                                "mt-6 border-t border-border/50 transition-[max-height] duration-300 ease-in-out overflow-hidden",
+                                historyCollapsed ? "max-h-10 cursor-pointer" : "max-h-[250px]"
+                              )}
+                              onClick={historyCollapsed ? () => setHistoryCollapsed(false) : undefined}
+                              role={historyCollapsed ? "button" : undefined}
+                              tabIndex={historyCollapsed ? 0 : undefined}
+                              onKeyDown={historyCollapsed ? (event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  setHistoryCollapsed(false);
+                                }
+                              } : undefined}
+                            >
+                              {historyCollapsed ? (
+                                <div className="flex h-10 items-center justify-center">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => setHistoryCollapsed(false)}
+                                    title="Show history"
+                                  >
+                                    <History className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="h-[250px]">
+                                  <RunHistoryPanel
+                                    onClear={() => setConfirmClearOpen(true)}
+                                    isEmpty={runHistory.length === 0}
+                                    onCollapse={() => setHistoryCollapsed(true)}
+                                    collapsed={false}
+                                    collapseDirection="bottom"
+                                    collapseOnHeaderClick
+                                  >
+                                    {runHistory.map((run) => (
+                                      <RunHistoryItem key={run.id} run={run} isActive={activeRunId === run.id} onClick={() => handleSelectRun(run)} />
+                                    ))}
+                                  </RunHistoryPanel>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1226,7 +1299,7 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
                                   return {
                                     key: step.id,
                                     status: results[step.id]?.status,
-                                    content: <div data-step-id={step.id} className="h-full"><StepResultCard variant="grid" step={step} result={results[step.id]} shouldCountdown={!!shouldCountdown} onAnalyzeWithAI={onAnalyzeStepWithAI} onGoToCode={onEditPipeline ? handleGoToCode : undefined} /></div>,
+                                    content: <div data-step-id={step.id} className="h-full"><StepResultCard variant="grid" step={step} result={results[step.id]} shouldCountdown={!!shouldCountdown} onAnalyzeWithAI={experimentalFeaturesEnabled ? onAnalyzeStepWithAI : undefined} onGoToCode={onEditPipeline ? handleGoToCode : undefined} onRerunFromStep={handleRerunFromStep} canRerunFromStep={!running && !isBatchActive && !!executionBackendUrl} /></div>,
                                   };
                                 })}
                               />
@@ -1240,7 +1313,7 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
                                   ) && (results[step.id]?.status === "pending" || results[step.id]?.status === "running" || !results[step.id]);
                                   return {
                                     key: step.id,
-                                    content: <div data-step-id={step.id}><StepResultCard step={step} result={results[step.id]} shouldCountdown={!!shouldCountdown} onAnalyzeWithAI={onAnalyzeStepWithAI} onGoToCode={onEditPipeline ? handleGoToCode : undefined} /></div>,
+                                    content: <div data-step-id={step.id}><StepResultCard step={step} result={results[step.id]} shouldCountdown={!!shouldCountdown} onAnalyzeWithAI={experimentalFeaturesEnabled ? onAnalyzeStepWithAI : undefined} onGoToCode={onEditPipeline ? handleGoToCode : undefined} onRerunFromStep={handleRerunFromStep} canRerunFromStep={!running && !isBatchActive && !!executionBackendUrl} /></div>,
                                   };
                                 })}
                               />
@@ -1362,7 +1435,7 @@ export default function TestExecutionPage({ pipelines, spec, specs, envGroups = 
                 <Menu className="h-4 w-4" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-[280px] p-0 flex flex-col">
+            <SheetContent side="left" className="w-screen max-w-none p-0 flex flex-col sm:max-w-none">
               <SheetHeader className="px-4 py-3 border-border/50">
                 <SheetTitle className="text-sm">{t("testExecution.navigation")}</SheetTitle>
               </SheetHeader>

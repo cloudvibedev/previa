@@ -5,7 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Badge } from "@/components/ui/badge";
 import { MethodBadge } from "@/components/MethodBadge";
 import { STATUS_BORDER } from "@/lib/constants";
-import { ChevronDown, Clock, CheckCircle2, XCircle, Circle as CircleIcon, ShieldCheck, ShieldX, RotateCcw, Timer, Sparkles, Copy, Eye, GripVertical } from "lucide-react";
+import { ChevronDown, Clock, CheckCircle2, XCircle, Circle as CircleIcon, ShieldCheck, ShieldX, RotateCcw, Timer, Sparkles, Copy, Eye, GripVertical, Play } from "lucide-react";
 import { DotsLoader } from "@/components/DotsLoader";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
@@ -60,6 +60,8 @@ interface StepResultCardProps {
   shouldCountdown?: boolean;
   onAnalyzeWithAI?: (step: PipelineStep, result: StepExecutionResult) => void;
   onGoToCode?: (stepId: string) => void;
+  onRerunFromStep?: (stepId: string) => void;
+  canRerunFromStep?: boolean;
   variant?: "list" | "grid";
 }
 
@@ -216,6 +218,42 @@ function CurlButton({ step, request }: { step: PipelineStep; request: StepExecut
   );
 }
 
+function RerunFromStepButton({
+  stepId,
+  disabled,
+  onRerunFromStep,
+}: {
+  stepId: string;
+  disabled?: boolean;
+  onRerunFromStep?: (stepId: string) => void;
+}) {
+  if (!onRerunFromStep) return null;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-[16px] w-[16px] shrink-0 bg-transparent p-0 text-white shadow-none hover:bg-transparent hover:text-white"
+            disabled={disabled}
+            aria-label="Rerun from here"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onRerunFromStep(stepId);
+            }}
+          >
+            <Play className="h-3 w-3 fill-current" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">Rerun from here</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 function DetailContent({ step, result, assertResults, t }: {
   step: PipelineStep; result?: StepExecutionResult; assertResults: any[]; t: any;
 }) {
@@ -324,10 +362,12 @@ function DetailContent({ step, result, assertResults, t }: {
 }
 
 /* ── Grid variant ── */
-function GridCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, status, assertResults, currentAttempt, totalAttempts, t }: {
+function GridCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, onRerunFromStep, canRerunFromStep, status, assertResults, currentAttempt, totalAttempts, t }: {
   step: PipelineStep; result?: StepExecutionResult; shouldCountdown?: boolean;
   onAnalyzeWithAI?: (step: PipelineStep, result: StepExecutionResult) => void;
   onGoToCode?: (stepId: string) => void;
+  onRerunFromStep?: (stepId: string) => void;
+  canRerunFromStep?: boolean;
   status: string; assertResults: any[]; currentAttempt?: number; totalAttempts: number; t: any;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
@@ -355,6 +395,11 @@ function GridCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, 
                 </Tooltip>
               </TooltipProvider>
             )}
+            <RerunFromStepButton
+              stepId={step.id}
+              disabled={canRerunFromStep === false}
+              onRerunFromStep={onRerunFromStep}
+            />
             {result && result.status !== "pending" && result.status !== "running" && onAnalyzeWithAI && (
               <TooltipProvider delayDuration={300}>
                 <Tooltip>
@@ -431,64 +476,73 @@ function GridCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, 
 }
 
 /* ── List variant (original collapsible) ── */
-function ListCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, status, assertResults, currentAttempt, totalAttempts, t }: {
+function ListCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, onRerunFromStep, canRerunFromStep, status, assertResults, currentAttempt, totalAttempts, t }: {
   step: PipelineStep; result?: StepExecutionResult; shouldCountdown?: boolean;
   onAnalyzeWithAI?: (step: PipelineStep, result: StepExecutionResult) => void;
   onGoToCode?: (stepId: string) => void;
+  onRerunFromStep?: (stepId: string) => void;
+  canRerunFromStep?: boolean;
   status: string; assertResults: any[]; currentAttempt?: number; totalAttempts: number; t: any;
 }) {
   return (
     <Collapsible className="h-full">
-      <Card className={`h-full flex flex-col border-l-4 ${STATUS_BORDER[status]} hover:shadow-md transition-all duration-200`} style={getStatusBgStyle(status, status === "pending" && shouldCountdown && (step.delay ?? 0) > 0)}>
-        <CollapsibleTrigger className="w-full text-left">
-          <CardHeader className="p-3 pb-2 space-y-1">
-            <div className="flex items-center gap-2">
-              {STATUS_ICON[status]}
-              <MethodBadge method={step.method} />
-              <span className="flex-1" />
-              {onGoToCode && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-6 px-2 shrink-0 text-[10px]" onClick={(e) => { e.stopPropagation(); e.preventDefault(); onGoToCode(step.id); }}>
-                        Code
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">Go to code</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+      <Card className={`relative h-full flex flex-col border-l-4 ${STATUS_BORDER[status]} hover:shadow-md transition-all duration-200`} style={getStatusBgStyle(status, status === "pending" && shouldCountdown && (step.delay ?? 0) > 0)}>
+        <CollapsibleTrigger asChild>
+          <div className="w-full cursor-pointer text-left">
+            <CardHeader className="p-3 pb-2 space-y-1">
+              <div className="flex items-center gap-2">
+                {STATUS_ICON[status]}
+                <MethodBadge method={step.method} />
+                <span className="flex-1" />
+                {onGoToCode && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-6 px-2 shrink-0 text-[10px]" onClick={(e) => { e.stopPropagation(); e.preventDefault(); onGoToCode(step.id); }}>
+                          Code
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">Go to code</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+                {result && result.status !== "pending" && result.status !== "running" && onAnalyzeWithAI && (
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          size="icon" variant="ghost"
+                          className="h-6 w-6 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          onClick={(e) => { e.stopPropagation(); onAnalyzeWithAI(step, result); }}
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">{t("stepResult.analyzeWithAI", "Analyze with AI")}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+                <RerunFromStepButton
+                  stepId={step.id}
+                  disabled={canRerunFromStep === false}
+                  onRerunFromStep={onRerunFromStep}
+                />
+                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform shrink-0" />
+              </div>
+              <CardTitle className="text-sm truncate pl-6">{step.name}</CardTitle>
+              <div className="flex items-center gap-2 flex-wrap pl-6">
+                <AssertSummaryBadge assertResults={assertResults} />
+                <TimingInfo step={step} result={result} status={status} shouldCountdown={shouldCountdown} currentAttempt={currentAttempt} totalAttempts={totalAttempts} t={t} />
+              </div>
+            </CardHeader>
+            <CardContent className="px-4 pb-3 pt-0">
+              <p className="text-xs text-muted-foreground">{step.description}</p>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">{step.url}</p>
+              {result?.error && (
+                <p className="mt-1 text-xs text-destructive">{result.error}</p>
               )}
-              {result && result.status !== "pending" && result.status !== "running" && onAnalyzeWithAI && (
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="icon" variant="ghost"
-                        className="h-6 w-6 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                        onClick={(e) => { e.stopPropagation(); onAnalyzeWithAI(step, result); }}
-                      >
-                        <Sparkles className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs">{t("stepResult.analyzeWithAI", "Analyze with AI")}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform shrink-0" />
-            </div>
-            <CardTitle className="text-sm truncate pl-6">{step.name}</CardTitle>
-            <div className="flex items-center gap-2 flex-wrap pl-6">
-              <AssertSummaryBadge assertResults={assertResults} />
-              <TimingInfo step={step} result={result} status={status} shouldCountdown={shouldCountdown} currentAttempt={currentAttempt} totalAttempts={totalAttempts} t={t} />
-            </div>
-          </CardHeader>
-          <CardContent className="px-4 pb-3 pt-0">
-            <p className="text-xs text-muted-foreground">{step.description}</p>
-            <p className="mt-1 font-mono text-xs text-muted-foreground">{step.url}</p>
-            {result?.error && (
-              <p className="mt-1 text-xs text-destructive">{result.error}</p>
-            )}
-          </CardContent>
+            </CardContent>
+          </div>
         </CollapsibleTrigger>
 
         <CollapsibleContent>
@@ -500,7 +554,7 @@ function ListCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, 
 }
 
 /* ── Main export ── */
-export function StepResultCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, variant = "list" }: StepResultCardProps) {
+export function StepResultCard({ step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, onRerunFromStep, canRerunFromStep, variant = "list" }: StepResultCardProps) {
   const { t } = useTranslation();
   const status = result?.status || "pending";
   const configuredTotalAttempts = (step.retry ?? 0) + 1;
@@ -510,7 +564,7 @@ export function StepResultCard({ step, result, shouldCountdown, onAnalyzeWithAI,
     ? result.assertResults.filter((item) => !!item && typeof item === "object")
     : [];
 
-  const common = { step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, status, assertResults, currentAttempt, totalAttempts, t };
+  const common = { step, result, shouldCountdown, onAnalyzeWithAI, onGoToCode, onRerunFromStep, canRerunFromStep, status, assertResults, currentAttempt, totalAttempts, t };
 
   if (variant === "grid") {
     return <GridCard {...common} />;

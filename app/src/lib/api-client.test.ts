@@ -133,6 +133,17 @@ describe("api-client load history mapping", () => {
         p99: 13,
         startTime: 1_000,
         elapsedMs: 1_000,
+        senderLaggedStarts: 4,
+        senderQueueDepth: 8,
+        lifecycleBuckets: [
+          {
+            elapsedMs: 1_000,
+            planned: 30,
+            sendStarted: 29,
+            httpStarted: 28,
+            senderLagged: 2,
+          },
+        ],
       },
       finalLines: [
         {
@@ -179,6 +190,17 @@ describe("api-client load history mapping", () => {
         networkTotalKb: 6,
       },
     ]);
+    expect(run.metrics.lifecycleBuckets).toEqual([
+      {
+        elapsedMs: 1_000,
+            planned: 30,
+            sendStarted: 29,
+            httpStarted: 28,
+            senderLagged: 2,
+      },
+    ]);
+    expect(run.metrics.senderLaggedStarts).toBe(4);
+    expect(run.metrics.senderQueueDepth).toBe(8);
   });
 });
 

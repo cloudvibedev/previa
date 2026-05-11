@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { FolderOpen, MoreVertical, Copy, Trash2, Calendar, Download, Pencil } from "lucide-react";
+import { BarChart3, FolderOpen, MoreVertical, Copy, Trash2, Calendar, Download, Pencil, Tag } from "lucide-react";
 import type { Project } from "@/types/project";
 import { format } from "date-fns";
 import { ptBR, enUS } from "date-fns/locale";
@@ -13,13 +13,15 @@ import { ptBR, enUS } from "date-fns/locale";
 interface ProjectCardProps {
   project: Project;
   onOpen: (id: string) => void;
+  onDashboard: (id: string) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
   onExport: (id: string) => void;
   onRename?: (id: string, newName: string) => void;
+  onEditTags?: (id: string) => void;
 }
 
-export function ProjectCard({ project, onOpen, onDuplicate, onDelete, onExport, onRename }: ProjectCardProps) {
+export function ProjectCard({ project, onOpen, onDashboard, onDuplicate, onDelete, onExport, onRename, onEditTags }: ProjectCardProps) {
   const { t, i18n } = useTranslation();
   const pipelinesCount = project.pipelines?.length || 0;
   const specsCount = project.specs?.length || 0;
@@ -48,7 +50,7 @@ export function ProjectCard({ project, onOpen, onDuplicate, onDelete, onExport, 
   };
 
   return (
-    <Card className="group relative hover:shadow-md hover:border-primary/30 hover-lift transition-all duration-300 h-[220px] flex flex-col">
+    <Card className="group relative hover:shadow-md hover:border-primary/30 hover-lift transition-all duration-300 h-[244px] flex flex-col">
       <CardHeader className="pb-3">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
@@ -72,6 +74,20 @@ export function ProjectCard({ project, onOpen, onDuplicate, onDelete, onExport, 
           {project.description}
           </CardDescription>
         )}
+        {project.tags && project.tags.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {project.tags.slice(0, 3).map((tag) => (
+              <Badge key={tag} variant="outline" className="max-w-[120px] truncate text-xs">
+                {tag}
+              </Badge>
+            ))}
+            {project.tags.length > 3 && (
+              <Badge variant="secondary" className="text-xs">
+                +{project.tags.length - 3}
+              </Badge>
+            )}
+          </div>
+        )}
         </div>
         
         <DropdownMenu>
@@ -80,6 +96,7 @@ export function ProjectCard({ project, onOpen, onDuplicate, onDelete, onExport, 
             variant="ghost" 
             size="icon" 
             className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+            aria-label={`${project.name} actions`}
             >
             <MoreVertical className="h-4 w-4" />
             </Button>
@@ -89,9 +106,17 @@ export function ProjectCard({ project, onOpen, onDuplicate, onDelete, onExport, 
           <FolderOpen className="h-4 w-4" />
           {t("common.open")}
           </DropdownMenuItem>
+          <DropdownMenuItem className="gap-2.5" onClick={() => onDashboard(project.id)}>
+          <BarChart3 className="h-4 w-4" />
+          {t("dashboard.title")}
+          </DropdownMenuItem>
           <DropdownMenuItem className="gap-2.5" onClick={() => { setEditName(project.name); setEditing(true); }}>
           <Pencil className="h-4 w-4" />
           {t("common.rename")}
+          </DropdownMenuItem>
+          <DropdownMenuItem className="gap-2.5" onClick={() => onEditTags?.(project.id)}>
+          <Tag className="h-4 w-4" />
+          {t("projects.tags.edit")}
           </DropdownMenuItem>
           <DropdownMenuItem className="gap-2.5" onClick={() => onDuplicate(project.id)}>
           <Copy className="h-4 w-4" />

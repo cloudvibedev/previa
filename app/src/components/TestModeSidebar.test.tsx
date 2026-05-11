@@ -46,6 +46,20 @@ describe("TestModeSidebar", () => {
     expect(screen.queryByText("Load Test")).not.toBeInTheDocument();
   });
 
+  it("keeps compact navigation expanded without a collapse toggle", () => {
+    render(
+      <Tabs defaultValue="loadtest">
+        <TestModeSidebar compact collapsed onCollapsedChange={vi.fn()} />
+      </Tabs>,
+    );
+
+    expect(screen.getByLabelText("Test modes")).toHaveClass("border-b");
+    expect(screen.getByRole("tab", { name: "End-to-End Test" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Load Test" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse test mode sidebar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Expand test mode sidebar" })).not.toBeInTheDocument();
+  });
+
   it("shows button names as tooltips when collapsed", async () => {
     render(
       <Tabs defaultValue="integration">
@@ -71,5 +85,15 @@ describe("TestModeSidebar", () => {
     expect(tooltip).not.toHaveClass("glass", "bg-popover", "backdrop-blur-xl");
     expect(tooltip).toHaveClass("bg-[hsl(var(--popover))]", "z-[2147483647]");
     expect(tooltip.parentElement).toBe(document.body);
+  });
+
+  it("can be removed from layout when collapsed", () => {
+    render(
+      <Tabs defaultValue="integration">
+        <TestModeSidebar collapsed hideWhenCollapsed onCollapsedChange={vi.fn()} />
+      </Tabs>,
+    );
+
+    expect(screen.queryByLabelText("Test modes")).not.toBeInTheDocument();
   });
 });
