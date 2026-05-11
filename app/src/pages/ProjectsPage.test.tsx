@@ -90,6 +90,10 @@ vi.mock("react-i18next", () => ({
         "projects.filters.noResults.description": "Try another search or remove a tag filter.",
         "projects.filters.noResults.title": "No stacks match",
         "projects.filters.searchPlaceholder": "Search title or description",
+        "projects.pagination.next": "Next",
+        "projects.pagination.pageLabel": `Page ${params?.page ?? ""} of ${params?.total ?? ""}`,
+        "projects.pagination.previous": "Previous",
+        "projects.pagination.summary": `${params?.start ?? ""}-${params?.end ?? ""} of ${params?.total ?? ""} stacks`,
         "projects.importError": "Error importing project.",
         "projects.imported": "Project imported!",
         "projects.loading": "Loading...",
@@ -222,5 +226,26 @@ describe("ProjectsPage", () => {
     renderPage();
 
     expect(screen.getByRole("main")).toHaveClass("min-h-0", "overflow-y-auto");
+  });
+
+  it("paginates stacks with a maximum of ten cards per page", () => {
+    projectStoreMock.projects = Array.from({ length: 11 }, (_, index) => ({
+      ...project,
+      id: `project-${index + 1}`,
+      name: `Stack ${index + 1}`,
+    }));
+
+    renderPage();
+
+    expect(screen.getByText("Stack 1")).toBeInTheDocument();
+    expect(screen.getByText("Stack 10")).toBeInTheDocument();
+    expect(screen.queryByText("Stack 11")).not.toBeInTheDocument();
+    expect(screen.getByText("1-10 of 11 stacks")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(screen.queryByText("Stack 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Stack 11")).toBeInTheDocument();
+    expect(screen.getByText("11-11 of 11 stacks")).toBeInTheDocument();
   });
 });

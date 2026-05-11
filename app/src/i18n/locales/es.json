@@ -51,6 +51,10 @@
   "projects.filters.clear": "Limpiar filtros",
   "projects.filters.noResults.title": "No hay stacks coincidentes",
   "projects.filters.noResults.description": "Prueba otra búsqueda o elimina un filtro de etiqueta.",
+  "projects.pagination.previous": "Anterior",
+  "projects.pagination.next": "Siguiente",
+  "projects.pagination.pageLabel": "Página {{page}} de {{total}}",
+  "projects.pagination.summary": "{{start}}-{{end}} de {{total}} stacks",
 
   "export.title": "Exportar Stack",
   "export.description": "Exportar \"{{name}}\" como archivo JSON.",

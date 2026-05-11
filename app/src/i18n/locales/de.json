@@ -51,6 +51,10 @@
   "projects.filters.clear": "Filter löschen",
   "projects.filters.noResults.title": "Keine passenden Stacks",
   "projects.filters.noResults.description": "Versuchen Sie eine andere Suche oder entfernen Sie einen Tag-Filter.",
+  "projects.pagination.previous": "Zurück",
+  "projects.pagination.next": "Weiter",
+  "projects.pagination.pageLabel": "Seite {{page}} von {{total}}",
+  "projects.pagination.summary": "{{start}}-{{end}} von {{total}} Stacks",
 
   "export.title": "Stack exportieren",
   "export.description": "\"{{name}}\" als JSON-Datei exportieren.",

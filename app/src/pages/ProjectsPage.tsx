@@ -9,13 +9,15 @@ import { ProjectTagsDialog } from "@/components/ProjectTagsDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, FolderOpen, Upload, Download, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, FolderOpen, Upload, Download, Search, X } from "lucide-react";
 import { useProjectStore } from "@/stores/useProjectStore";
 import { useOrchestratorStore } from "@/stores/useOrchestratorStore";
 import { exportProjectsSqlite, importProjectFile } from "@/lib/project-io";
 import { collectProjectTags, filterProjectsBySearchAndTags } from "@/lib/project-tags";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { toast } from "sonner";
+
+const PROJECTS_PER_PAGE = 10;
 
 export default function ProjectsPage() {
   const { t } = useTranslation();
@@ -28,6 +30,7 @@ export default function ProjectsPage() {
   const [projectToEditTags, setProjectToEditTags] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -108,6 +111,20 @@ export default function ProjectsPage() {
     [projects, searchQuery, selectedTags],
   );
   const hasFilters = searchQuery.trim().length > 0 || selectedTags.length > 0;
+  const totalPages = Math.max(1, Math.ceil(filteredProjects.length / PROJECTS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStartIndex = (safeCurrentPage - 1) * PROJECTS_PER_PAGE;
+  const paginatedProjects = filteredProjects.slice(pageStartIndex, pageStartIndex + PROJECTS_PER_PAGE);
+  const visibleStart = filteredProjects.length === 0 ? 0 : pageStartIndex + 1;
+  const visibleEnd = Math.min(pageStartIndex + paginatedProjects.length, filteredProjects.length);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedTags]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
 
   const toggleTagFilter = (tag: string) => {
     setSelectedTags((current) => (
@@ -212,25 +229,64 @@ export default function ProjectsPage() {
               <p className="text-muted-foreground">{t("projects.loading")}</p>
             </div>
           ) : projects.length > 0 && filteredProjects.length > 0 ? (
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredProjects.map((project, i) => (
-                <div key={project.id} className="animate-slide-up" style={{ animationDelay: `${i * 80}ms`, opacity: 0 }}>
-                  <ProjectCard
-                    project={project}
-                    onOpen={handleOpenProject}
-                    onDashboard={handleOpenProjectDashboard}
-                    onDuplicate={handleDuplicateProject}
-                    onDelete={handleDeleteClick}
-                    onExport={handleExportClick}
-                    onEditTags={setProjectToEditTags}
-                    onRename={async (id, newName) => {
-                      await updateProject(id, { name: newName });
-                      toast.success(t("projects.renamed"));
-                    }}
-                  />
+            <>
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                {paginatedProjects.map((project, i) => (
+                  <div key={project.id} className="animate-slide-up" style={{ animationDelay: `${i * 80}ms`, opacity: 0 }}>
+                    <ProjectCard
+                      project={project}
+                      onOpen={handleOpenProject}
+                      onDashboard={handleOpenProjectDashboard}
+                      onDuplicate={handleDuplicateProject}
+                      onDelete={handleDeleteClick}
+                      onExport={handleExportClick}
+                      onEditTags={setProjectToEditTags}
+                      onRename={async (id, newName) => {
+                        await updateProject(id, { name: newName });
+                        toast.success(t("projects.renamed"));
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {totalPages > 1 && (
+                <div className="mt-5 flex flex-col items-center justify-between gap-3 border-t border-border/50 pt-4 text-sm text-muted-foreground sm:flex-row">
+                  <span>
+                    {t("projects.pagination.summary", {
+                      start: visibleStart,
+                      end: visibleEnd,
+                      total: filteredProjects.length,
+                    })}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                      disabled={safeCurrentPage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      {t("projects.pagination.previous")}
+                    </Button>
+                    <span className="min-w-24 text-center text-xs font-medium text-foreground">
+                      {t("projects.pagination.pageLabel", { page: safeCurrentPage, total: totalPages })}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                      disabled={safeCurrentPage === totalPages}
+                    >
+                      {t("projects.pagination.next")}
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           ) : projects.length > 0 ? (
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/50 py-12 sm:py-16 px-4 animate-fade-in">
               {hasFilters && (
