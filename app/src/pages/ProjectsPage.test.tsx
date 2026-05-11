@@ -217,4 +217,10 @@ describe("ProjectsPage", () => {
     expect(screen.getByText("Payments")).toBeInTheDocument();
     expect(screen.queryByText("Orders")).not.toBeInTheDocument();
   });
+
+  it("keeps the stacks page scrollable inside the app shell", () => {
+    renderPage();
+
+    expect(screen.getByRole("main")).toHaveClass("min-h-0", "overflow-y-auto");
+  });
 });
