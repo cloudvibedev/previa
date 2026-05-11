@@ -396,121 +396,115 @@ function WaveEditor({
           <span>100%</span>
           <span>0%</span>
         </div>
-        <svg
-          data-testid="wave-editor-graph"
-          viewBox={`0 0 ${plotWidth} ${plotHeight}`}
-          className="h-40 w-full cursor-crosshair touch-none rounded bg-muted/20"
-          role="img"
-          aria-label={t("loadTest.wavePreview")}
-          onClick={(event) => {
-            if (event.detail > 1) return;
-            addPoint(pointFromEvent(event));
-          }}
-          onMouseMove={handleMouseMove}
-          onMouseUp={stopDragging}
-          onMouseLeave={stopDragging}
-          onPointerMove={handlePointerMove}
-          onPointerUp={stopDragging}
-          onPointerLeave={stopDragging}
-        >
-          {[0.25, 0.5, 0.75].map((line) => (
-            <line
-              key={`h-${line}`}
-              x1="0"
-              x2={plotWidth}
-              y1={plotHeight * line}
-              y2={plotHeight * line}
-              stroke="currentColor"
-              strokeOpacity="0.08"
-              strokeWidth="0.5"
-            />
-          ))}
-          {[0.25, 0.5, 0.75].map((line) => (
-            <line
-              key={`v-${line}`}
-              x1={plotWidth * line}
-              x2={plotWidth * line}
-              y1="0"
-              y2={plotHeight}
-              stroke="currentColor"
-              strokeOpacity="0.08"
-              strokeWidth="0.5"
-            />
-          ))}
-          {visibleSecondMarkers.map((marker) => {
-            const x = (marker.second * 1000 / Math.max(durationMs, 1)) * plotWidth;
-            const label = formatPlannedRequests(marker.plannedRequests);
-            const labelX = clamp(x, 2, plotWidth - 2);
-            const textAnchor = x >= plotWidth - 4 ? "end" : x <= 4 ? "start" : "middle";
-            const labelWidth = label.length * 2.1 + 1.2;
-            const labelRectX = textAnchor === "middle"
-              ? labelX - labelWidth / 2
-              : textAnchor === "end"
-                ? labelX - labelWidth
-                : labelX;
-            return (
-              <g key={`second-marker-${marker.second}`} data-testid={`wave-second-marker-${marker.second}`} pointerEvents="none">
-                <line
-                  x1={x}
-                  x2={x}
-                  y1="0"
-                  y2={plotHeight}
-                  stroke="currentColor"
-                  strokeOpacity="0.22"
-                  strokeWidth="0.45"
-                  strokeDasharray="1 1.6"
-                />
-                <rect
-                  x={clamp(labelRectX, 0.6, plotWidth - labelWidth - 0.6)}
-                  y="0.7"
-                  width={labelWidth}
-                  height="5.2"
-                  rx="1.2"
-                  fill="hsl(var(--background))"
-                  opacity="0.72"
-                />
-                <text
-                  x={labelX}
-                  y="4.7"
-                  textAnchor={textAnchor}
-                  fontSize="3.2"
-                  fill="currentColor"
-                  opacity="0.82"
+        <div className="min-w-0">
+          <svg
+            data-testid="wave-editor-graph"
+            viewBox={`0 0 ${plotWidth} ${plotHeight}`}
+            className="h-40 w-full cursor-crosshair touch-none rounded bg-muted/20"
+            role="img"
+            aria-label={t("loadTest.wavePreview")}
+            onClick={(event) => {
+              if (event.detail > 1) return;
+              addPoint(pointFromEvent(event));
+            }}
+            onMouseMove={handleMouseMove}
+            onMouseUp={stopDragging}
+            onMouseLeave={stopDragging}
+            onPointerMove={handlePointerMove}
+            onPointerUp={stopDragging}
+            onPointerLeave={stopDragging}
+          >
+            {[0.25, 0.5, 0.75].map((line) => (
+              <line
+                key={`h-${line}`}
+                x1="0"
+                x2={plotWidth}
+                y1={plotHeight * line}
+                y2={plotHeight * line}
+                stroke="currentColor"
+                strokeOpacity="0.08"
+                strokeWidth="0.5"
+              />
+            ))}
+            {[0.25, 0.5, 0.75].map((line) => (
+              <line
+                key={`v-${line}`}
+                x1={plotWidth * line}
+                x2={plotWidth * line}
+                y1="0"
+                y2={plotHeight}
+                stroke="currentColor"
+                strokeOpacity="0.08"
+                strokeWidth="0.5"
+              />
+            ))}
+            {visibleSecondMarkers.map((marker) => {
+              const x = (marker.second * 1000 / Math.max(durationMs, 1)) * plotWidth;
+              return (
+                <g key={`second-marker-${marker.second}`} data-testid={`wave-second-marker-${marker.second}`} pointerEvents="none">
+                  <line
+                    x1={x}
+                    x2={x}
+                    y1="0"
+                    y2={plotHeight}
+                    stroke="currentColor"
+                    strokeOpacity="0.22"
+                    strokeWidth="0.45"
+                    strokeDasharray="1 1.6"
+                  />
+                </g>
+              );
+            })}
+            <path data-testid="wave-editor-path" d={pathData} fill="none" stroke="currentColor" strokeWidth="1.8" />
+            {graphPoints.map((point, index) => (
+              <circle
+                key={`${points[index].atMs}-${points[index].intensity}-${index}`}
+                data-testid={`wave-point-${index}`}
+                cx={point.x}
+                cy={point.y}
+                r={index === selectedPointIndex ? markerRadius + 0.8 : markerRadius}
+                fill="currentColor"
+                stroke="hsl(var(--background))"
+                strokeWidth="0.8"
+                className="cursor-grab"
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  draggingIndexRef.current = index;
+                  setDraggingIndex(index);
+                  onSelectedPointIndex(index);
+                  event.currentTarget.setPointerCapture?.(event.pointerId);
+                }}
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                  draggingIndexRef.current = index;
+                  setDraggingIndex(index);
+                  onSelectedPointIndex(index);
+                }}
+                onClick={(event) => event.stopPropagation()}
+              />
+            ))}
+          </svg>
+          <div data-testid="wave-marker-value-strip" className="relative mt-1 h-5 text-[10px] font-mono text-muted-foreground">
+            {visibleSecondMarkers.map((marker) => {
+              const percent = clamp((marker.second * 1000 / Math.max(durationMs, 1)) * 100, 0, 100);
+              const edgeClass = percent >= 98
+                ? "-translate-x-full"
+                : percent <= 2
+                  ? "translate-x-0"
+                  : "-translate-x-1/2";
+              return (
+                <span
+                  key={`second-marker-value-${marker.second}`}
+                  data-testid={`wave-second-marker-value-${marker.second}`}
+                  className={`absolute top-0 rounded bg-background/70 px-1 leading-4 ${edgeClass}`}
+                  style={{ left: `${percent}%` }}
                 >
-                  {label}
-                </text>
-              </g>
-            );
-          })}
-          <path data-testid="wave-editor-path" d={pathData} fill="none" stroke="currentColor" strokeWidth="1.8" />
-          {graphPoints.map((point, index) => (
-            <circle
-              key={`${points[index].atMs}-${points[index].intensity}-${index}`}
-              data-testid={`wave-point-${index}`}
-              cx={point.x}
-              cy={point.y}
-              r={index === selectedPointIndex ? markerRadius + 0.8 : markerRadius}
-              fill="currentColor"
-              stroke="hsl(var(--background))"
-              strokeWidth="0.8"
-              className="cursor-grab"
-              onPointerDown={(event) => {
-                event.stopPropagation();
-                draggingIndexRef.current = index;
-                setDraggingIndex(index);
-                onSelectedPointIndex(index);
-                event.currentTarget.setPointerCapture?.(event.pointerId);
-              }}
-              onMouseDown={(event) => {
-                event.stopPropagation();
-                draggingIndexRef.current = index;
-                setDraggingIndex(index);
-                onSelectedPointIndex(index);
-              }}
-              onClick={(event) => event.stopPropagation()}
-            />
-          ))}
-        </svg>
+                  {formatPlannedRequests(marker.plannedRequests)}
+                </span>
+              );
+            })}
+          </div>
+        </div>
       </div>
       <div className="ml-[3.25rem] mt-1 flex justify-between text-[10px] text-muted-foreground">
         <span>0 ms</span>
