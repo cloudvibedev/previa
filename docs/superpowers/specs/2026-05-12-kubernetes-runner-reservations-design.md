@@ -311,7 +311,7 @@ surface for per-runner node claims, constraints, expiry, and consolidation.
 
 ## Version Scope
 
-Version 0 should focus on AWS Karpenter. This keeps the first implementation
+Version 0 supports AWS Karpenter only. This keeps the first implementation
 small and gives Previa one concrete, production-grade provisioning path.
 
 Even with AWS as the only supported provider in v0, the stable contract should
@@ -331,6 +331,26 @@ Adding another Karpenter-compatible provider later should require a new
 provider mapping inside the plugin, not a change to public APIs, runner
 authorization headers, execution queueing, or the `previa-main` reservation
 client.
+
+V0 requires Karpenter to be installed in the target EKS cluster before the
+Previa plugin is deployed. The plugin does not install, upgrade, or own the
+cluster-wide Karpenter controller, CRDs, IAM roles, IRSA configuration, subnet
+discovery, or security group discovery.
+
+The plugin owns Previa-specific AWS Karpenter resources:
+
+- runner `NodePool` definitions;
+- runner `EC2NodeClass` definitions or references;
+- labels, taints, tolerations, and scheduling requirements for Previa runners;
+- runner pods and services;
+- owner labels and cleanup for resources tied to reservations.
+
+V0 should support two Karpenter resource modes:
+
+- `managed`: default. The plugin creates and reconciles Previa-owned
+  `NodePool` and `EC2NodeClass` resources.
+- `reference`: the operator provides existing `NodePool` and `EC2NodeClass`
+  names, and the plugin only schedules runner pods against them.
 
 ## Plugin Configuration
 
@@ -352,6 +372,7 @@ runner_capacity:
     provisioner:
       kind: karpenter
       provider: aws
+      resource_mode: managed
     node_profiles:
       small-dedicated-runner:
         runner_cpu_request: "500m"
@@ -496,7 +517,5 @@ The first implementation still needs concrete choices for:
 - the exact Kubernetes client library and deployment manifest format;
 - whether runner reuse is enabled in the first release or deferred behind a
   configuration flag;
-- the exact AWS Karpenter resources the v0 plugin manages directly versus
-  expects to find pre-created;
 - the exact execution status names used in the existing load-test history and
   SSE flows.
