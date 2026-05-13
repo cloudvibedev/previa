@@ -4,7 +4,10 @@ WORKDIR /src
 
 COPY Cargo.toml Cargo.lock ./
 COPY engine ./engine
+COPY main ./main
+COPY previa ./previa
 COPY runner ./runner
+COPY load-target ./load-target
 COPY kubernetes-plugin ./kubernetes-plugin
 
 RUN cargo build --release -p previa-kubernetes-plugin
