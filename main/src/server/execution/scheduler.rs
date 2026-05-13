@@ -143,13 +143,43 @@ impl ExecutionScheduler {
             return AcquireOutcome::Missing;
         };
 
-        if position != 0 {
+        let request = state
+            .queued
+            .get(position)
+            .cloned()
+            .expect("queued request at located position");
+        if request.kind == ScheduledExecutionKind::E2e && position != 0 {
+            return AcquireOutcome::Pending {
+                position: position + 1,
+            };
+        }
+        if request.kind == ScheduledExecutionKind::Load {
+            for earlier in state.queued.iter().take(position) {
+                if earlier.kind != ScheduledExecutionKind::Load {
+                    return AcquireOutcome::Pending {
+                        position: position + 1,
+                    };
+                }
+                if earlier.lock_key == request.lock_key {
+                    return AcquireOutcome::Pending { position: 1 };
+                }
+                let blocked_by_active_lock = earlier
+                    .lock_key
+                    .as_ref()
+                    .and_then(|key| state.load_locks.get(key))
+                    .is_some_and(|holder| holder != &earlier.execution_id);
+                if !blocked_by_active_lock {
+                    return AcquireOutcome::Pending {
+                        position: position + 1,
+                    };
+                }
+            }
+        } else if position != 0 {
             return AcquireOutcome::Pending {
                 position: position + 1,
             };
         }
 
-        let request = state.queued.front().cloned().expect("front queue request");
         if request.kind == ScheduledExecutionKind::E2e
             && state
                 .project_locks
@@ -186,7 +216,7 @@ impl ExecutionScheduler {
             return AcquireOutcome::Pending { position: 1 };
         }
 
-        state.queued.pop_front();
+        state.queued.remove(position);
         for runner in &selected {
             let usage = state.runner_usage.entry(runner.clone()).or_default();
             match request.kind {
@@ -449,6 +479,57 @@ mod tests {
             .await
         {
             AcquireOutcome::Reserved(runners) => assert_eq!(runners, vec!["runner-1".to_owned()]),
+            other => panic!("unexpected acquire result: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn load_queue_skips_blocked_pipeline_for_independent_pipeline() {
+        let scheduler = ExecutionScheduler::new(SchedulerConfig {
+            e2e_per_runner_limit: 1,
+            load_per_runner_limit: 1,
+        });
+        scheduler
+            .enqueue_with_lock(
+                "load-a1".to_owned(),
+                ScheduledExecutionKind::Load,
+                "project-1".to_owned(),
+                1,
+                Some("project-1:pipeline-a".to_owned()),
+            )
+            .await;
+        match scheduler
+            .try_acquire("load-a1", &["runner-1".to_owned(), "runner-2".to_owned()])
+            .await
+        {
+            AcquireOutcome::Reserved(runners) => assert_eq!(runners, vec!["runner-1".to_owned()]),
+            other => panic!("unexpected acquire result: {other:?}"),
+        }
+
+        scheduler
+            .enqueue_with_lock(
+                "load-a2".to_owned(),
+                ScheduledExecutionKind::Load,
+                "project-1".to_owned(),
+                1,
+                Some("project-1:pipeline-a".to_owned()),
+            )
+            .await;
+        scheduler
+            .enqueue_with_lock(
+                "load-b1".to_owned(),
+                ScheduledExecutionKind::Load,
+                "project-1".to_owned(),
+                1,
+                Some("project-1:pipeline-b".to_owned()),
+            )
+            .await;
+
+        match scheduler
+            .try_acquire("load-b1", &["runner-1".to_owned(), "runner-2".to_owned()])
+            .await
+        {
+            AcquireOutcome::Reserved(runners) => assert_eq!(runners, vec!["runner-2".to_owned()]),
             other => panic!("unexpected acquire result: {other:?}"),
         }
     }

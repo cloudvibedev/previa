@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, HeaderValue, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 use crate::server::db::load_project_pipeline_for_execution;
@@ -9,13 +9,11 @@ use crate::server::errors::{
     bad_request_message_response, bad_request_response, internal_error_response,
     service_unavailable_response,
 };
-use crate::server::execution::{
-    StartLoadExecutionError, sse_response_for_started_load_execution, start_load_execution,
-};
+use crate::server::execution::{StartLoadExecutionError, start_load_execution};
 use crate::server::middleware::transaction::extract_transaction_id;
 use crate::server::models::{
-    ErrorResponse, LoadCapacityPreviewRequest, LoadCapacityPreviewResponse, LoadTestRequest,
-    OrchestratorSseEventData, ProjectLoadTestRequest,
+    ErrorResponse, LoadCapacityPreviewRequest, LoadCapacityPreviewResponse,
+    LoadExecutionStartResponse, LoadTestRequest, ProjectLoadTestRequest,
 };
 use crate::server::services::runner_capacity::estimate_runner_count;
 use crate::server::state::AppState;
@@ -54,7 +52,12 @@ pub async fn preview_load_capacity(
         target_rps: payload.target_rps,
         rps_per_runner: state.rps_per_node,
         estimated_runner_count,
-        capacity_mode: "manual".to_owned(),
+        capacity_mode: std::env::var("PREVIA_KUBERNETES_PLUGIN_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|_| "kubernetes")
+            .unwrap_or("manual")
+            .to_owned(),
     })
     .into_response()
 }
@@ -76,7 +79,14 @@ pub async fn run_load_test_internal(
             response_with_execution_headers(
                 project_id,
                 &execution_id,
-                sse_response_for_started_load_execution(started),
+                (
+                    StatusCode::ACCEPTED,
+                    Json(LoadExecutionStartResponse {
+                        execution_id: execution_id.clone(),
+                        status: started.status,
+                    }),
+                )
+                    .into_response(),
             )
         }
         Err(StartLoadExecutionError::BadRequest(message)) => bad_request_message_response(&message),
@@ -97,10 +107,9 @@ pub async fn run_load_test_internal(
     request_body = ProjectLoadTestRequest,
     responses(
         (
-            status = 200,
-            description = "Stream SSE unificado de load test (project-scoped).",
-            content_type = "text/event-stream",
-            body = OrchestratorSseEventData,
+            status = 202,
+            description = "Execução de load test aceita. Use a rota de eventos da execução para acompanhar o stream.",
+            body = LoadExecutionStartResponse,
             headers(
                 ("x-execution-id" = String, description = "ID da execução iniciada para reconexão via GET /executions/{executionId}"),
                 ("Location" = String, description = "Rota project-scoped da execução iniciada"),
@@ -158,6 +167,7 @@ pub async fn run_load_test_for_project(
         pipeline,
         config: payload.config,
         load: payload.load,
+        target_rps: payload.target_rps,
         selected_base_url_key: payload.selected_base_url_key,
         selected_env_group_slug: payload.selected_env_group_slug,
         project_id: Some(project_id.clone()),
@@ -213,11 +223,12 @@ mod tests {
     use crate::server::state::AppState;
 
     #[tokio::test]
-    async fn post_load_returns_execution_headers_matching_execution_init_event() {
+    async fn post_load_returns_async_execution_response_and_events_endpoint_replays_init() {
         let (runner_url, _runner_task) = spawn_runner_server().await;
         let app = test_app(runner_url).await;
 
         let response = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
@@ -239,14 +250,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response
-                .headers()
-                .get(header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok()),
-            Some("text/event-stream")
-        );
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
         let execution_id = response
             .headers()
             .get("x-execution-id")
@@ -260,6 +264,36 @@ mod tests {
             .expect("location header")
             .to_owned();
         assert!(location.ends_with(&format!("/executions/{execution_id}")));
+
+        let body = http_body_util::BodyExt::collect(response.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["executionId"], execution_id);
+        assert!(
+            payload["status"] == "running" || payload["status"] == "queued",
+            "unexpected status payload: {payload}"
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/api/v1/executions/{execution_id}/events"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/event-stream")
+        );
 
         let mut body = response.into_body().into_data_stream();
         let first_chunk = tokio::time::timeout(std::time::Duration::from_secs(2), body.next())

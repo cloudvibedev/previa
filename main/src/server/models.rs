@@ -13,6 +13,8 @@ pub struct LoadTestRequest {
     pub config: Option<LoadTestConfig>,
     #[serde(default)]
     pub load: Option<LoadProfile>,
+    #[serde(default)]
+    pub target_rps: Option<u64>,
     pub selected_base_url_key: Option<String>,
     pub selected_env_group_slug: Option<String>,
     pub project_id: Option<String>,
@@ -92,6 +94,8 @@ pub struct ProjectLoadTestRequest {
     pub config: Option<LoadTestConfig>,
     #[serde(default)]
     pub load: Option<LoadProfile>,
+    #[serde(default)]
+    pub target_rps: Option<u64>,
     pub selected_base_url_key: Option<String>,
     pub selected_env_group_slug: Option<String>,
     pub pipeline_index: Option<i64>,
@@ -114,6 +118,13 @@ pub struct LoadCapacityPreviewResponse {
     pub rps_per_runner: u64,
     pub estimated_runner_count: usize,
     pub capacity_mode: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadExecutionStartResponse {
+    pub execution_id: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -144,6 +155,42 @@ pub struct KubernetesReservationStatus {
 pub struct KubernetesReservationRunner {
     pub id: String,
     pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunnerReservationRecord {
+    pub execution_id: String,
+    pub pipeline_id: Option<String>,
+    pub capacity_mode: String,
+    pub requested_runner_count: usize,
+    pub ready_runner_count: usize,
+    pub target_rps: u64,
+    pub node_profile: Option<String>,
+    pub reservation_id: Option<String>,
+    #[serde(skip_serializing)]
+    pub reservation_token: Option<String>,
+    pub reservation_expires_at: Option<String>,
+    pub reservation_status: String,
+    pub runner_endpoints: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunnerReservationUpsert {
+    pub execution_id: String,
+    pub pipeline_id: Option<String>,
+    pub capacity_mode: String,
+    pub requested_runner_count: usize,
+    pub ready_runner_count: usize,
+    pub target_rps: u64,
+    pub node_profile: Option<String>,
+    pub reservation_id: Option<String>,
+    pub reservation_token: Option<String>,
+    pub reservation_expires_at: Option<String>,
+    pub reservation_status: String,
+    pub runner_endpoints: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]

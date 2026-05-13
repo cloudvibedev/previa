@@ -10,7 +10,9 @@ use crate::server::handlers::env_groups::{
     create_project_env_group, delete_project_env_group, get_project_env_group,
     list_project_env_groups, upsert_project_env_group,
 };
-use crate::server::handlers::executions::{cancel_execution, stream_execution};
+use crate::server::handlers::executions::{
+    cancel_execution, stream_execution, stream_execution_events,
+};
 use crate::server::handlers::health::{get_info, health, openapi_json};
 use crate::server::handlers::history_e2e::{
     delete_e2e_history, delete_e2e_test_by_id, get_e2e_test_by_id, list_e2e_history,
@@ -97,6 +99,10 @@ pub fn build_app_with_config(
         .route(
             "/api/v1/executions/{executionId}/cancel",
             post(cancel_execution),
+        )
+        .route(
+            "/api/v1/executions/{executionId}/events",
+            get(stream_execution_events),
         )
         .route(
             "/api/v1/projects/{projectId}/executions/{executionId}",

@@ -30,6 +30,12 @@ pub struct LoadTelemetryState {
     runners: HashMap<String, RunnerLoadTelemetryState>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RunnerReservationHeaders {
+    pub reservation_id: String,
+    pub reservation_token: String,
+}
+
 #[derive(Debug, Clone, Default)]
 struct RunnerLoadTelemetryState {
     line: Option<RunnerLoadLine>,
@@ -53,6 +59,7 @@ pub async fn forward_runner_stream_load_chunked(
     endpoint_path: &str,
     transaction_id: Option<String>,
     runner_auth_key: Option<&str>,
+    reservation_headers: Option<RunnerReservationHeaders>,
 ) {
     if cancel.is_cancelled() {
         return;
@@ -70,6 +77,11 @@ pub async fn forward_runner_stream_load_chunked(
 
     if let Some(transaction_id) = transaction_id.as_deref() {
         request = request.header(TRANSACTION_ID_HEADER, transaction_id);
+    }
+    if let Some(headers) = reservation_headers {
+        request = request
+            .header("x-previa-reservation-id", headers.reservation_id)
+            .header("x-previa-reservation-token", headers.reservation_token);
     }
 
     let response = match tokio::time::timeout(Duration::from_secs(10), request.json(&body).send())

@@ -3149,6 +3149,7 @@ async fn resolve_project_load_request(
         pipeline,
         config: args.config,
         load: args.load,
+        target_rps: args.target_rps,
         selected_base_url_key: args.selected_base_url_key,
         selected_env_group_slug: args.selected_env_group_slug,
         project_id: Some(args.project_id),

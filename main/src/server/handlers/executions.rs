@@ -209,6 +209,49 @@ async fn load_finished_execution_snapshot(
     })
 }
 
+async fn load_finished_execution_snapshot_by_id(
+    db: &DbPool,
+    execution_id: &str,
+) -> Result<Option<FinishedExecutionSnapshot>, sqlx::Error> {
+    let project_rows = sqlx::query(
+        "SELECT project_id, finished_at_ms FROM integration_history WHERE execution_id = ?
+        UNION ALL
+        SELECT project_id, finished_at_ms FROM load_history WHERE execution_id = ?
+        ORDER BY finished_at_ms DESC
+        LIMIT 1",
+    )
+    .bind(execution_id)
+    .bind(execution_id)
+    .fetch_optional(db)
+    .await?;
+
+    let Some(row) = project_rows else {
+        return Ok(None);
+    };
+    let project_id = row.try_get::<String, _>("project_id").unwrap_or_default();
+    load_finished_execution_snapshot(db, &project_id, execution_id).await
+}
+
+async fn stream_active_execution(
+    execution: std::sync::Arc<crate::server::state::ExecutionCtx>,
+) -> Response {
+    let skip_execution_init = match execution.kind {
+        ExecutionKind::E2e | ExecutionKind::Load => true,
+    };
+    let (tx, rx) = mpsc::unbounded_channel::<SseMessage>();
+    let init_payload = execution.init_payload.get().await;
+    let _ = tx.send(SseMessage {
+        event: "execution:init".to_owned(),
+        data: init_payload,
+    });
+    let _ = tx.send(SseMessage {
+        event: "execution:snapshot".to_owned(),
+        data: execution.snapshot_payload.get().await,
+    });
+    spawn_broadcast_bridge(execution.sse_tx.subscribe(), tx, skip_execution_init);
+    sse_response_from_rx(rx)
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/projects/{projectId}/executions/{executionId}",
@@ -263,21 +306,7 @@ pub async fn stream_execution(
             return not_found_response("execution not found for project");
         }
 
-        let skip_execution_init = match execution.kind {
-            ExecutionKind::E2e | ExecutionKind::Load => true,
-        };
-        let (tx, rx) = mpsc::unbounded_channel::<SseMessage>();
-        let init_payload = execution.init_payload.get().await;
-        let _ = tx.send(SseMessage {
-            event: "execution:init".to_owned(),
-            data: init_payload,
-        });
-        let _ = tx.send(SseMessage {
-            event: "execution:snapshot".to_owned(),
-            data: execution.snapshot_payload.get().await,
-        });
-        spawn_broadcast_bridge(execution.sse_tx.subscribe(), tx, skip_execution_init);
-        return sse_response_from_rx(rx);
+        return stream_active_execution(execution).await;
     }
 
     let snapshot =
@@ -290,6 +319,76 @@ pub async fn stream_execution(
 
     let Some(snapshot) = snapshot else {
         return not_found_response("execution not found for project");
+    };
+
+    let (tx, rx) = mpsc::unbounded_channel::<SseMessage>();
+    let _ = tx.send(SseMessage {
+        event: "execution:init".to_owned(),
+        data: snapshot.init_payload,
+    });
+    let _ = tx.send(SseMessage {
+        event: "execution:snapshot".to_owned(),
+        data: snapshot.snapshot_payload,
+    });
+    let _ = tx.send(SseMessage {
+        event: snapshot.terminal_event.to_owned(),
+        data: snapshot.terminal_payload,
+    });
+    drop(tx);
+
+    sse_response_from_rx(rx)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/executions/{executionId}/events",
+    params(
+        ("executionId" = String, Path, description = "ID da execução")
+    ),
+    responses(
+        (
+            status = 200,
+            description = "Stream SSE da execução com replay inicial e eventos ao vivo ou terminal.",
+            content_type = "text/event-stream",
+            body = OrchestratorSseEventData
+        ),
+        (
+            status = 400,
+            description = "Parâmetro inválido",
+            body = ErrorResponse
+        ),
+        (
+            status = 404,
+            description = "Execução não encontrada",
+            body = ErrorResponse
+        )
+    )
+)]
+pub async fn stream_execution_events(
+    State(state): State<AppState>,
+    Path(execution_id): Path<String>,
+) -> Response {
+    let execution_id = execution_id.trim().to_owned();
+    if execution_id.is_empty() {
+        return bad_request_message_response("executionId cannot be empty");
+    }
+
+    let execution = {
+        let executions = state.executions.read().await;
+        executions.get(&execution_id).cloned()
+    };
+    if let Some(execution) = execution {
+        return stream_active_execution(execution).await;
+    }
+
+    let snapshot = match load_finished_execution_snapshot_by_id(&state.db, &execution_id).await {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            return internal_error_response(format!("failed to load execution history: {err}"));
+        }
+    };
+    let Some(snapshot) = snapshot else {
+        return not_found_response("execution not found");
     };
 
     let (tx, rx) = mpsc::unbounded_channel::<SseMessage>();

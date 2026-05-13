@@ -532,6 +532,7 @@ pub struct RunProjectLoadTestArgs {
     pub pipeline: Option<Pipeline>,
     pub config: Option<LoadTestConfig>,
     pub load: Option<crate::server::models::LoadProfile>,
+    pub target_rps: Option<u64>,
     pub selected_base_url_key: Option<String>,
     pub selected_env_group_slug: Option<String>,
     pub pipeline_index: Option<i64>,

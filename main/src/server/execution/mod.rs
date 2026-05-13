@@ -14,12 +14,10 @@ pub mod sse_stream;
 pub use e2e::{StartE2eExecutionError, sse_response_for_started_execution, start_e2e_execution};
 pub use forward::{add_context_fields, forward_runner_stream, send_sse_best_effort};
 pub use history_capture::{determine_e2e_history_status, determine_load_history_status};
-pub use load::{
-    StartLoadExecutionError, sse_response_for_started_load_execution, start_load_execution,
-};
+pub use load::{StartLoadExecutionError, start_load_execution};
 pub use load_batch::{
-    LoadTelemetryState, add_load_context_fields, drain_load_chunk, flush_load_batches,
-    forward_runner_stream_load_chunked, rebuild_final_rps_history,
+    LoadTelemetryState, RunnerReservationHeaders, add_load_context_fields, drain_load_chunk,
+    flush_load_batches, forward_runner_stream_load_chunked, rebuild_final_rps_history,
     snapshot_telemetry_consolidated_metrics, snapshot_telemetry_lines, snapshot_telemetry_map,
 };
 pub use node_plan::{

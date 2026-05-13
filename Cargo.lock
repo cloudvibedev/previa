@@ -2007,6 +2007,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "previa-kubernetes-plugin"
+version = "1.0.0-alpha.22"
+dependencies = [
+ "axum",
+ "chrono",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid 1.22.0",
+]
+
+[[package]]
 name = "previa-load-target"
 version = "1.0.0-alpha.22"
 dependencies = [

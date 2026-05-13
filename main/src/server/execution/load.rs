@@ -1,25 +1,28 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use tokio::sync::{Mutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
-use crate::server::db::{save_load_history, upsert_load_history};
+use crate::server::db::{save_load_history, upsert_load_history, upsert_runner_reservation};
 use crate::server::execution::{
-    AcquireOutcome, LoadTelemetryState, ScheduledExecutionKind, add_load_context_fields,
-    build_live_load_snapshot_payload, build_load_snapshot_payload, calculate_node_plan,
-    determine_load_history_status, extract_load_context_value, flush_load_batches,
-    forward_runner_stream_load_chunked, rebuild_final_rps_history,
+    AcquireOutcome, LoadTelemetryState, RunnerReservationHeaders, ScheduledExecutionKind,
+    add_load_context_fields, build_live_load_snapshot_payload, build_load_snapshot_payload,
+    calculate_node_plan, determine_load_history_status, extract_load_context_value,
+    flush_load_batches, forward_runner_stream_load_chunked, rebuild_final_rps_history,
     resolve_runtime_env_groups_for_execution, resolve_runtime_specs_for_execution,
     send_sse_best_effort, snapshot_telemetry_consolidated_metrics, snapshot_telemetry_lines,
     snapshot_telemetry_map, split_even,
 };
 use crate::server::models::{
-    HistoryMetadata, LoadEventContext, LoadHistoryWrite, LoadLatencyAccumulator, LoadProfile,
-    LoadTestConfig, LoadTestRequest, RunnerLoadLine, RunnerLoadPlanItem, SseMessage,
+    HistoryMetadata, KubernetesReservationCreateRequest, KubernetesReservationStatus,
+    LoadEventContext, LoadHistoryWrite, LoadLatencyAccumulator, LoadProfile, LoadTestConfig,
+    LoadTestRequest, RunnerLoadLine, RunnerLoadPlanItem, RunnerReservationUpsert,
 };
+use crate::server::services::kubernetes_reservations::KubernetesReservationClient;
 use crate::server::state::{
     AppState, EXECUTION_SSE_BUFFER_SIZE, ExecutionCtx, ExecutionKind, LOAD_BATCH_WINDOW_MS,
 };
@@ -42,7 +45,7 @@ pub struct LoadExecutionOutcome {
 
 pub struct StartedLoadExecution {
     pub execution_id: String,
-    pub subscriber: broadcast::Receiver<SseMessage>,
+    pub status: String,
     #[allow(dead_code)]
     pub completion: oneshot::Receiver<LoadExecutionOutcome>,
 }
@@ -52,6 +55,19 @@ struct LoadPlanningValues {
     target_rps: u64,
     total_requests: usize,
     concurrency: usize,
+}
+
+#[derive(Clone)]
+struct KubernetesCapacity {
+    client: KubernetesReservationClient,
+    node_profile: Option<String>,
+    poll_interval: Duration,
+    ready_timeout: Duration,
+}
+
+struct ReadyReservation {
+    endpoints: Vec<String>,
+    headers: RunnerReservationHeaders,
 }
 
 pub async fn start_load_execution(
@@ -73,58 +89,111 @@ pub async fn start_load_execution(
         validate_main_load_profile(load)?;
     }
 
-    let runner_statuses =
-        crate::server::services::runner_registry::collect_registered_runner_statuses(
-            &state.db,
-            &state.client,
-            state.runner_auth_key.as_deref(),
-        )
-        .await
-        .map_err(|err| {
-            StartLoadExecutionError::Internal(format!("failed to load runner registry: {err}"))
-        })?;
-    let registered_nodes: Vec<String> = runner_statuses
-        .iter()
-        .map(|runner| runner.endpoint.clone())
-        .collect();
-    let active_nodes: Vec<String> = runner_statuses
-        .into_iter()
-        .filter(|runner| runner.active)
-        .map(|runner| runner.endpoint)
-        .collect();
-    if active_nodes.is_empty() {
-        return Err(StartLoadExecutionError::ServiceUnavailable(
-            "No active runners found via /health".to_owned(),
-        ));
-    }
-
-    let planning = load_planning_values(
-        payload.config.as_ref(),
-        payload.load.as_ref(),
-        active_nodes.len(),
-        state.rps_per_node,
-    );
-
-    let plan = calculate_node_plan(
-        planning.target_rps,
-        state.rps_per_node,
-        active_nodes.len(),
-        planning.total_requests,
-        planning.concurrency,
-    );
-
-    let selected_nodes: Vec<String> = active_nodes.iter().take(plan.nodes_used).cloned().collect();
-    if selected_nodes.is_empty() {
-        return Err(StartLoadExecutionError::ServiceUnavailable(
-            "No runner selected for execution".to_owned(),
-        ));
-    }
-
     let transaction_id_for_children = transaction_id.clone();
     let history_metadata = HistoryMetadata {
         project_id: payload.project_id.clone(),
         pipeline_index: payload.pipeline_index,
     };
+    let Some(project_id_for_execution) = payload.project_id.clone() else {
+        return Err(StartLoadExecutionError::BadRequest(
+            "projectId is required".to_owned(),
+        ));
+    };
+    let orchestrator_execution_id = new_uuid_v7();
+    let pipeline_lock_key = load_pipeline_lock_key(
+        &project_id_for_execution,
+        &payload.pipeline.id,
+        payload.pipeline_index,
+        &payload.pipeline.name,
+    );
+    let kubernetes_capacity = kubernetes_capacity_from_env(&state.client);
+    let (registered_nodes, active_nodes, scheduler_nodes, planning_nodes_found) =
+        if kubernetes_capacity.is_some() {
+            let planning = dynamic_load_planning_values(
+                payload.config.as_ref(),
+                payload.load.as_ref(),
+                payload.target_rps,
+                state.rps_per_node,
+            );
+            let desired_nodes = planning
+                .target_rps
+                .div_ceil(state.rps_per_node.max(1))
+                .max(1) as usize;
+            (
+                Vec::new(),
+                Vec::new(),
+                synthetic_runner_nodes(&orchestrator_execution_id, desired_nodes),
+                desired_nodes,
+            )
+        } else {
+            let runner_statuses =
+                crate::server::services::runner_registry::collect_registered_runner_statuses(
+                    &state.db,
+                    &state.client,
+                    state.runner_auth_key.as_deref(),
+                )
+                .await
+                .map_err(|err| {
+                    StartLoadExecutionError::Internal(format!(
+                        "failed to load runner registry: {err}"
+                    ))
+                })?;
+            let registered_nodes: Vec<String> = runner_statuses
+                .iter()
+                .map(|runner| runner.endpoint.clone())
+                .collect();
+            let active_nodes: Vec<String> = runner_statuses
+                .into_iter()
+                .filter(|runner| runner.active)
+                .map(|runner| runner.endpoint)
+                .collect();
+            if active_nodes.is_empty() {
+                return Err(StartLoadExecutionError::ServiceUnavailable(
+                    "No active runners found via /health".to_owned(),
+                ));
+            }
+            (
+                registered_nodes,
+                active_nodes.clone(),
+                active_nodes.clone(),
+                active_nodes.len(),
+            )
+        };
+
+    let planning = if kubernetes_capacity.is_some() {
+        dynamic_load_planning_values(
+            payload.config.as_ref(),
+            payload.load.as_ref(),
+            payload.target_rps,
+            state.rps_per_node,
+        )
+    } else {
+        load_planning_values(
+            payload.config.as_ref(),
+            payload.load.as_ref(),
+            active_nodes.len(),
+            state.rps_per_node,
+        )
+    };
+
+    let plan = calculate_node_plan(
+        planning.target_rps,
+        state.rps_per_node,
+        planning_nodes_found,
+        planning.total_requests,
+        planning.concurrency,
+    );
+
+    if kubernetes_capacity.is_none() {
+        let selected_nodes: Vec<String> =
+            active_nodes.iter().take(plan.nodes_used).cloned().collect();
+        if selected_nodes.is_empty() {
+            return Err(StartLoadExecutionError::ServiceUnavailable(
+                "No runner selected for execution".to_owned(),
+            ));
+        }
+    }
+
     let runtime_specs = resolve_runtime_specs_for_execution(
         &state.db,
         payload.project_id.as_deref(),
@@ -178,21 +247,10 @@ pub async fn start_load_execution(
         "envGroups": runtime_env_groups.clone(),
         "config": runner_config.clone(),
         "load": runner_load.clone(),
+        "targetRps": payload.target_rps,
         "projectId": history_metadata.project_id.clone(),
         "pipelineIndex": history_metadata.pipeline_index
     });
-    let Some(project_id_for_execution) = payload.project_id.clone() else {
-        return Err(StartLoadExecutionError::BadRequest(
-            "projectId is required".to_owned(),
-        ));
-    };
-    let orchestrator_execution_id = new_uuid_v7();
-    let pipeline_lock_key = load_pipeline_lock_key(
-        &project_id_for_execution,
-        &payload.pipeline.id,
-        payload.pipeline_index,
-        &payload.pipeline.name,
-    );
     let queue_position = state
         .scheduler
         .enqueue_with_lock(
@@ -205,23 +263,35 @@ pub async fn start_load_execution(
         .await;
     let initial_acquire = state
         .scheduler
-        .try_acquire(&orchestrator_execution_id, &active_nodes)
+        .try_acquire(&orchestrator_execution_id, &scheduler_nodes)
         .await;
     let init_context_config = load_context_config(
         runner_config.as_ref(),
         runner_load.as_ref(),
-        active_nodes.len(),
+        planning_nodes_found,
         state.rps_per_node,
     );
     let init_payload = match &initial_acquire {
-        AcquireOutcome::Reserved(runners) => build_running_load_payload(
-            &orchestrator_execution_id,
-            &registered_nodes,
-            &active_nodes,
-            runners,
-            &init_context_config,
-            &plan,
-        ),
+        AcquireOutcome::Reserved(runners) => {
+            if kubernetes_capacity.is_some() {
+                build_provisioning_load_payload(
+                    &orchestrator_execution_id,
+                    &registered_nodes,
+                    &active_nodes,
+                    &init_context_config,
+                    &plan,
+                )
+            } else {
+                build_running_load_payload(
+                    &orchestrator_execution_id,
+                    &registered_nodes,
+                    &active_nodes,
+                    runners,
+                    &init_context_config,
+                    &plan,
+                )
+            }
+        }
         AcquireOutcome::Pending { position } => build_queued_load_payload(
             &orchestrator_execution_id,
             &registered_nodes,
@@ -240,13 +310,14 @@ pub async fn start_load_execution(
         ),
     };
     let (sse_tx, _) = broadcast::channel(EXECUTION_SSE_BUFFER_SIZE);
-    let response_subscriber = sse_tx.subscribe();
+    let initial_status = init_payload
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("queued")
+        .to_owned();
     let init_snapshot = build_load_snapshot_payload(
         &orchestrator_execution_id,
-        init_payload
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or("queued"),
+        &initial_status,
         extract_load_context_value(&init_payload),
         Vec::new(),
         None,
@@ -272,108 +343,334 @@ pub async fn start_load_execution(
     let history_execution_id = orchestrator_execution_id.clone();
     let runtime_specs_for_runner = runtime_specs.clone().unwrap_or_default();
     let runtime_env_groups_for_runner = runtime_env_groups.clone().unwrap_or_default();
+    let scheduler_nodes_for_run = scheduler_nodes.clone();
+    let kubernetes_capacity_for_run = kubernetes_capacity.clone();
+    let reservation_target_rps = planning.target_rps;
+    let reservation_node_profile = kubernetes_capacity
+        .as_ref()
+        .and_then(|capacity| capacity.node_profile.clone());
     let (completion_tx, completion_rx) = oneshot::channel();
 
     tokio::spawn(async move {
         let _ = send_sse_best_effort(&sse_tx, "execution:init", init_payload);
 
-        let (selected_nodes, active_nodes_for_run, emitted_running_status) = match initial_acquire {
-            AcquireOutcome::Reserved(runners) => (runners, active_nodes.clone(), false),
-            AcquireOutcome::Pending { .. } | AcquireOutcome::Missing => loop {
-                if exec_ctx.cancel.is_cancelled() {
-                    let _ = state_clone
-                        .scheduler
-                        .cancel_queued(&history_execution_id)
-                        .await;
-                    let cancelled_payload = json!({
-                        "executionId": history_execution_id,
-                        "status": "cancelled",
-                        "message": "execution cancelled while queued"
-                    });
-                    let _ = send_sse_best_effort(&sse_tx, "execution:status", cancelled_payload);
-                    let mut executions = state_clone.executions.write().await;
-                    executions.remove(&execution_id_for_cleanup);
-                    let _ = completion_tx.send(LoadExecutionOutcome {
-                        execution_id: history_execution_id,
-                        status: "cancelled".to_owned(),
-                    });
-                    return;
-                }
-
-                let runner_statuses =
-                    match crate::server::services::runner_registry::collect_registered_runner_statuses(
-                        &state_clone.db,
-                        &state_clone.client,
-                        state_clone.runner_auth_key.as_deref(),
-                    )
-                    .await
-                    {
-                        Ok(runner_statuses) => runner_statuses,
-                        Err(err) => {
-                            error!("failed to load runner registry: {}", err);
-                            Vec::new()
-                        }
-                    };
-                let active_nodes = runner_statuses
-                    .into_iter()
-                    .filter(|runner| runner.active)
-                    .map(|runner| runner.endpoint)
-                    .collect::<Vec<_>>();
-                match state_clone
-                    .scheduler
-                    .try_acquire(&history_execution_id, &active_nodes)
-                    .await
-                {
-                    AcquireOutcome::Reserved(runners) => break (runners, active_nodes, true),
-                    AcquireOutcome::Pending { position } => {
-                        let queued_context_config = load_context_config(
-                            runner_config.as_ref(),
-                            runner_load.as_ref(),
-                            active_nodes.len(),
-                            state_clone.rps_per_node,
-                        );
-                        let queued_payload = build_queued_load_payload(
-                            &history_execution_id,
-                            &registered_nodes,
-                            &active_nodes,
-                            &queued_context_config,
-                            &plan,
-                            position,
-                        );
-                        exec_ctx.init_payload.set(queued_payload.clone()).await;
-                        let queued_context = extract_load_context_value(&queued_payload);
-                        exec_ctx
-                            .snapshot_payload
-                            .set(crate::server::execution::build_load_snapshot_payload(
+        let (selected_nodes, active_nodes_for_run, emitted_running_status, reservation_headers) =
+            if let Some(kubernetes_capacity) = kubernetes_capacity_for_run.clone() {
+                let mut acquire = initial_acquire;
+                let mut emitted_provisioning_status =
+                    matches!(acquire, AcquireOutcome::Reserved(_));
+                loop {
+                    match acquire {
+                        AcquireOutcome::Reserved(_) => break,
+                        AcquireOutcome::Pending { position } => {
+                            if exec_ctx.cancel.is_cancelled() {
+                                let _ = state_clone
+                                    .scheduler
+                                    .cancel_queued(&history_execution_id)
+                                    .await;
+                                let cancelled_payload = json!({
+                                    "executionId": history_execution_id,
+                                    "status": "cancelled",
+                                    "message": "execution cancelled while queued"
+                                });
+                                let _ = send_sse_best_effort(
+                                    &sse_tx,
+                                    "execution:status",
+                                    cancelled_payload,
+                                );
+                                let mut executions = state_clone.executions.write().await;
+                                executions.remove(&execution_id_for_cleanup);
+                                let _ = completion_tx.send(LoadExecutionOutcome {
+                                    execution_id: history_execution_id,
+                                    status: "cancelled".to_owned(),
+                                });
+                                return;
+                            }
+                            let queued_context_config = load_context_config(
+                                runner_config.as_ref(),
+                                runner_load.as_ref(),
+                                scheduler_nodes_for_run.len(),
+                                state_clone.rps_per_node,
+                            );
+                            let queued_payload = build_queued_load_payload(
                                 &history_execution_id,
-                                "queued",
-                                queued_context,
-                                Vec::new(),
-                                None,
-                                Vec::new(),
-                            ))
-                            .await;
-                        let _ = send_sse_best_effort(&sse_tx, "execution:status", queued_payload);
-                        if !state_clone
-                            .scheduler
-                            .wait_for_change(&exec_ctx.cancel)
-                            .await
-                        {
-                            continue;
+                                &registered_nodes,
+                                &active_nodes,
+                                &queued_context_config,
+                                &plan,
+                                position,
+                            );
+                            exec_ctx.init_payload.set(queued_payload.clone()).await;
+                            let queued_context = extract_load_context_value(&queued_payload);
+                            exec_ctx
+                                .snapshot_payload
+                                .set(crate::server::execution::build_load_snapshot_payload(
+                                    &history_execution_id,
+                                    "queued",
+                                    queued_context,
+                                    Vec::new(),
+                                    None,
+                                    Vec::new(),
+                                ))
+                                .await;
+                            let _ =
+                                send_sse_best_effort(&sse_tx, "execution:status", queued_payload);
+                            let _ = state_clone
+                                .scheduler
+                                .wait_for_change(&exec_ctx.cancel)
+                                .await;
+                            acquire = state_clone
+                                .scheduler
+                                .try_acquire(&history_execution_id, &scheduler_nodes_for_run)
+                                .await;
+                        }
+                        AcquireOutcome::Missing => {
+                            let mut executions = state_clone.executions.write().await;
+                            executions.remove(&execution_id_for_cleanup);
+                            let _ = completion_tx.send(LoadExecutionOutcome {
+                                execution_id: history_execution_id,
+                                status: "cancelled".to_owned(),
+                            });
+                            return;
                         }
                     }
-                    AcquireOutcome::Missing => {
-                        let mut executions = state_clone.executions.write().await;
-                        executions.remove(&execution_id_for_cleanup);
+                }
+
+                if !emitted_provisioning_status {
+                    let provisioning_context_config = load_context_config(
+                        runner_config.as_ref(),
+                        runner_load.as_ref(),
+                        scheduler_nodes_for_run.len(),
+                        state_clone.rps_per_node,
+                    );
+                    let provisioning_payload = build_provisioning_load_payload(
+                        &history_execution_id,
+                        &registered_nodes,
+                        &active_nodes,
+                        &provisioning_context_config,
+                        &plan,
+                    );
+                    exec_ctx
+                        .init_payload
+                        .set(provisioning_payload.clone())
+                        .await;
+                    exec_ctx
+                        .snapshot_payload
+                        .set(crate::server::execution::build_load_snapshot_payload(
+                            &history_execution_id,
+                            "provisioning",
+                            extract_load_context_value(&provisioning_payload),
+                            Vec::new(),
+                            None,
+                            Vec::new(),
+                        ))
+                        .await;
+                    let _ = send_sse_best_effort(&sse_tx, "execution:status", provisioning_payload);
+                    emitted_provisioning_status = true;
+                }
+                let _ = emitted_provisioning_status;
+
+                let reservation_request = KubernetesReservationCreateRequest {
+                    execution_id: history_execution_id.clone(),
+                    pipeline_id: history_pipeline_id
+                        .clone()
+                        .unwrap_or_else(|| history_pipeline_name.clone()),
+                    count: plan.nodes_used.max(1),
+                };
+                let reservation = match kubernetes_capacity
+                    .client
+                    .create(&reservation_request)
+                    .await
+                {
+                    Ok(status) => status,
+                    Err(err) => {
+                        error!("failed to create runner reservation: {}", err);
+                        finish_failed_before_dispatch(
+                            &state_clone,
+                            &exec_ctx,
+                            &sse_tx,
+                            &execution_id_for_cleanup,
+                            &history_execution_id,
+                            "failed to create runner reservation",
+                        )
+                        .await;
                         let _ = completion_tx.send(LoadExecutionOutcome {
                             execution_id: history_execution_id,
-                            status: "cancelled".to_owned(),
+                            status: "failed".to_owned(),
                         });
                         return;
                     }
-                }
-            },
-        };
+                };
+                persist_runner_reservation_status(
+                    &state_clone.db,
+                    &history_execution_id,
+                    history_pipeline_id.as_deref(),
+                    reservation_target_rps,
+                    reservation_node_profile.as_deref(),
+                    &reservation,
+                )
+                .await;
+
+                let ready = match wait_for_ready_reservation(
+                    &kubernetes_capacity,
+                    reservation,
+                    &exec_ctx.cancel,
+                    &state_clone.db,
+                    &history_execution_id,
+                    history_pipeline_id.as_deref(),
+                    reservation_target_rps,
+                    reservation_node_profile.as_deref(),
+                )
+                .await
+                {
+                    Ok(ready) => ready,
+                    Err(message) => {
+                        if exec_ctx.cancel.is_cancelled() {
+                            let _ = state_clone
+                                .scheduler
+                                .cancel_queued(&history_execution_id)
+                                .await;
+                        }
+                        finish_failed_before_dispatch(
+                            &state_clone,
+                            &exec_ctx,
+                            &sse_tx,
+                            &execution_id_for_cleanup,
+                            &history_execution_id,
+                            &message,
+                        )
+                        .await;
+                        let _ = completion_tx.send(LoadExecutionOutcome {
+                            execution_id: history_execution_id,
+                            status: "failed".to_owned(),
+                        });
+                        return;
+                    }
+                };
+
+                (
+                    ready.endpoints.clone(),
+                    ready.endpoints,
+                    true,
+                    Some(ready.headers),
+                )
+            } else {
+                let (selected_nodes, active_nodes_for_run, emitted_running_status) =
+                    match initial_acquire {
+                        AcquireOutcome::Reserved(runners) => (runners, active_nodes.clone(), false),
+                        AcquireOutcome::Pending { .. } | AcquireOutcome::Missing => loop {
+                            if exec_ctx.cancel.is_cancelled() {
+                                let _ = state_clone
+                                    .scheduler
+                                    .cancel_queued(&history_execution_id)
+                                    .await;
+                                let cancelled_payload = json!({
+                                    "executionId": history_execution_id,
+                                    "status": "cancelled",
+                                    "message": "execution cancelled while queued"
+                                });
+                                let _ = send_sse_best_effort(
+                                    &sse_tx,
+                                    "execution:status",
+                                    cancelled_payload,
+                                );
+                                let mut executions = state_clone.executions.write().await;
+                                executions.remove(&execution_id_for_cleanup);
+                                let _ = completion_tx.send(LoadExecutionOutcome {
+                                    execution_id: history_execution_id,
+                                    status: "cancelled".to_owned(),
+                                });
+                                return;
+                            }
+
+                            let runner_statuses =
+                                match crate::server::services::runner_registry::collect_registered_runner_statuses(
+                                    &state_clone.db,
+                                    &state_clone.client,
+                                    state_clone.runner_auth_key.as_deref(),
+                                )
+                                .await
+                                {
+                                    Ok(runner_statuses) => runner_statuses,
+                                    Err(err) => {
+                                        error!("failed to load runner registry: {}", err);
+                                        Vec::new()
+                                    }
+                                };
+                            let active_nodes = runner_statuses
+                                .into_iter()
+                                .filter(|runner| runner.active)
+                                .map(|runner| runner.endpoint)
+                                .collect::<Vec<_>>();
+                            match state_clone
+                                .scheduler
+                                .try_acquire(&history_execution_id, &active_nodes)
+                                .await
+                            {
+                                AcquireOutcome::Reserved(runners) => {
+                                    break (runners, active_nodes, true);
+                                }
+                                AcquireOutcome::Pending { position } => {
+                                    let queued_context_config = load_context_config(
+                                        runner_config.as_ref(),
+                                        runner_load.as_ref(),
+                                        active_nodes.len(),
+                                        state_clone.rps_per_node,
+                                    );
+                                    let queued_payload = build_queued_load_payload(
+                                        &history_execution_id,
+                                        &registered_nodes,
+                                        &active_nodes,
+                                        &queued_context_config,
+                                        &plan,
+                                        position,
+                                    );
+                                    exec_ctx.init_payload.set(queued_payload.clone()).await;
+                                    let queued_context =
+                                        extract_load_context_value(&queued_payload);
+                                    exec_ctx
+                                        .snapshot_payload
+                                        .set(crate::server::execution::build_load_snapshot_payload(
+                                            &history_execution_id,
+                                            "queued",
+                                            queued_context,
+                                            Vec::new(),
+                                            None,
+                                            Vec::new(),
+                                        ))
+                                        .await;
+                                    let _ = send_sse_best_effort(
+                                        &sse_tx,
+                                        "execution:status",
+                                        queued_payload,
+                                    );
+                                    if !state_clone
+                                        .scheduler
+                                        .wait_for_change(&exec_ctx.cancel)
+                                        .await
+                                    {
+                                        continue;
+                                    }
+                                }
+                                AcquireOutcome::Missing => {
+                                    let mut executions = state_clone.executions.write().await;
+                                    executions.remove(&execution_id_for_cleanup);
+                                    let _ = completion_tx.send(LoadExecutionOutcome {
+                                        execution_id: history_execution_id,
+                                        status: "cancelled".to_owned(),
+                                    });
+                                    return;
+                                }
+                            }
+                        },
+                    };
+                (
+                    selected_nodes,
+                    active_nodes_for_run,
+                    emitted_running_status,
+                    None,
+                )
+            };
 
         let planning = load_planning_values(
             runner_config.as_ref(),
@@ -550,6 +847,7 @@ pub async fn start_load_execution(
             let specs = runtime_specs_for_runner.clone();
             let env_groups = runtime_env_groups_for_runner.clone();
             let runner_auth_key = state_clone.runner_auth_key.clone();
+            let reservation_headers = reservation_headers.clone();
 
             let child_request = if let Some(load_profile) = runner_load.as_ref() {
                 json!({
@@ -598,6 +896,7 @@ pub async fn start_load_execution(
                     "/api/v1/tests/load",
                     transaction_id,
                     runner_auth_key.as_deref(),
+                    reservation_headers,
                 )
                 .await;
             }));
@@ -704,17 +1003,9 @@ pub async fn start_load_execution(
 
     Ok(StartedLoadExecution {
         execution_id: orchestrator_execution_id,
-        subscriber: response_subscriber,
+        status: initial_status,
         completion: completion_rx,
     })
-}
-
-pub fn sse_response_for_started_load_execution(
-    started: StartedLoadExecution,
-) -> axum::response::Response {
-    let (tx, rx) = mpsc::unbounded_channel();
-    crate::server::execution::spawn_broadcast_bridge(started.subscriber, tx, false);
-    crate::server::execution::sse_response_from_rx(rx)
 }
 
 fn load_planning_values(
@@ -752,6 +1043,62 @@ fn load_planning_values(
     }
 }
 
+fn dynamic_load_planning_values(
+    config: Option<&LoadTestConfig>,
+    load: Option<&LoadProfile>,
+    target_rps: Option<u64>,
+    rps_per_node: u64,
+) -> LoadPlanningValues {
+    if let Some(config) = config {
+        return LoadPlanningValues {
+            target_rps: target_rps.unwrap_or(config.concurrency as u64).max(1),
+            total_requests: config.total_requests.max(1),
+            concurrency: config.concurrency.max(1),
+        };
+    }
+
+    let requested_rps = target_rps.unwrap_or(rps_per_node).max(1);
+    let estimated_nodes = requested_rps.div_ceil(rps_per_node.max(1)).max(1) as usize;
+    LoadPlanningValues {
+        target_rps: requested_rps,
+        total_requests: estimated_nodes,
+        concurrency: load.map(|_| estimated_nodes).unwrap_or(estimated_nodes),
+    }
+}
+
+fn kubernetes_capacity_from_env(client: &reqwest::Client) -> Option<KubernetesCapacity> {
+    let base_url = optional_env("PREVIA_KUBERNETES_PLUGIN_URL")?;
+    Some(KubernetesCapacity {
+        client: KubernetesReservationClient::new(client.clone(), base_url),
+        node_profile: optional_env("PREVIA_KUBERNETES_NODE_PROFILE"),
+        poll_interval: Duration::from_millis(env_u64("PREVIA_KUBERNETES_POLL_MS", 1000).max(100)),
+        ready_timeout: Duration::from_secs(
+            env_u64("PREVIA_KUBERNETES_READY_TIMEOUT_SECONDS", 300).max(1),
+        ),
+    })
+}
+
+fn optional_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
+fn synthetic_runner_nodes(execution_id: &str, count: usize) -> Vec<String> {
+    (0..count.max(1))
+        .map(|index| format!("kubernetes://{execution_id}/runner-{}", index + 1))
+        .collect()
+}
+
 fn load_context_config(
     config: Option<&LoadTestConfig>,
     load: Option<&LoadProfile>,
@@ -769,6 +1116,146 @@ fn load_context_config(
             .unwrap_or_else(|| rps_per_node.max(1) as usize),
         ramp_up_seconds: 0.0,
     }
+}
+
+async fn wait_for_ready_reservation(
+    capacity: &KubernetesCapacity,
+    initial: KubernetesReservationStatus,
+    cancel: &CancellationToken,
+    db: &crate::server::db::DbPool,
+    execution_id: &str,
+    pipeline_id: Option<&str>,
+    target_rps: u64,
+    node_profile: Option<&str>,
+) -> Result<ReadyReservation, String> {
+    let reservation_id = initial.reservation_id.clone();
+    let deadline = tokio::time::Instant::now() + capacity.ready_timeout;
+    let mut status = initial;
+
+    loop {
+        if status.status == "ready" {
+            let token = status.reservation_token.clone().ok_or_else(|| {
+                "runner reservation is ready but did not include a token".to_owned()
+            })?;
+            let endpoints = status
+                .runners
+                .iter()
+                .map(|runner| runner.endpoint.clone())
+                .filter(|endpoint| !endpoint.trim().is_empty())
+                .collect::<Vec<_>>();
+            if endpoints.is_empty() {
+                return Err("runner reservation is ready but did not include runners".to_owned());
+            }
+            return Ok(ReadyReservation {
+                endpoints,
+                headers: RunnerReservationHeaders {
+                    reservation_id,
+                    reservation_token: token,
+                },
+            });
+        }
+        if matches!(status.status.as_str(), "failed" | "cancelled" | "expired") {
+            return Err(format!("runner reservation ended as {}", status.status));
+        }
+        if cancel.is_cancelled() {
+            let _ = capacity.client.cancel(&reservation_id).await;
+            return Err("execution cancelled while provisioning runners".to_owned());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let _ = capacity.client.cancel(&reservation_id).await;
+            return Err("runner reservation timed out before ready".to_owned());
+        }
+
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = capacity.client.cancel(&reservation_id).await;
+                return Err("execution cancelled while provisioning runners".to_owned());
+            }
+            _ = tokio::time::sleep(capacity.poll_interval) => {}
+        }
+
+        status = capacity
+            .client
+            .get(&reservation_id)
+            .await
+            .map_err(|err| format!("failed to poll runner reservation: {err}"))?;
+        persist_runner_reservation_status(
+            db,
+            execution_id,
+            pipeline_id,
+            target_rps,
+            node_profile,
+            &status,
+        )
+        .await;
+    }
+}
+
+async fn persist_runner_reservation_status(
+    db: &crate::server::db::DbPool,
+    execution_id: &str,
+    pipeline_id: Option<&str>,
+    target_rps: u64,
+    node_profile: Option<&str>,
+    status: &KubernetesReservationStatus,
+) {
+    let runner_endpoints = status
+        .runners
+        .iter()
+        .map(|runner| runner.endpoint.clone())
+        .collect::<Vec<_>>();
+    if let Err(err) = upsert_runner_reservation(
+        db,
+        RunnerReservationUpsert {
+            execution_id: execution_id.to_owned(),
+            pipeline_id: pipeline_id.map(ToOwned::to_owned),
+            capacity_mode: "kubernetes".to_owned(),
+            requested_runner_count: status.requested_runners,
+            ready_runner_count: status.ready_runners,
+            target_rps,
+            node_profile: node_profile.map(ToOwned::to_owned),
+            reservation_id: Some(status.reservation_id.clone()),
+            reservation_token: status.reservation_token.clone(),
+            reservation_expires_at: status.expires_at.clone(),
+            reservation_status: status.status.clone(),
+            runner_endpoints,
+        },
+    )
+    .await
+    {
+        error!("failed to persist runner reservation: {}", err);
+    }
+}
+
+async fn finish_failed_before_dispatch(
+    state: &AppState,
+    exec_ctx: &ExecutionCtx,
+    sse_tx: &broadcast::Sender<crate::server::models::SseMessage>,
+    execution_id_for_cleanup: &str,
+    execution_id: &str,
+    message: &str,
+) {
+    state.scheduler.release(execution_id).await;
+    let payload = json!({
+        "executionId": execution_id,
+        "status": "failed",
+        "message": message
+    });
+    exec_ctx.init_payload.set(payload.clone()).await;
+    exec_ctx
+        .snapshot_payload
+        .set(build_load_snapshot_payload(
+            execution_id,
+            "failed",
+            extract_load_context_value(&payload),
+            Vec::new(),
+            None,
+            vec![message.to_owned()],
+        ))
+        .await;
+    let _ = send_sse_best_effort(sse_tx, "error", payload);
+    let mut executions = state.executions.write().await;
+    executions.remove(execution_id_for_cleanup);
 }
 
 fn runner_load_profile(profile: &LoadProfile, runner_max_rps: u64) -> Value {
@@ -859,6 +1346,36 @@ fn build_queued_load_payload(
             "status": "queued",
             "queuePosition": queue_position,
             "message": "execution queued waiting for scheduler capacity"
+        }),
+        &LoadEventContext {
+            plan: crate::server::models::NodePlan {
+                requested_nodes: plan.requested_nodes,
+                nodes_found: plan.nodes_found,
+                nodes_used: 0,
+                warning: plan.warning.clone(),
+            },
+            warning: None,
+            registered_nodes: registered_nodes.to_vec(),
+            active_nodes: active_nodes.to_vec(),
+            used_nodes: Vec::new(),
+            runner_load_plan: build_runner_load_plan(config, &[], plan.requested_nodes),
+            batch_window_ms: LOAD_BATCH_WINDOW_MS,
+        },
+    )
+}
+
+fn build_provisioning_load_payload(
+    execution_id: &str,
+    registered_nodes: &[String],
+    active_nodes: &[String],
+    config: &crate::server::models::LoadTestConfig,
+    plan: &crate::server::models::NodePlan,
+) -> Value {
+    add_load_context_fields(
+        json!({
+            "executionId": execution_id,
+            "status": "provisioning",
+            "message": "runner reservation accepted; waiting for Kubernetes runners"
         }),
         &LoadEventContext {
             plan: crate::server::models::NodePlan {
@@ -975,6 +1492,7 @@ mod tests {
                 pipeline: test_pipeline("pipe-1"),
                 config: Some(test_config()),
                 load: None,
+                target_rps: None,
                 selected_base_url_key: None,
                 selected_env_group_slug: None,
                 project_id: Some("project-1".to_owned()),
@@ -992,6 +1510,7 @@ mod tests {
                 pipeline: test_pipeline("pipe-1"),
                 config: Some(test_config()),
                 load: None,
+                target_rps: None,
                 selected_base_url_key: None,
                 selected_env_group_slug: None,
                 project_id: Some("project-1".to_owned()),
@@ -1086,6 +1605,7 @@ mod tests {
                 pipeline: test_pipeline("pipe-1"),
                 config: Some(test_config()),
                 load: None,
+                target_rps: None,
                 selected_base_url_key: None,
                 selected_env_group_slug: None,
                 project_id: Some("project-1".to_owned()),
@@ -1103,6 +1623,7 @@ mod tests {
                 pipeline: test_pipeline("pipe-1"),
                 config: Some(test_config()),
                 load: None,
+                target_rps: None,
                 selected_base_url_key: None,
                 selected_env_group_slug: None,
                 project_id: Some("project-1".to_owned()),
