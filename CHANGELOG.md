@@ -2,6 +2,40 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.30] - 2026-05-14
+
+### Bug Fixes
+- Publish busy runner dns endpoints (a0476b9)
+- Keep kubernetes runner selectors stable (d0bcf32)
+
+### Documentation
+- Plan kubernetes runner selector fix (71e713e)
+- Changelog: update for v1.0.0-alpha.23 (b8b2504)
+
+### Maintenance
+- Bump version to alpha 30 (15a36bd)
+- Update release metadata for v1.0.0-alpha.23 (179899f)
+
+### Other Changes
+- Polish Previa Codex plugin (212f833)
+- Surface Kubernetes cleanup failures (f5d64e9)
+- Delete runner pods during reservation cleanup (c9330d3)
+- Shorten Kubernetes runner resource names (c485da1)
+- Install rustls provider for plugin startup (25d4d5f)
+- Use newer runtime for artifact images (fb05365)
+- Keep settings action on access page (eb8c695)
+- Document access management modes (3eb227d)
+- Prevent users from changing own role (b7e3534)
+- Simplify access page header (7f7cfa6)
+- Bump alpha version to 1.0.0-alpha.23 (5e0719a)
+- Add access type help tooltips (b15f982)
+- Move access creation into dialogs (a96335e)
+- Polish access management layout (b6b5f74)
+- Complete protected access workflows (4ad2d16)
+- Add access management auth (b0d21b7)
+
+Full Changelog: https://github.com/runvibe/previa/compare/k8s-validation-e7fb6eb...v1.0.0-alpha.30
+
 ## [v1.0.0-alpha.23] - 2026-05-14
 
 ### Documentation
