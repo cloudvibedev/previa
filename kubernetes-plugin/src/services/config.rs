@@ -10,6 +10,7 @@ pub struct PluginConfig {
     pub runner_image: String,
     pub runner_command: String,
     pub runner_install_enabled: bool,
+    pub runner_install_url_template: String,
     pub runner_port: u16,
     pub service_name: String,
     pub reservation_ttl_seconds: i64,
@@ -67,6 +68,11 @@ impl PluginConfig {
                 "/opt/previa/previa-runner",
             ),
             runner_install_enabled: bool_value(&values, "PREVIA_RUNNER_INSTALL_ENABLED", true),
+            runner_install_url_template: string_value(
+                &values,
+                "PREVIA_RUNNER_INSTALL_URL_TEMPLATE",
+                "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.22/previa-runner-linux-${previa_arch}",
+            ),
             runner_port: u16_value(&values, "PREVIA_RUNNER_PORT", 7373),
             service_name: string_value(&values, "PREVIA_RUNNER_SERVICE_NAME", "previa-runner"),
             reservation_ttl_seconds: i64_value(&values, "PREVIA_RESERVATION_TTL_SECONDS", 300),
@@ -215,6 +221,11 @@ mod tests {
         assert_eq!(config.runner_port, 7373);
         assert_eq!(config.runner_command, "/opt/previa/previa-runner");
         assert!(config.runner_install_enabled);
+        assert!(
+            config
+                .runner_install_url_template
+                .contains("previa-runner-linux-${previa_arch}")
+        );
         assert_eq!(config.provision_timeout_seconds, 300);
         assert_eq!(config.capacity_mode, CapacityMode::Kubernetes);
     }
@@ -241,6 +252,10 @@ mod tests {
             ("PREVIA_RUNNER_COMMAND", "/app/previa-runner"),
             ("PREVIA_RUNNER_INSTALL_ENABLED", "false"),
             (
+                "PREVIA_RUNNER_INSTALL_URL_TEMPLATE",
+                "https://example.test/runner-${previa_arch}",
+            ),
+            (
                 "PREVIA_RUNNER_TOLERATIONS",
                 "workload.cloudvibe.dev/previa=arm:NoSchedule",
             ),
@@ -248,6 +263,10 @@ mod tests {
 
         assert_eq!(config.runner_command, "/app/previa-runner");
         assert!(!config.runner_install_enabled);
+        assert_eq!(
+            config.runner_install_url_template,
+            "https://example.test/runner-${previa_arch}"
+        );
         assert_eq!(config.tolerations.len(), 1);
         assert_eq!(config.tolerations[0].key, "workload.cloudvibe.dev/previa");
         assert_eq!(config.tolerations[0].value.as_deref(), Some("arm"));

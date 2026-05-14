@@ -2,6 +2,12 @@ name: Kubernetes Plugin
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_validation_images:
+        description: "Publish optional runner/plugin validation images"
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - .github/workflows/kubernetes-plugin.yaml
@@ -189,7 +195,7 @@ jobs:
 
   validation_images:
     name: Publish validation images
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_validation_images == true
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -161,7 +161,7 @@ pub fn build_runner_statefulset(
                     containers: vec![runner_container(config, spec)],
                     init_containers: config
                         .runner_install_enabled
-                        .then(|| vec![install_runner_container()]),
+                        .then(|| vec![install_runner_container(config)]),
                     node_selector: (!node_selector.is_empty()).then_some(node_selector),
                     security_context: Some(PodSecurityContext {
                         fs_group: Some(65532),
@@ -328,7 +328,7 @@ fn runner_volume_mounts(config: &PluginConfig) -> Vec<VolumeMount> {
     mounts
 }
 
-fn install_runner_container() -> Container {
+fn install_runner_container(config: &PluginConfig) -> Container {
     Container {
         name: "install-previa-runner".to_owned(),
         image: Some("curlimages/curl:8.10.1".to_owned()),
@@ -342,13 +342,17 @@ case "$(uname -m)" in
   aarch64|arm64) previa_arch="arm64" ;;
   *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
-curl -fsSL \
-  "https://github.com/runvibe/previa/releases/download/v1.0.0-alpha.22/previa-runner-linux-${previa_arch}" \
-  -o /opt/previa/previa-runner
+runner_url="$(printf '%s' "${PREVIA_RUNNER_INSTALL_URL_TEMPLATE}" | sed "s/\${previa_arch}/${previa_arch}/g")"
+curl -fsSL "${runner_url}" -o /opt/previa/previa-runner
 chmod 0755 /opt/previa/previa-runner
 "#
             .to_owned(),
         ]),
+        env: Some(vec![EnvVar {
+            name: "PREVIA_RUNNER_INSTALL_URL_TEMPLATE".to_owned(),
+            value: Some(config.runner_install_url_template.clone()),
+            ..Default::default()
+        }]),
         security_context: Some(container_security_context(false)),
         volume_mounts: Some(vec![VolumeMount {
             mount_path: "/opt/previa".to_owned(),
@@ -467,6 +471,36 @@ mod tests {
         assert_eq!(
             container.liveness_probe.as_ref().unwrap().failure_threshold,
             Some(5)
+        );
+    }
+
+    #[test]
+    fn install_container_uses_configured_runner_binary_url_template() {
+        let config = PluginConfig::from_pairs([
+            (
+                "PREVIA_RUNNER_IMAGE",
+                "gcr.io/distroless/cc-debian12:nonroot",
+            ),
+            (
+                "PREVIA_RUNNER_INSTALL_URL_TEMPLATE",
+                "https://example.test/previa-runner-linux-${previa_arch}",
+            ),
+        ]);
+        let spec = RunnerReservationSpec::new("rr_test", "rt_secret", 1);
+        let statefulset = build_runner_statefulset(&config, &spec);
+        let mut init_containers = statefulset
+            .spec
+            .unwrap()
+            .template
+            .spec
+            .unwrap()
+            .init_containers
+            .unwrap();
+        let init_container = init_containers.remove(0);
+
+        assert_eq!(
+            init_container.env.unwrap()[0].value.as_deref(),
+            Some("https://example.test/previa-runner-linux-${previa_arch}")
         );
     }
 
