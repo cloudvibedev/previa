@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Activity,
   Check,
+  CircleHelp,
   Clipboard,
   KeyRound,
   Loader2,
@@ -52,6 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 const ROLES: AccessRole[] = ["admin", "editor", "operator", "viewer"];
@@ -280,10 +282,16 @@ export default function AccessManagementPage() {
           <>
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShieldCheck className="h-4 w-4" />
-                  Usuarios
-                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ShieldCheck className="h-4 w-4" />
+                    Usuarios
+                  </CardTitle>
+                  <AccessTypeHelp
+                    label="Ajuda sobre usuarios"
+                    description="Usuarios acessam o app pelo login e recebem JWT na sessao. Use para pessoas que precisam entrar na interface do Previa."
+                  />
+                </div>
                 {canManage ? (
                   <Button size="sm" onClick={() => setCreateDialog("user")}>
                     <Plus className="h-4 w-4" />
@@ -362,10 +370,16 @@ export default function AccessManagementPage() {
 
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <KeyRound className="h-4 w-4" />
-                  API tokens
-                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <KeyRound className="h-4 w-4" />
+                    API tokens
+                  </CardTitle>
+                  <AccessTypeHelp
+                    label="Ajuda sobre API tokens"
+                    description="API tokens sao credenciais fixas para CLI, MCP e chamadas diretas na API, sem depender de login interativo."
+                  />
+                </div>
                 {canManage ? (
                   <Button size="sm" onClick={() => {
                     setCreatedToken(null);
@@ -547,6 +561,26 @@ export default function AccessManagementPage() {
         onConfirm={handleDeleteToken}
       />
     </main>
+  );
+}
+
+function AccessTypeHelp({ label, description }: { label: string; description: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          title={description}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+        >
+          <CircleHelp className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-xs leading-relaxed">
+        {description}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
