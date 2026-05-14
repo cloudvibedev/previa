@@ -1,3 +1,4 @@
+mod auth;
 mod browser;
 mod cli;
 mod compose;
@@ -19,7 +20,7 @@ mod runner_cli;
 mod runtime;
 mod selectors;
 
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,7 @@ use clap::Parser;
 use reqwest::Client;
 use tokio::time::sleep;
 
+use crate::auth::{run_login, run_logout, run_token, run_whoami};
 use crate::browser::{build_open_url, open_browser};
 use crate::cli::{
     Cli, Commands, DownArgs, ExportArgs, ExportTarget, InitArgs, LocalArgs, LocalCommands,
@@ -78,6 +80,10 @@ pub async fn run() -> Result<()> {
         .context("failed to build HTTP client")?;
 
     match cli.command {
+        Commands::Login(args) => run_login(&paths, &http, args).await,
+        Commands::Logout(args) => run_logout(&paths, args).await,
+        Commands::Whoami(args) => run_whoami(&paths, &http, args).await,
+        Commands::Token(args) => run_token(&paths, &http, args).await,
         Commands::Init(args) => cmd_init(args),
         Commands::Local(args) => cmd_local(&paths, &http, args).await,
         Commands::Up(args) => cmd_up(&paths, &http, args).await,
@@ -134,7 +140,7 @@ async fn cmd_local_push(
         .timeout(Duration::from_secs(30))
         .build()
         .context("failed to build HTTP client")?;
-    let outcome = push_project(&http, &local_base_url, &args).await?;
+    let outcome = push_project(paths, &http, &local_base_url, &args).await?;
 
     if let Some(replaced) = outcome.remote_project_replaced.as_deref() {
         println!(
@@ -170,8 +176,8 @@ async fn cmd_local_import(paths: &PreviaPaths, args: LocalImportArgs) -> Result<
         .context("failed to build HTTP client")?;
     let include_history = !args.no_history;
     let url = format!("{local_base_url}/api/v1/projects/import?includeHistory={include_history}");
-    let response = http
-        .post(&url)
+    let auth_path = crate::auth::auth_path_for_context(paths, &stack_name)?;
+    let response = crate::auth::apply_optional_bearer(http.post(&url), &auth_path)?
         .header("content-type", "application/vnd.sqlite3")
         .body(bytes)
         .send()
@@ -246,8 +252,8 @@ async fn cmd_local_export(paths: &PreviaPaths, args: LocalExportArgs) -> Result<
         .build()
         .context("failed to build HTTP client")?;
     let url = format!("{local_base_url}/api/v1/projects/export");
-    let response = http
-        .post(&url)
+    let auth_path = crate::auth::auth_path_for_context(paths, &stack_name)?;
+    let response = crate::auth::apply_optional_bearer(http.post(&url), &auth_path)?
         .json(&body)
         .send()
         .await
@@ -301,10 +307,13 @@ async fn cmd_pull(args: PullArgs) -> Result<()> {
     pull_images(args.target, &args.version).await
 }
 
-async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> {
+async fn cmd_up(paths: &PreviaPaths, http: &Client, mut args: UpArgs) -> Result<()> {
     let import_config = resolve_import_config(&args)?;
     let stack_name = parse_stack_name(&args.context)?;
     let stack_paths = paths.stack(&stack_name);
+    if args.protected && args.root_password_stdin {
+        args.root_password = Some(read_stdin_secret("root password")?);
+    }
     let mut resolved = resolve_up_config(paths, &stack_paths, args).await?;
 
     if resolved.dry_run {
@@ -317,7 +326,7 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
 
     let _lock = acquire_lock(&stack_paths)?;
     ensure_context_not_running(&stack_paths).await?;
-    persist_generated_runner_auth_key(&stack_paths, &resolved)?;
+    persist_generated_runtime_secrets(&stack_paths, &resolved)?;
 
     match resolved.backend {
         RuntimeBackend::Compose => {
@@ -346,9 +355,15 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
                     stack_name, state.main.address, state.main.port
                 );
                 if let Some(import_config) = import_config.as_ref() {
-                    let outcome =
-                        import_pipelines(http, &state.main.address, state.main.port, import_config)
-                            .await?;
+                    let auth_path = crate::auth::auth_path_for_context(paths, &stack_name)?;
+                    let outcome = import_pipelines(
+                        http,
+                        &state.main.address,
+                        state.main.port,
+                        Some(&auth_path),
+                        import_config,
+                    )
+                    .await?;
                     println!(
                         "imported {} pipeline(s) into stack '{}' ({})",
                         outcome.pipelines_imported, outcome.stack_name, outcome.project_id
@@ -377,9 +392,15 @@ async fn cmd_up(paths: &PreviaPaths, http: &Client, args: UpArgs) -> Result<()> 
                     stack_name, state.main.address, state.main.port
                 );
                 if let Some(import_config) = import_config.as_ref() {
-                    let outcome =
-                        import_pipelines(http, &state.main.address, state.main.port, import_config)
-                            .await?;
+                    let auth_path = crate::auth::auth_path_for_context(paths, &stack_name)?;
+                    let outcome = import_pipelines(
+                        http,
+                        &state.main.address,
+                        state.main.port,
+                        Some(&auth_path),
+                        import_config,
+                    )
+                    .await?;
                     println!(
                         "imported {} pipeline(s) into stack '{}' ({})",
                         outcome.pipelines_imported, outcome.stack_name, outcome.project_id
@@ -699,8 +720,15 @@ async fn cmd_export(paths: &PreviaPaths, http: &Client, args: ExportArgs) -> Res
             let stack_name = parse_stack_name(&args.context)?;
             let stack_paths = paths.stack(&stack_name);
             let state = read_required_state(&stack_paths)?;
-            let outcome =
-                export_pipelines(http, &state.main.address, state.main.port, &args).await?;
+            let auth_path = crate::auth::auth_path_for_context(paths, &args.context)?;
+            let outcome = export_pipelines(
+                http,
+                &state.main.address,
+                state.main.port,
+                Some(&auth_path),
+                &args,
+            )
+            .await?;
 
             println!(
                 "exported {} pipeline(s) from project '{}' ({}) to '{}' as {}",
@@ -780,23 +808,49 @@ async fn ensure_context_not_running(stack_paths: &StackPaths) -> Result<()> {
     Ok(())
 }
 
-fn persist_generated_runner_auth_key(
+fn persist_generated_runtime_secrets(
     stack_paths: &StackPaths,
     resolved: &ResolvedUpConfig,
 ) -> Result<()> {
-    let Some(generated_key) = resolved.generated_runner_auth_key.as_ref() else {
-        return Ok(());
-    };
+    if let Some(generated_key) = resolved.generated_runner_auth_key.as_ref() {
+        let mut main_env = read_env_file(&stack_paths.main_env)?;
+        main_env.insert("RUNNER_AUTH_KEY".to_owned(), generated_key.clone());
+        write_env_file(&stack_paths.main_env, &main_env)?;
 
-    let mut main_env = read_env_file(&stack_paths.main_env)?;
-    main_env.insert("RUNNER_AUTH_KEY".to_owned(), generated_key.clone());
-    write_env_file(&stack_paths.main_env, &main_env)?;
+        let mut runner_env = read_env_file(&stack_paths.runner_env)?;
+        runner_env.insert("RUNNER_AUTH_KEY".to_owned(), generated_key.clone());
+        write_env_file(&stack_paths.runner_env, &runner_env)?;
+    }
 
-    let mut runner_env = read_env_file(&stack_paths.runner_env)?;
-    runner_env.insert("RUNNER_AUTH_KEY".to_owned(), generated_key.clone());
-    write_env_file(&stack_paths.runner_env, &runner_env)?;
+    if resolved.auth_config_changed {
+        let mut main_env = read_env_file(&stack_paths.main_env)?;
+        for key in [
+            "PREVIA_AUTH_ANONYMOUS",
+            "PREVIA_ROOT_USERNAME",
+            "PREVIA_ROOT_PASSWORD",
+            "PREVIA_JWT_SECRET",
+            "PREVIA_JWT_TTL_SECONDS",
+        ] {
+            if let Some(value) = resolved.main_env.get(key) {
+                main_env.insert(key.to_owned(), value.clone());
+            }
+        }
+        write_env_file(&stack_paths.main_env, &main_env)?;
+    }
 
     Ok(())
+}
+
+fn read_stdin_secret(label: &str) -> Result<String> {
+    let mut value = String::new();
+    io::stdin()
+        .read_to_string(&mut value)
+        .with_context(|| format!("failed to read {label} from stdin"))?;
+    let value = value.trim_end_matches(['\n', '\r']).to_owned();
+    if value.trim().is_empty() {
+        bail!("{label} cannot be empty");
+    }
+    Ok(value)
 }
 
 fn running_context_message(state: &DetachedRuntimeState) -> String {
