@@ -5,9 +5,11 @@ import {
   parseLoadExecutionSnapshot,
   runRemoteLoadTest,
 } from "@/lib/remote-executor";
+import { fetchLatestRunnerReservation } from "@/lib/api-client";
 import type { Pipeline } from "@/types/pipeline";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -209,27 +211,133 @@ describe("remote execution snapshot parsing", () => {
 });
 
 describe("remote load execution requests", () => {
+  const pipeline: Pipeline = {
+    id: "pipeline-1",
+    name: "Pipeline",
+    description: null,
+    steps: [
+      {
+        id: "step-1",
+        name: "Step",
+        description: null,
+        method: "GET",
+        url: "https://example.com",
+        headers: {},
+      },
+    ],
+  };
+
+  it("fetches the latest runner reservation for a pipeline without exposing a token", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        executionId: "exec-1",
+        pipelineId: "pipe-1",
+        capacityMode: "kubernetes",
+        requestedRunnerCount: 3,
+        readyRunnerCount: 2,
+        targetRps: 2500,
+        nodeProfile: "4gn.nano",
+        reservationId: "rr-1",
+        reservationExpiresAt: "2026-05-14T10:00:00Z",
+        reservationStatus: "provisioning",
+        runnerEndpoints: ["http://10.0.0.1:55880"],
+        createdAt: "2026-05-14T09:55:00Z",
+        updatedAt: "2026-05-14T09:56:00Z",
+      }),
+    } as Response);
+
+    const status = await fetchLatestRunnerReservation(
+      "http://localhost:5589",
+      "project-1",
+      "pipe-1",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:5589/api/v1/projects/project-1/pipelines/pipe-1/runner-reservation/latest",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(status?.reservationId).toBe("rr-1");
+    expect("reservationToken" in status!).toBe(false);
+  });
+
+  it("polls provisioning status while the load stream request is pending", async () => {
+    vi.useFakeTimers();
+    const callbacks = {
+      onError: vi.fn(),
+      onProvisioningUpdate: vi.fn(),
+    };
+    let resolveLoadRequest: ((value: Response) => void) | null = null;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/runner-reservation/latest")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            executionId: "exec-1",
+            pipelineId: "pipeline-1",
+            capacityMode: "kubernetes",
+            requestedRunnerCount: 3,
+            readyRunnerCount: 1,
+            targetRps: 2500,
+            nodeProfile: "4gn.nano",
+            reservationId: "rr-1",
+            reservationExpiresAt: "2026-05-14T10:00:00Z",
+            reservationStatus: "provisioning",
+            runnerEndpoints: ["http://10.0.0.1:55880"],
+            createdAt: "2026-05-14T09:55:00Z",
+            updatedAt: "2026-05-14T09:56:00Z",
+          }),
+        } as Response);
+      }
+
+      return new Promise<Response>((resolve) => {
+        resolveLoadRequest = resolve;
+      });
+    });
+
+    const controller = runRemoteLoadTest(
+      "http://localhost:5589",
+      pipeline,
+      { points: [{ atMs: 0, intensity: 10 }], interpolation: "smooth" },
+      callbacks,
+      "project-1",
+      undefined,
+      0,
+      [],
+      [],
+      null,
+      2500,
+    );
+
+    await vi.advanceTimersByTimeAsync(1_100);
+
+    expect(callbacks.onProvisioningUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "rr-1",
+        readyRunnerCount: 1,
+        requestedRunnerCount: 3,
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:5589/api/v1/projects/project-1/pipelines/pipeline-1/runner-reservation/latest",
+      expect.objectContaining({ method: "GET" }),
+    );
+
+    controller.disconnect();
+    resolveLoadRequest?.({
+      ok: false,
+      status: 499,
+      text: async () => "cancelled",
+    } as Response);
+  });
+
   it("sends global targetRps alongside the per-runner load profile", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: false,
       text: async () => "stop",
     } as Response);
-    const pipeline: Pipeline = {
-      id: "pipeline-1",
-      name: "Pipeline",
-      description: null,
-      steps: [
-        {
-          id: "step-1",
-          name: "Step",
-          description: null,
-          method: "GET",
-          url: "https://example.com",
-          headers: {},
-        },
-      ],
-    };
-
     runRemoteLoadTest(
       "http://localhost:5589",
       pipeline,

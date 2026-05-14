@@ -1,5 +1,6 @@
 import type { Pipeline, StepExecutionResult } from "@/types/pipeline";
 import type {
+  LoadProvisioningStatus,
   LoadRunConfig,
   LoadTestMetrics,
   LoadTestState,
@@ -12,7 +13,7 @@ import type {
 } from "@/types/load-test";
 import { isWaveLoadConfig } from "@/types/load-test";
 import { generateUUID } from "./uuid";
-import { cancelExecution, ensureApiPrefix } from "./api-client";
+import { cancelExecution, ensureApiPrefix, fetchLatestRunnerReservation } from "./api-client";
 
 // ============ SSE Parser ============
 
@@ -1156,6 +1157,7 @@ export interface RemoteLoadTestCallbacks {
   onError: (error: string) => void;
   onNodesInfo?: (info: RemoteNodesInfo) => void;
   onSnapshot?: (snapshot: RemoteLoadExecutionSnapshot) => void;
+  onProvisioningUpdate?: (status: LoadProvisioningStatus) => void;
 }
 
 export interface RemoteLoadTestController {
@@ -1488,6 +1490,55 @@ export function runRemoteLoadTest(
   const rpsHistory: RpsPoint[] = [];
   const runnerResourceHistory: RunnerResourcePoint[] = [];
   let lastRpsPointTime = 0;
+  let provisioningPollStopped = false;
+
+  const stopProvisioningPolling = () => {
+    provisioningPollStopped = true;
+  };
+
+  const buildUnavailableProvisioningStatus = (message: string): LoadProvisioningStatus => ({
+    executionId: "",
+    pipelineId: pipeline.id ?? null,
+    capacityMode: "kubernetes",
+    requestedRunnerCount: 0,
+    readyRunnerCount: 0,
+    targetRps: targetRps ?? 0,
+    reservationStatus: "unavailable",
+    runnerEndpoints: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    unavailable: true,
+    message,
+  });
+
+  const startProvisioningPolling = () => {
+    if (!callbacks.onProvisioningUpdate || !projectId || !pipeline.id) return;
+
+    const poll = async () => {
+      if (provisioningPollStopped || abortController.signal.aborted) return;
+      try {
+        const status = await fetchLatestRunnerReservation(backendUrl, projectId, pipeline.id);
+        if (provisioningPollStopped || abortController.signal.aborted) return;
+        callbacks.onProvisioningUpdate?.(
+          status ?? buildUnavailableProvisioningStatus("Provisioning state is not available yet."),
+        );
+      } catch (err) {
+        if (provisioningPollStopped || abortController.signal.aborted) return;
+        callbacks.onProvisioningUpdate?.(
+          buildUnavailableProvisioningStatus(err instanceof Error ? err.message : String(err)),
+        );
+      }
+    };
+
+    void poll();
+    const intervalId = window.setInterval(() => {
+      if (provisioningPollStopped || abortController.signal.aborted) {
+        window.clearInterval(intervalId);
+        return;
+      }
+      void poll();
+    }, 1_000);
+  };
 
   function toFullMetrics(event: RemoteMetricsEvent, consolidated?: ConsolidatedLoadMetrics | null): LoadTestMetrics {
     const now = Date.now();
@@ -1562,6 +1613,7 @@ export function runRemoteLoadTest(
         specs,
         envGroups,
       };
+      startProvisioningPolling();
       const response = await fetch(basePath, {
         method: "POST",
         headers: {
@@ -1572,6 +1624,7 @@ export function runRemoteLoadTest(
         body: JSON.stringify(body),
         signal: abortController.signal,
       });
+      stopProvisioningPolling();
 
       if (!response.ok) {
         const err = await response.text();
@@ -1713,6 +1766,7 @@ export function runRemoteLoadTest(
         }
       }
     } catch (err) {
+      stopProvisioningPolling();
       if ((err as Error).name !== "AbortError") {
         callbacks.onError(err instanceof Error ? err.message : String(err));
       }
@@ -1723,12 +1777,14 @@ export function runRemoteLoadTest(
 
   return {
     cancel: () => {
+      stopProvisioningPolling();
       if (executionId) {
         cancelExecution(backendUrl, executionId);
       }
       abortController.abort();
     },
     disconnect: () => {
+      stopProvisioningPolling();
       abortController.abort();
     },
   };

@@ -9,7 +9,12 @@ import {
 import { runRemoteLoadTest, reconnectToLoadExecution, type RemoteLoadTestController } from "@/lib/remote-executor";
 import * as apiClient from "@/lib/api-client";
 import type { Pipeline } from "@/types/pipeline";
-import type { LoadRunConfig, LoadTestMetrics, LoadTestState } from "@/types/load-test";
+import type {
+  LoadProvisioningStatus,
+  LoadRunConfig,
+  LoadTestMetrics,
+  LoadTestState,
+} from "@/types/load-test";
 import { toast } from "sonner";
 import i18n from "@/i18n";
 
@@ -36,6 +41,8 @@ interface LoadTestHistoryState {
   metrics: LoadTestMetrics;
   config: LoadRunConfig | null;
   nodesInfo: NodesInfo | null;
+  provisioningStatus: LoadProvisioningStatus | null;
+  provisioningStartedAt: number | null;
 
   // Live state — always reflects real execution (decoupled from display when browsing history)
   liveState: LoadTestState;
@@ -86,6 +93,8 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
   metrics: emptyMetrics,
   config: null,
   nodesInfo: null,
+  provisioningStatus: null,
+  provisioningStartedAt: null,
   liveState: "idle",
   liveMetrics: emptyMetrics,
   viewingHistoricRun: false,
@@ -119,24 +128,34 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       pipelineName: pipeline.name,
       config: cfg,
       metrics: emptyMetrics,
-      state: "running",
+      state: "provisioning",
       timestamp: new Date().toISOString(),
     };
     set((s) => ({
       config: cfg,
       metrics: emptyMetrics,
-      state: "running",
+      state: "provisioning",
       viewingHistoricRun: false,
       nodesInfo: null,
+      provisioningStatus: null,
+      provisioningStartedAt: Date.now(),
       liveMetrics: emptyMetrics,
-      liveState: "running",
-      runs: [syntheticRun, ...s.runs.filter(r => r.state !== "running")],
+      liveState: "provisioning",
+      runs: [syntheticRun, ...s.runs.filter(r => r.state !== "running" && r.state !== "provisioning")],
       activeRunId: syntheticId,
     }));
 
     if (!executionBackendUrl) {
       toast.error(i18n.t("store.configureServerUrl"));
-      set({ state: "idle", liveState: "idle", metrics: emptyMetrics, liveMetrics: emptyMetrics, activeRunId: null });
+      set({
+        state: "idle",
+        liveState: "idle",
+        metrics: emptyMetrics,
+        liveMetrics: emptyMetrics,
+        activeRunId: null,
+        provisioningStatus: null,
+        provisioningStartedAt: null,
+      });
       return;
     }
 
@@ -167,6 +186,8 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
             liveMetrics: snapshot.metrics,
             liveState: snapshot.state,
             nodesInfo: snapshot.nodesInfo,
+            provisioningStatus: null,
+            provisioningStartedAt: null,
           });
           if (!s.viewingHistoricRun) {
             set({
@@ -178,15 +199,25 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
         onMetricsUpdate: (m) => {
           const snapshot = { ...m };
           const s = get();
-          set({ liveMetrics: snapshot });
+          set({
+            liveMetrics: snapshot,
+            liveState: "running",
+            provisioningStatus: null,
+            provisioningStartedAt: null,
+          });
           if (!s.viewingHistoricRun) {
-            set({ metrics: snapshot });
+            set({ metrics: snapshot, state: "running" });
           }
         },
         onComplete: (m) => {
           const snapshot = { ...m };
           const s = get();
-          set({ liveMetrics: snapshot, liveState: "completed" });
+          set({
+            liveMetrics: snapshot,
+            liveState: "completed",
+            provisioningStatus: null,
+            provisioningStartedAt: null,
+          });
           if (!s.viewingHistoricRun) {
             set({ metrics: snapshot, state: "completed" });
           }
@@ -196,11 +227,25 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
           console.error("Remote load test error:", err);
           toast.error(err || i18n.t("store.loadTestRemoteError"));
           const s = get();
-          set({ liveState: "cancelled" });
+          set({
+            liveState: "cancelled",
+            provisioningStatus: null,
+            provisioningStartedAt: null,
+          });
           if (!s.viewingHistoricRun) {
             set({ state: "cancelled" });
           }
           saveAndRefresh(s.liveMetrics, "cancelled");
+        },
+        onProvisioningUpdate: (status) => {
+          const s = get();
+          set({
+            provisioningStatus: status,
+            liveState: "provisioning",
+          });
+          if (!s.viewingHistoricRun) {
+            set({ state: "provisioning" });
+          }
         },
         onNodesInfo: (info) => {
           if (info.nodeNames) info.nodeNames.forEach(n => collectedNodeNames.add(n));
@@ -219,14 +264,28 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
   disconnectController: () => {
     _loadController?.disconnect();
     _loadController = null;
-    set({ state: "idle", metrics: emptyMetrics, activeRunId: null, liveState: "idle", liveMetrics: emptyMetrics, viewingHistoricRun: false, nodesInfo: null });
+    set({
+      state: "idle",
+      metrics: emptyMetrics,
+      activeRunId: null,
+      liveState: "idle",
+      liveMetrics: emptyMetrics,
+      viewingHistoricRun: false,
+      nodesInfo: null,
+      provisioningStatus: null,
+      provisioningStartedAt: null,
+    });
   },
 
   cancelTest: () => {
     _loadController?.cancel();
     _loadController = null;
     const s = get();
-    set({ liveState: "cancelled" });
+    set({
+      liveState: "cancelled",
+      provisioningStatus: null,
+      provisioningStartedAt: null,
+    });
     if (!s.viewingHistoricRun) {
       set({ state: "cancelled" });
     }
@@ -249,6 +308,8 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       viewingHistoricRun: false,
       activeRunId: null,
       nodesInfo: null,
+      provisioningStatus: null,
+      provisioningStartedAt: null,
       liveMetrics: emptyMetrics,
       liveState: "idle",
     });
@@ -262,6 +323,8 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       state: run.state === "completed" ? "completed" : "cancelled",
       activeRunId: run.id ?? null,
       viewingHistoricRun: true,
+      provisioningStatus: null,
+      provisioningStartedAt: null,
     });
   },
 
@@ -272,6 +335,8 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       activeRunId: null,
       metrics: s.liveMetrics,
       state: s.liveState,
+      provisioningStatus: s.liveState === "provisioning" ? s.provisioningStatus : null,
+      provisioningStartedAt: s.liveState === "provisioning" ? s.provisioningStartedAt : null,
     });
   },
 
@@ -299,6 +364,8 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
         viewingHistoricRun: false,
         activeRunId: null,
         nodesInfo: null,
+        provisioningStatus: null,
+        provisioningStartedAt: null,
         liveMetrics: emptyMetrics,
         liveState: "idle",
       });
@@ -315,11 +382,13 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
         const mapped = records.map(apiClient.loadRecordToRun);
         const { liveState, activeRunId, runs: currentRuns } = get();
 
-        // Preserve synthetic running entry during polling
-        if (liveState === "running" && activeRunId) {
-          const hasRunning = mapped.some(r => r.state === "running");
-          if (!hasRunning) {
-            const syntheticEntry = currentRuns.find(r => r.id === activeRunId && r.state === "running");
+        // Preserve synthetic active entry during polling
+        if ((liveState === "running" || liveState === "provisioning") && activeRunId) {
+          const hasActive = mapped.some(r => r.state === "running" || r.state === "provisioning");
+          if (!hasActive) {
+            const syntheticEntry = currentRuns.find(
+              r => r.id === activeRunId && (r.state === "running" || r.state === "provisioning"),
+            );
             if (syntheticEntry) {
               set({ runs: [syntheticEntry, ...mapped.filter(r => r.id !== activeRunId)] });
             } else {
@@ -333,7 +402,7 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
         }
 
         // Auto-reconnect to latest run if not currently running
-        if (autoReconnect && !get().liveState.startsWith("running") && mapped.length > 0) {
+        if (autoReconnect && !["running", "provisioning"].includes(get().liveState) && mapped.length > 0) {
           const latest = mapped[0];
           if (latest.executionId) {
             get().reconnectExecution(latest.executionId, latest.projectId, executionBackendUrl);
@@ -378,9 +447,11 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       metrics: emptyMetrics,
       viewingHistoricRun: false,
       nodesInfo: null,
+      provisioningStatus: null,
+      provisioningStartedAt: null,
       liveMetrics: emptyMetrics,
       liveState: "running",
-      runs: [syntheticRun, ...s.runs.filter(r => r.state !== "running")],
+      runs: [syntheticRun, ...s.runs.filter(r => r.state !== "running" && r.state !== "provisioning")],
       activeRunId: syntheticId,
     }));
 
@@ -391,6 +462,8 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
           liveMetrics: snapshot.metrics,
           liveState: snapshot.state,
           nodesInfo: snapshot.nodesInfo,
+          provisioningStatus: null,
+          provisioningStartedAt: null,
         });
         if (!s.viewingHistoricRun) {
           set({
@@ -402,7 +475,7 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       onMetricsUpdate: (m) => {
         const snapshot = { ...m };
         const s = get();
-        set({ liveMetrics: snapshot });
+        set({ liveMetrics: snapshot, provisioningStatus: null, provisioningStartedAt: null });
         if (!s.viewingHistoricRun) {
           set({ metrics: snapshot });
         }
@@ -410,7 +483,12 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       onComplete: (m) => {
         const snapshot = { ...m };
         const s = get();
-        set({ liveMetrics: snapshot, liveState: "completed" });
+        set({
+          liveMetrics: snapshot,
+          liveState: "completed",
+          provisioningStatus: null,
+          provisioningStartedAt: null,
+        });
         if (!s.viewingHistoricRun) {
           set({ metrics: snapshot, state: "completed" });
         }
@@ -424,7 +502,11 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       onError: (err) => {
         console.error("Reconnect load test error:", err);
         const s = get();
-        set({ liveState: "cancelled" });
+        set({
+          liveState: "cancelled",
+          provisioningStatus: null,
+          provisioningStartedAt: null,
+        });
         if (!s.viewingHistoricRun) {
           set({ state: "cancelled" });
         }
