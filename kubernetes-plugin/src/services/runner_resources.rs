@@ -229,6 +229,7 @@ pub fn build_runner_service(config: &PluginConfig, spec: &RunnerReservationSpec)
                 target_port: Some(IntOrString::String("http".to_owned())),
                 ..Default::default()
             }]),
+            publish_not_ready_addresses: Some(true),
             selector: Some(selector_labels),
             ..Default::default()
         }),
@@ -488,6 +489,21 @@ mod tests {
         assert!(
             !selector.contains_key("previa.runvibe.com/state"),
             "Service selector must not depend on mutable runner state"
+        );
+    }
+
+    #[test]
+    fn runner_service_publishes_not_ready_addresses_for_stable_dns() {
+        let config = PluginConfig::test_default();
+        let spec = RunnerReservationSpec::new("rr_test", "rt_secret", 1);
+        let service = build_runner_service(&config, &spec);
+
+        assert_eq!(
+            service
+                .spec
+                .unwrap()
+                .publish_not_ready_addresses,
+            Some(true)
         );
     }
 
