@@ -75,6 +75,30 @@ spec:
           values: ["nano", "micro", "small", "medium"]
 ```
 
+## Plugin RBAC
+
+The plugin needs namespaced permissions to create, inspect, update, and delete
+runner resources. Include `deletecollection` for pods so idle/expired
+reservations can remove all runner pods selected by reservation label.
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: previa-kubernetes-plugin
+  namespace: previa
+rules:
+  - apiGroups: [""]
+    resources: ["services", "pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+```
+
 ## Plugin PDB
 
 Deploy the plugin itself with a PDB so Karpenter does not voluntarily evict the only plugin replica during reservation creation.

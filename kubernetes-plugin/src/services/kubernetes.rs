@@ -184,14 +184,50 @@ impl KubernetesRunnerApi for KubeRunnerApi {
         let name = reservation_resource_name(reservation_id);
         let params = DeleteParams::background();
         let selector = format!("previa.runvibe.com/reservation-id={reservation_id}");
-        let _ = self.statefulsets().delete(&name, &params).await;
-        let _ = self
-            .pods()
-            .delete_collection(&params, &ListParams::default().labels(&selector))
-            .await;
-        let _ = self.services().delete(&name, &params).await;
-        let _ = self.pdbs().delete(&name, &params).await;
+        let mut first_error = None;
+        remember_first_error(
+            &mut first_error,
+            ignore_not_found(self.statefulsets().delete(&name, &params).await),
+        );
+        remember_first_error(
+            &mut first_error,
+            ignore_not_found(
+                self.pods()
+                    .delete_collection(&params, &ListParams::default().labels(&selector))
+                    .await,
+            ),
+        );
+        remember_first_error(
+            &mut first_error,
+            ignore_not_found(self.services().delete(&name, &params).await),
+        );
+        remember_first_error(
+            &mut first_error,
+            ignore_not_found(self.pdbs().delete(&name, &params).await),
+        );
+        if let Some(error) = first_error {
+            return Err(error);
+        }
         Ok(())
+    }
+}
+
+fn ignore_not_found<T>(result: Result<T, kube::Error>) -> Result<(), KubernetesError> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(kube::Error::Api(error)) if error.code == 404 => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn remember_first_error(
+    first_error: &mut Option<KubernetesError>,
+    result: Result<(), KubernetesError>,
+) {
+    if first_error.is_none() {
+        if let Err(error) = result {
+            *first_error = Some(error);
+        }
     }
 }
 

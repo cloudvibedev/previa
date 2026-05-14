@@ -4,6 +4,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, Utc};
 use thiserror::Error;
 use tokio::sync::RwLock;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::models::{
@@ -248,7 +249,9 @@ impl ReservationStore {
         record.status.status = ReservationStatusKind::Cancelled;
         drop(lock);
         if let Some(api) = self.kubernetes.as_ref() {
-            let _ = api.delete_reservation_resources(reservation_id).await;
+            if let Err(error) = api.delete_reservation_resources(reservation_id).await {
+                warn!(%reservation_id, %error, "failed to delete cancelled reservation resources");
+            }
         }
         true
     }
@@ -372,10 +375,15 @@ impl ReservationStore {
             }
         }
         if let Some(api) = self.kubernetes.as_ref() {
-            let _ = api
+            if let Err(error) = api
                 .update_runner_state_label(reservation_id, RunnerLifecycleState::Terminating)
-                .await;
-            let _ = api.delete_reservation_resources(reservation_id).await;
+                .await
+            {
+                warn!(%reservation_id, %error, "failed to mark runner resources as terminating");
+            }
+            if let Err(error) = api.delete_reservation_resources(reservation_id).await {
+                warn!(%reservation_id, %error, "failed to delete reservation resources");
+            }
         }
     }
 }
