@@ -21,6 +21,8 @@ const LABEL_APP_NAME: &str = "app.kubernetes.io/name";
 const LABEL_COMPONENT: &str = "app.kubernetes.io/component";
 const LABEL_RESERVATION_ID: &str = "previa.runvibe.com/reservation-id";
 const LABEL_STATE: &str = "previa.runvibe.com/state";
+const RESOURCE_NAME_PREFIX: &str = "previa-runner-";
+const RESOURCE_NAME_ID_CHARS: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunnerReservationSpec {
@@ -51,17 +53,21 @@ impl RunnerReservationSpec {
 }
 
 pub fn reservation_resource_name(reservation_id: &str) -> String {
-    let normalized = reservation_id
+    let suffix = reservation_id
         .chars()
-        .map(|ch| match ch {
-            'a'..='z' | '0'..='9' => ch,
-            'A'..='Z' => ch.to_ascii_lowercase(),
-            _ => '-',
+        .filter_map(|ch| match ch {
+            'a'..='z' | '0'..='9' => Some(ch),
+            'A'..='Z' => Some(ch.to_ascii_lowercase()),
+            _ => return None,
         })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_owned();
-    format!("previa-runner-{}", normalized)
+        .take(RESOURCE_NAME_ID_CHARS)
+        .collect::<String>();
+    let suffix = if suffix.is_empty() {
+        "reservation".to_owned()
+    } else {
+        suffix
+    };
+    format!("{RESOURCE_NAME_PREFIX}{suffix}")
 }
 
 pub fn runner_dns_name(
@@ -421,7 +427,7 @@ mod tests {
 
         assert_eq!(
             statefulset.metadata.name.as_deref(),
-            Some("previa-runner-rr-test")
+            Some("previa-runner-rrtest")
         );
         assert_eq!(statefulset.spec.as_ref().unwrap().replicas, Some(3));
         let template = &statefulset.spec.as_ref().unwrap().template;
@@ -440,8 +446,16 @@ mod tests {
         );
         assert_eq!(
             runner_dns_name(&config, &spec, 0),
-            "previa-runner-rr-test-0.previa-runner-rr-test.previa.svc.cluster.local"
+            "previa-runner-rrtest-0.previa-runner-rrtest.previa.svc.cluster.local"
         );
+    }
+
+    #[test]
+    fn keeps_resource_names_short_enough_for_statefulset_pod_labels() {
+        let name = reservation_resource_name("rr_8effafd4-a6f2-4c10-8bcc-a6e590a3617d");
+
+        assert_eq!(name, "previa-runner-rr8effafd4a6f24c108b");
+        assert!(name.len() <= 40);
     }
 
     #[test]
