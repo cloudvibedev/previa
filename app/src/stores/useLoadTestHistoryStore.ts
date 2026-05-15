@@ -128,19 +128,19 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       pipelineName: pipeline.name,
       config: cfg,
       metrics: emptyMetrics,
-      state: "provisioning",
+      state: "running",
       timestamp: new Date().toISOString(),
     };
     set((s) => ({
       config: cfg,
       metrics: emptyMetrics,
-      state: "provisioning",
+      state: "running",
       viewingHistoricRun: false,
       nodesInfo: null,
       provisioningStatus: null,
-      provisioningStartedAt: Date.now(),
+      provisioningStartedAt: null,
       liveMetrics: emptyMetrics,
-      liveState: "provisioning",
+      liveState: "running",
       runs: [syntheticRun, ...s.runs.filter(r => r.state !== "running" && r.state !== "provisioning")],
       activeRunId: syntheticId,
     }));
@@ -182,12 +182,13 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
       const controller = runRemoteLoadTest(executionBackendUrl, pipeline, cfg, {
         onSnapshot: (snapshot) => {
           const s = get();
+          const isProvisioning = snapshot.state === "provisioning";
           set({
             liveMetrics: snapshot.metrics,
             liveState: snapshot.state,
             nodesInfo: snapshot.nodesInfo,
-            provisioningStatus: null,
-            provisioningStartedAt: null,
+            provisioningStatus: isProvisioning ? s.provisioningStatus : null,
+            provisioningStartedAt: isProvisioning ? (s.provisioningStartedAt ?? Date.now()) : null,
           });
           if (!s.viewingHistoricRun) {
             set({
@@ -458,12 +459,13 @@ export const useLoadTestHistoryStore = create<LoadTestHistoryState>((set, get) =
     const controller = reconnectToLoadExecution(executionBackendUrl, projectId, executionId, {
       onSnapshot: (snapshot) => {
         const s = get();
+        const isProvisioning = snapshot.state === "provisioning";
         set({
           liveMetrics: snapshot.metrics,
           liveState: snapshot.state,
           nodesInfo: snapshot.nodesInfo,
-          provisioningStatus: null,
-          provisioningStartedAt: null,
+          provisioningStatus: isProvisioning ? s.provisioningStatus : null,
+          provisioningStartedAt: isProvisioning ? (s.provisioningStartedAt ?? Date.now()) : null,
         });
         if (!s.viewingHistoricRun) {
           set({

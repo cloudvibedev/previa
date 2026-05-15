@@ -192,6 +192,7 @@ function resolveStepId(
 
 function mapLoadSnapshotStatus(status: string): LoadTestState {
   if (status === "cancelled") return "cancelled";
+  if (status === "provisioning") return "provisioning";
   if (status === "running" || status === "queued") return "running";
   return "completed";
 }
@@ -1491,25 +1492,11 @@ export function runRemoteLoadTest(
   const runnerResourceHistory: RunnerResourcePoint[] = [];
   let lastRpsPointTime = 0;
   let provisioningPollStopped = false;
+  let streamController: RemoteLoadTestController | null = null;
 
   const stopProvisioningPolling = () => {
     provisioningPollStopped = true;
   };
-
-  const buildUnavailableProvisioningStatus = (message: string): LoadProvisioningStatus => ({
-    executionId: "",
-    pipelineId: pipeline.id ?? null,
-    capacityMode: "kubernetes",
-    requestedRunnerCount: 0,
-    readyRunnerCount: 0,
-    targetRps: targetRps ?? 0,
-    reservationStatus: "unavailable",
-    runnerEndpoints: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    unavailable: true,
-    message,
-  });
 
   const startProvisioningPolling = () => {
     if (!callbacks.onProvisioningUpdate || !projectId || !pipeline.id) return;
@@ -1519,13 +1506,26 @@ export function runRemoteLoadTest(
       try {
         const status = await fetchLatestRunnerReservation(backendUrl, projectId, pipeline.id);
         if (provisioningPollStopped || abortController.signal.aborted) return;
-        callbacks.onProvisioningUpdate?.(
-          status ?? buildUnavailableProvisioningStatus("Provisioning state is not available yet."),
-        );
+        if (status) {
+          callbacks.onProvisioningUpdate?.(status);
+        }
       } catch (err) {
         if (provisioningPollStopped || abortController.signal.aborted) return;
         callbacks.onProvisioningUpdate?.(
-          buildUnavailableProvisioningStatus(err instanceof Error ? err.message : String(err)),
+          {
+            executionId: executionId ?? "",
+            pipelineId: pipeline.id ?? null,
+            capacityMode: "kubernetes",
+            requestedRunnerCount: 0,
+            readyRunnerCount: 0,
+            targetRps: targetRps ?? 0,
+            reservationStatus: "unavailable",
+            runnerEndpoints: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            unavailable: true,
+            message: err instanceof Error ? err.message : String(err),
+          },
         );
       }
     };
@@ -1599,6 +1599,28 @@ export function runRemoteLoadTest(
     };
   }
 
+  const streamCallbacks: RemoteLoadTestCallbacks = {
+    ...callbacks,
+    onSnapshot: (snapshot) => {
+      if (snapshot.state !== "provisioning") {
+        stopProvisioningPolling();
+      }
+      callbacks.onSnapshot?.(snapshot);
+    },
+    onMetricsUpdate: (metrics) => {
+      stopProvisioningPolling();
+      callbacks.onMetricsUpdate(metrics);
+    },
+    onComplete: (metrics) => {
+      stopProvisioningPolling();
+      callbacks.onComplete(metrics);
+    },
+    onError: (error) => {
+      stopProvisioningPolling();
+      callbacks.onError(error);
+    },
+  };
+
   const run = async () => {
     try {
       const base = ensureApiPrefix(backendUrl);
@@ -1624,17 +1646,31 @@ export function runRemoteLoadTest(
         body: JSON.stringify(body),
         signal: abortController.signal,
       });
-      stopProvisioningPolling();
 
       if (!response.ok) {
+        stopProvisioningPolling();
         const err = await response.text();
-        callbacks.onError(`HTTP ${response.status}: ${err}`);
+        streamCallbacks.onError(`HTTP ${response.status}: ${err}`);
+        return;
+      }
+
+      const contentType = response.headers?.get("content-type") ?? "";
+      if (!contentType.includes("text/event-stream")) {
+        const payload = await response.json().catch(() => ({}));
+        executionId = response.headers?.get("x-execution-id") ?? payload?.executionId ?? null;
+        if (!executionId) {
+          stopProvisioningPolling();
+          streamCallbacks.onError("Load test accepted without an execution id");
+          return;
+        }
+        streamController = reconnectToLoadExecution(backendUrl, projectId, executionId, streamCallbacks);
         return;
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
-        callbacks.onError("Stream não suportado pelo servidor");
+        stopProvisioningPolling();
+        streamCallbacks.onError("Stream não suportado pelo servidor");
         return;
       }
 
@@ -1670,12 +1706,13 @@ export function runRemoteLoadTest(
               case "execution:init":
                 executionId = envelope.executionId ?? envelope.payload?.executionId ?? null;
                 break;
+              case "execution:status":
               case "execution:snapshot": {
                 const snapshot = parseLoadExecutionSnapshot(envelope);
                 if (snapshot) {
-                  callbacks.onSnapshot?.(snapshot);
-                  if (snapshot.nodesInfo && callbacks.onNodesInfo) {
-                    callbacks.onNodesInfo(snapshot.nodesInfo);
+                  streamCallbacks.onSnapshot?.(snapshot);
+                  if (snapshot.nodesInfo && streamCallbacks.onNodesInfo) {
+                    streamCallbacks.onNodesInfo(snapshot.nodesInfo);
                   }
                 }
                 break;
@@ -1694,7 +1731,7 @@ export function runRemoteLoadTest(
                 } else {
                   snapshot = (envelope.payload ?? envelope) as RemoteMetricsEvent;
                 }
-                callbacks.onMetricsUpdate(toFullMetrics(snapshot, envelopeConsolidated));
+                streamCallbacks.onMetricsUpdate(toFullMetrics(snapshot, envelopeConsolidated));
                 break;
               }
               case "complete": {
@@ -1717,7 +1754,7 @@ export function runRemoteLoadTest(
                 break;
               }
               case "error":
-                callbacks.onError(envelope.message || envelope.payload?.message || envelope.payload?.error || "Erro desconhecido");
+                streamCallbacks.onError(envelope.message || envelope.payload?.message || envelope.payload?.error || "Erro desconhecido");
                 break;
             }
           } catch {
@@ -1729,7 +1766,7 @@ export function runRemoteLoadTest(
         if (pendingCompleteMetrics) {
           const m = pendingCompleteMetrics;
           pendingCompleteMetrics = null;
-          callbacks.onComplete(m);
+          streamCallbacks.onComplete(m);
         }
       };
 
@@ -1760,15 +1797,15 @@ export function runRemoteLoadTest(
       if (!streamCompleted && !abortController.signal.aborted) {
         const lastSnapshot = consolidateNodeMetrics(lastKnownNodeMetrics);
         if (lastSnapshot) {
-          callbacks.onComplete(toFullMetrics(lastSnapshot));
+          streamCallbacks.onComplete(toFullMetrics(lastSnapshot));
         } else {
-          callbacks.onComplete(toFullMetrics({ totalSent: 0, totalSuccess: 0, totalError: 0, rps: 0, startTime: Date.now(), elapsedMs: 0 }));
+          streamCallbacks.onComplete(toFullMetrics({ totalSent: 0, totalSuccess: 0, totalError: 0, rps: 0, startTime: Date.now(), elapsedMs: 0 }));
         }
       }
     } catch (err) {
       stopProvisioningPolling();
       if ((err as Error).name !== "AbortError") {
-        callbacks.onError(err instanceof Error ? err.message : String(err));
+        streamCallbacks.onError(err instanceof Error ? err.message : String(err));
       }
     }
   };
@@ -1778,13 +1815,16 @@ export function runRemoteLoadTest(
   return {
     cancel: () => {
       stopProvisioningPolling();
-      if (executionId) {
+      if (streamController) {
+        streamController.cancel();
+      } else if (executionId) {
         cancelExecution(backendUrl, executionId);
       }
       abortController.abort();
     },
     disconnect: () => {
       stopProvisioningPolling();
+      streamController?.disconnect();
       abortController.abort();
     },
   };
@@ -2042,6 +2082,7 @@ export function reconnectToLoadExecution(
             switch (event) {
               case "execution:init":
                 break;
+              case "execution:status":
               case "execution:snapshot": {
                 const snapshot = parseLoadExecutionSnapshot(envelope);
                 if (snapshot) {
