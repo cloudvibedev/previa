@@ -150,6 +150,7 @@ pub fn build_runner_statefulset(
             ..Default::default()
         },
         spec: Some(StatefulSetSpec {
+            pod_management_policy: Some("Parallel".to_owned()),
             replicas: Some(spec.count as i32),
             selector: selector.clone(),
             service_name: name.clone(),
@@ -442,6 +443,15 @@ mod tests {
             Some("previa-runner-rrtest")
         );
         assert_eq!(statefulset.spec.as_ref().unwrap().replicas, Some(3));
+        assert_eq!(
+            statefulset
+                .spec
+                .as_ref()
+                .unwrap()
+                .pod_management_policy
+                .as_deref(),
+            Some("Parallel")
+        );
         let template = &statefulset.spec.as_ref().unwrap().template;
         assert!(template.spec.as_ref().unwrap().affinity.is_some());
     }
