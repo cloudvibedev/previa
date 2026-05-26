@@ -12,6 +12,10 @@ use crate::server::models::{ErrorResponse, UserCreateRequest, UserUpdateRequest}
 use crate::server::state::AppState;
 use crate::server::utils::new_uuid_v7;
 
+fn normalize_optional(value: Option<String>) -> Option<String> {
+    value.map(|item| item.trim().to_owned())
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/users",
@@ -51,7 +55,9 @@ pub async fn create_user(
         &state.db,
         UserInsert {
             id: new_uuid_v7(),
-            username: payload.username,
+            username: payload.username.trim().to_owned(),
+            name: normalize_optional(payload.name),
+            email: normalize_optional(payload.email),
             password_hash,
             role: payload.role,
             active: payload.active,
@@ -98,7 +104,9 @@ pub async fn update_user(
         &state.db,
         &user_id,
         UserUpdate {
-            username: payload.username,
+            username: payload.username.map(|value| value.trim().to_owned()),
+            name: normalize_optional(payload.name),
+            email: normalize_optional(payload.email),
             password_hash,
             role: payload.role,
             active: payload.active,

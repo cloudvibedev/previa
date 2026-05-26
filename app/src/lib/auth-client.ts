@@ -13,6 +13,8 @@ export interface LoginResponse {
 export interface ManagedUser {
   id: string;
   username: string;
+  name?: string | null;
+  email?: string | null;
   role: AccessRole;
   active: boolean;
   createdAt: string;
@@ -57,6 +59,8 @@ export async function listUsers(): Promise<ManagedUser[]> {
 
 export async function createUser(input: {
   username: string;
+  name?: string | null;
+  email?: string | null;
   password: string;
   role: AccessRole;
   active: boolean;
@@ -73,6 +77,8 @@ export async function updateUser(
   userId: string,
   input: Partial<{
     username: string;
+    name: string | null;
+    email: string | null;
     password: string;
     role: AccessRole;
     active: boolean;
@@ -133,6 +139,21 @@ export async function fetchCurrentUser(): Promise<AuthUser> {
     const text = await response.text().catch(() => "");
     throw new ApiError(`HTTP ${response.status}: ${text}`, response.status, text);
   }
+  return response.json();
+}
+
+export async function updateCurrentUser(input: {
+  username?: string;
+  name?: string | null;
+  email?: string | null;
+  currentPassword?: string;
+  newPassword?: string;
+}): Promise<AuthUser> {
+  const response = await authFetch("/api/v1/auth/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
   return response.json();
 }
 

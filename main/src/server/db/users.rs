@@ -9,6 +9,8 @@ use crate::server::utils::{now_iso, now_ms};
 pub struct UserInsert {
     pub id: String,
     pub username: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
     pub password_hash: String,
     pub role: Role,
     pub active: bool,
@@ -17,6 +19,8 @@ pub struct UserInsert {
 #[derive(Debug, Clone)]
 pub struct UserUpdate {
     pub username: Option<String>,
+    pub name: Option<String>,
+    pub email: Option<String>,
     pub password_hash: Option<String>,
     pub role: Option<Role>,
     pub active: Option<bool>,
@@ -26,6 +30,8 @@ pub struct UserUpdate {
 pub struct UserAuthRecord {
     pub id: String,
     pub username: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
     pub password_hash: String,
     pub role: Role,
     pub active: bool,
@@ -36,12 +42,14 @@ pub async fn insert_user_record(db: &DbPool, input: UserInsert) -> Result<UserRe
     let now_ms = now_ms() as i64;
     db.query(
         "INSERT INTO users (
-            id, username, password_hash, role, active, created_at, updated_at,
+            id, username, name, email, password_hash, role, active, created_at, updated_at,
             created_at_ms, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&input.id)
     .bind(&input.username)
+    .bind(&input.name)
+    .bind(&input.email)
     .bind(&input.password_hash)
     .bind(input.role.to_string())
     .bind(if input.active { 1_i64 } else { 0_i64 })
@@ -60,7 +68,7 @@ pub async fn insert_user_record(db: &DbPool, input: UserInsert) -> Result<UserRe
 pub async fn list_user_records(db: &DbPool) -> Result<Vec<UserRecord>, sqlx::Error> {
     let rows = db
         .query(
-            "SELECT id, username, role, active, created_at, updated_at
+            "SELECT id, username, name, email, role, active, created_at, updated_at
             FROM users
             ORDER BY updated_at_ms DESC",
         )
@@ -75,7 +83,7 @@ pub async fn load_user_record(
 ) -> Result<Option<UserRecord>, sqlx::Error> {
     let row = db
         .query(
-            "SELECT id, username, role, active, created_at, updated_at
+            "SELECT id, username, name, email, role, active, created_at, updated_at
             FROM users
             WHERE id = ?",
         )
@@ -91,11 +99,27 @@ pub async fn load_user_auth_record_by_username(
 ) -> Result<Option<UserAuthRecord>, sqlx::Error> {
     let row = db
         .query(
-            "SELECT id, username, password_hash, role, active
+            "SELECT id, username, name, email, password_hash, role, active
             FROM users
             WHERE username = ?",
         )
         .bind(username)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.as_ref().map(user_auth_record_from_row))
+}
+
+pub async fn load_user_auth_record_by_id(
+    db: &DbPool,
+    user_id: &str,
+) -> Result<Option<UserAuthRecord>, sqlx::Error> {
+    let row = db
+        .query(
+            "SELECT id, username, name, email, password_hash, role, active
+            FROM users
+            WHERE id = ?",
+        )
+        .bind(user_id)
         .fetch_optional(db)
         .await?;
     Ok(row.as_ref().map(user_auth_record_from_row))
@@ -107,7 +131,7 @@ pub async fn update_user_record(
     input: UserUpdate,
 ) -> Result<Option<UserRecord>, sqlx::Error> {
     let existing = db
-        .query("SELECT username, password_hash, role, active FROM users WHERE id = ?")
+        .query("SELECT username, name, email, password_hash, role, active FROM users WHERE id = ?")
         .bind(user_id)
         .fetch_optional(db)
         .await?;
@@ -118,6 +142,15 @@ pub async fn update_user_record(
     let username = input
         .username
         .unwrap_or_else(|| existing.try_get("username").unwrap_or_default());
+    let name = input
+        .name
+        .or_else(|| existing.try_get::<Option<String>, _>("name").ok().flatten());
+    let email = input.email.or_else(|| {
+        existing
+            .try_get::<Option<String>, _>("email")
+            .ok()
+            .flatten()
+    });
     let password_hash = input
         .password_hash
         .unwrap_or_else(|| existing.try_get("password_hash").unwrap_or_default());
@@ -137,10 +170,12 @@ pub async fn update_user_record(
 
     db.query(
         "UPDATE users
-        SET username = ?, password_hash = ?, role = ?, active = ?, updated_at = ?, updated_at_ms = ?
+        SET username = ?, name = ?, email = ?, password_hash = ?, role = ?, active = ?, updated_at = ?, updated_at_ms = ?
         WHERE id = ?",
     )
     .bind(username)
+    .bind(name)
+    .bind(email)
     .bind(password_hash)
     .bind(role.to_string())
     .bind(if active { 1_i64 } else { 0_i64 })
@@ -166,6 +201,8 @@ fn user_record_from_row(row: &sqlx::any::AnyRow) -> UserRecord {
     UserRecord {
         id: row.try_get("id").unwrap_or_default(),
         username: row.try_get("username").unwrap_or_default(),
+        name: row.try_get::<Option<String>, _>("name").ok().flatten(),
+        email: row.try_get::<Option<String>, _>("email").ok().flatten(),
         role: row
             .try_get::<String, _>("role")
             .ok()
@@ -184,6 +221,8 @@ fn user_auth_record_from_row(row: &sqlx::any::AnyRow) -> UserAuthRecord {
     UserAuthRecord {
         id: row.try_get("id").unwrap_or_default(),
         username: row.try_get("username").unwrap_or_default(),
+        name: row.try_get::<Option<String>, _>("name").ok().flatten(),
+        email: row.try_get::<Option<String>, _>("email").ok().flatten(),
         password_hash: row.try_get("password_hash").unwrap_or_default(),
         role: row
             .try_get::<String, _>("role")

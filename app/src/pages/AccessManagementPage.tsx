@@ -85,6 +85,8 @@ export default function AccessManagementPage() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [tokens, setTokens] = useState<ApiTokenRecord[]>([]);
   const [username, setUsername] = useState("");
+  const [userName, setUserName] = useState("");
+  const [userEmail, setUserEmail] = useState("");
   const [password, setPassword] = useState("");
   const [userRole, setUserRole] = useState<AccessRole>("viewer");
   const [tokenName, setTokenName] = useState("");
@@ -138,9 +140,18 @@ export default function AccessManagementPage() {
     setError(null);
     setSaving(true);
     try {
-      const user = await createUser({ username, password, role: userRole, active: true });
+      const user = await createUser({
+        username,
+        name: userName || null,
+        email: userEmail || null,
+        password,
+        role: userRole,
+        active: true,
+      });
       setUsers((items) => [user, ...items]);
       setUsername("");
+      setUserName("");
+      setUserEmail("");
       setPassword("");
       setCreateDialog(null);
       toast.success("Usuario criado");
@@ -309,7 +320,8 @@ export default function AccessManagementPage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="min-w-56">Login</TableHead>
+                          <TableHead className="min-w-56">Usuario</TableHead>
+                          <TableHead className="min-w-56">Contato</TableHead>
                           <TableHead className="w-36 text-center">Role</TableHead>
                           <TableHead className="w-36 text-center">Status</TableHead>
                           <TableHead className="min-w-44">Criado em</TableHead>
@@ -319,7 +331,15 @@ export default function AccessManagementPage() {
                       <TableBody>
                         {users.map((user) => (
                           <TableRow key={user.id}>
-                            <TableCell className="min-w-56 font-medium">{user.username}</TableCell>
+                            <TableCell className="min-w-56">
+                              <div className="font-medium">{user.username}</div>
+                              {user.name ? (
+                                <div className="text-xs text-muted-foreground">{user.name}</div>
+                              ) : null}
+                            </TableCell>
+                            <TableCell className="min-w-56 text-sm text-muted-foreground">
+                              {user.email || "-"}
+                            </TableCell>
                             <TableCell className="w-36 text-center">
                               <Badge variant="outline" className={cn("capitalize", roleClass(user.role))}>
                                 {user.role}
@@ -472,6 +492,14 @@ export default function AccessManagementPage() {
             <div className="space-y-1.5">
               <Label htmlFor="access-username">Login</Label>
               <Input id="access-username" value={username} onChange={(event) => setUsername(event.target.value)} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="access-name">Nome</Label>
+              <Input id="access-name" value={userName} onChange={(event) => setUserName(event.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="access-email">Email</Label>
+              <Input id="access-email" type="email" value={userEmail} onChange={(event) => setUserEmail(event.target.value)} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="access-password">Senha</Label>

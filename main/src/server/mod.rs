@@ -9,7 +9,7 @@ use crate::server::handlers::api_tokens::{
     create_api_token, delete_api_token, list_api_tokens, update_api_token,
 };
 use crate::server::handlers::app::app_fallback;
-use crate::server::handlers::auth::{login, me};
+use crate::server::handlers::auth::{login, me, update_me};
 use crate::server::handlers::env_groups::{
     create_project_env_group, delete_project_env_group, get_project_env_group,
     list_project_env_groups, upsert_project_env_group,
@@ -25,11 +25,13 @@ use crate::server::handlers::history_load::{
     delete_load_history, delete_load_test_by_id, get_load_test_by_id, list_load_history,
 };
 use crate::server::handlers::pipelines::{
-    create_project_pipeline, delete_project_pipeline, get_project_pipeline, list_project_pipelines,
-    upsert_project_pipeline,
+    create_project_pipeline, delete_project_pipeline, delete_project_pipeline_share,
+    get_project_pipeline, get_project_pipeline_shares, list_project_pipelines,
+    update_project_pipeline_visibility, upsert_project_pipeline, upsert_project_pipeline_share,
 };
 use crate::server::handlers::projects::{
-    create_project, delete_project, get_project, list_projects, upsert_project,
+    create_project, delete_project, delete_project_share, get_project, get_project_shares,
+    list_projects, update_project_visibility, upsert_project, upsert_project_share,
 };
 use crate::server::handlers::proxy::proxy_request;
 use crate::server::handlers::runner_reservations::get_latest_runner_reservation_for_pipeline;
@@ -102,7 +104,7 @@ pub fn build_app_with_config(
     let mut app = Router::new()
         .route("/health", get(health))
         .route("/api/v1/auth/login", post(login))
-        .route("/api/v1/auth/me", get(me))
+        .route("/api/v1/auth/me", get(me).patch(update_me))
         .route(
             "/api/v1/api-tokens",
             get(list_api_tokens).post(create_api_token),
@@ -145,6 +147,18 @@ pub fn build_app_with_config(
         .route("/api/v1/projects/{projectId}", get(get_project))
         .route("/api/v1/projects/{projectId}/export", get(export_project))
         .route(
+            "/api/v1/projects/{projectId}/shares",
+            get(get_project_shares).post(upsert_project_share),
+        )
+        .route(
+            "/api/v1/projects/{projectId}/shares/{userId}",
+            axum::routing::delete(delete_project_share),
+        )
+        .route(
+            "/api/v1/projects/{projectId}/visibility",
+            put(update_project_visibility),
+        )
+        .route(
             "/api/v1/projects/{projectId}/specs",
             get(list_project_specs).post(create_project_spec),
         )
@@ -173,6 +187,18 @@ pub fn build_app_with_config(
             get(get_project_pipeline)
                 .put(upsert_project_pipeline)
                 .delete(delete_project_pipeline),
+        )
+        .route(
+            "/api/v1/projects/{projectId}/pipelines/{pipelineId}/shares",
+            get(get_project_pipeline_shares).post(upsert_project_pipeline_share),
+        )
+        .route(
+            "/api/v1/projects/{projectId}/pipelines/{pipelineId}/shares/{userId}",
+            axum::routing::delete(delete_project_pipeline_share),
+        )
+        .route(
+            "/api/v1/projects/{projectId}/pipelines/{pipelineId}/visibility",
+            put(update_project_pipeline_visibility),
         )
         .route(
             "/api/v1/projects/{projectId}/pipelines/{pipelineId}/runner-reservation/latest",
@@ -684,6 +710,111 @@ mod tests {
         let payload = serde_json::from_slice::<Value>(&body).expect("json");
         assert_eq!(payload["tokenKind"], "jwt");
         assert_eq!(payload["user"]["role"], "editor");
+    }
+
+    #[tokio::test]
+    async fn protected_database_user_can_update_own_profile_and_password() {
+        let auth = protected_auth();
+        let root_token = protected_root_jwt(&auth);
+        let app = test_app_with_auth(auth).await;
+
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/users")
+                    .header("authorization", format!("Bearer {root_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"editor","name":"Editor User","email":"editor@example.test","password":"editor-secret","role":"editor","active":true}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(created.status(), StatusCode::CREATED);
+
+        let login = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"editor","password":"editor-secret","clientKind":"app"}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("login response");
+        assert_eq!(login.status(), StatusCode::OK);
+        let body = to_bytes(login.into_body(), usize::MAX).await.expect("body");
+        let payload = serde_json::from_slice::<Value>(&body).expect("json");
+        let user_token = payload["token"].as_str().expect("user jwt");
+
+        let updated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PATCH)
+                    .uri("/api/v1/auth/me")
+                    .header("authorization", format!("Bearer {user_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"name":"Updated Editor","email":"updated@example.test","currentPassword":"editor-secret","newPassword":"editor-secret-2"}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(updated.status(), StatusCode::OK);
+        let body = to_bytes(updated.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let payload = serde_json::from_slice::<Value>(&body).expect("json");
+        assert_eq!(payload["username"], "editor");
+        assert_eq!(payload["name"], "Updated Editor");
+        assert_eq!(payload["email"], "updated@example.test");
+        assert_eq!(payload["role"], "editor");
+
+        let login = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"editor","password":"editor-secret-2","clientKind":"app"}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("login response");
+        assert_eq!(login.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn protected_env_root_cannot_update_account_settings() {
+        let auth = protected_auth();
+        let token = protected_root_jwt(&auth);
+        let app = test_app_with_auth(auth).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::PATCH)
+                    .uri("/api/v1/auth/me")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"Root"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

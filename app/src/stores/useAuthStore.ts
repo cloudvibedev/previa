@@ -5,6 +5,8 @@ const STORAGE_KEY = "previa.auth";
 export interface AuthUser {
   id: string;
   username: string;
+  name?: string | null;
+  email?: string | null;
   role: "root" | "admin" | "editor" | "operator" | "viewer" | "anonymous";
   source: "env" | "database" | "anonymous" | "api_token";
 }

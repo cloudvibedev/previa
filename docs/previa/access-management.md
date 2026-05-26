@@ -193,6 +193,47 @@ Role creation rules:
 - `editor`, `operator`, and `viewer` cannot manage users or API tokens
 - use `anonymous` through anonymous mode, not as a named user or token role
 
+## Stack Ownership and Sharing
+
+Projects, also called stacks in the UI, are private by default. The user that
+creates a stack becomes its owner. Owners can share the whole stack with several
+users, revoke those users later, and switch the stack between private and public
+visibility.
+
+Stack sharing grants editor access to the project surface: specs, environment
+groups, pipelines, executions, and history. A stack-level editor can create,
+edit, and run pipelines inside the stack. Pipeline-level sharing still exists
+for narrower collaboration when only one pipeline should be exposed.
+
+Public stacks are writable collaboration surfaces. Any user, including an
+unauthenticated anonymous caller, can open, edit, and run the stack. Deleting
+the stack remains restricted to the stack owner, `root`, or `admin`. If the
+stack is owned by `anonymous`, any anonymous caller is treated as that owner and
+can delete it.
+
+## Pipeline Ownership and Sharing
+
+Pipelines are private by default. The user that creates a pipeline becomes its
+owner. Owners can:
+
+- edit, run, and delete their pipeline
+- share the same pipeline with multiple users
+- revoke individual shared access
+- switch the pipeline between private and public visibility
+
+Shared users receive editor access to the same pipeline object. They can edit
+the pipeline, run it, control executions, and read its shared history. Revoking
+access removes that user from future pipeline and history access.
+
+Public pipelines are writable collaboration surfaces. Any user, including an
+unauthenticated anonymous caller, can view, edit, run, cancel active executions,
+and read history for a public pipeline. Deleting the pipeline remains restricted
+to the owner, `root`, or `admin`.
+
+Anonymous ownership is intentionally coarse: `anonymous` is a single shared
+principal. If a pipeline is owned by `anonymous`, any anonymous caller is treated
+as that owner and can delete it.
+
 ## Access UI
 
 Root and admin users see the access button in the app header. The `/access`

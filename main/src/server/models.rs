@@ -72,6 +72,10 @@ pub enum AuthPrincipalSource {
 pub struct AuthUserResponse {
     pub id: String,
     pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
     pub role: Role,
     pub source: AuthPrincipalSource,
 }
@@ -131,6 +135,8 @@ pub struct ApiTokenCreateResponse {
 pub struct UserRecord {
     pub id: String,
     pub username: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
     pub role: Role,
     pub active: bool,
     pub created_at: String,
@@ -141,6 +147,10 @@ pub struct UserRecord {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UserCreateRequest {
     pub username: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
     pub password: String,
     pub role: Role,
     #[serde(default = "default_user_active")]
@@ -153,6 +163,10 @@ pub struct UserUpdateRequest {
     #[serde(default)]
     pub username: Option<String>,
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
     pub password: Option<String>,
     #[serde(default)]
     pub role: Option<Role>,
@@ -162,6 +176,21 @@ pub struct UserUpdateRequest {
 
 fn default_user_active() -> bool {
     true
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuthMeUpdateRequest {
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub current_password: Option<String>,
+    #[serde(default)]
+    pub new_password: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -461,8 +490,114 @@ pub struct ProjectRecord {
     pub name: String,
     pub description: Option<String>,
     pub tags: Vec<String>,
+    pub owner_user_id: String,
+    pub owner_username: String,
+    pub visibility: ProjectVisibility,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectVisibility {
+    Private,
+    Public,
+}
+
+impl std::fmt::Display for ProjectVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Private => "private",
+            Self::Public => "public",
+        })
+    }
+}
+
+impl std::str::FromStr for ProjectVisibility {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "private" => Ok(Self::Private),
+            "public" => Ok(Self::Public),
+            _ => Err(format!("invalid project visibility '{value}'")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectShareAccessLevel {
+    Viewer,
+    Runner,
+    Editor,
+    Manager,
+}
+
+impl std::fmt::Display for ProjectShareAccessLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Viewer => "viewer",
+            Self::Runner => "runner",
+            Self::Editor => "editor",
+            Self::Manager => "manager",
+        })
+    }
+}
+
+impl std::str::FromStr for ProjectShareAccessLevel {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "viewer" => Ok(Self::Viewer),
+            "runner" => Ok(Self::Runner),
+            "editor" => Ok(Self::Editor),
+            "manager" => Ok(Self::Manager),
+            _ => Err(format!("invalid project share access level '{value}'")),
+        }
+    }
+}
+
+fn default_project_share_access_level() -> ProjectShareAccessLevel {
+    ProjectShareAccessLevel::Editor
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectShareRecord {
+    pub id: String,
+    pub project_id: String,
+    pub user_id: String,
+    pub username: String,
+    pub access_level: ProjectShareAccessLevel,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSharingRecord {
+    pub project_id: String,
+    pub owner_user_id: String,
+    pub owner_username: String,
+    pub visibility: ProjectVisibility,
+    pub shares: Vec<ProjectShareRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectShareCreateRequest {
+    pub user_id: String,
+    pub username: String,
+    #[serde(default = "default_project_share_access_level")]
+    pub access_level: ProjectShareAccessLevel,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectVisibilityUpdateRequest {
+    pub visibility: ProjectVisibility,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -481,6 +616,109 @@ pub struct ProjectPipelineRecord {
     pub description: Option<String>,
     pub steps: Vec<previa_runner::PipelineStep>,
     pub runtime: PipelineRuntimeState,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PipelineVisibility {
+    Private,
+    Public,
+}
+
+impl std::fmt::Display for PipelineVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Private => "private",
+            Self::Public => "public",
+        })
+    }
+}
+
+impl std::str::FromStr for PipelineVisibility {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "private" => Ok(Self::Private),
+            "public" => Ok(Self::Public),
+            _ => Err(format!("invalid pipeline visibility '{value}'")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PipelineShareAccessLevel {
+    Viewer,
+    Runner,
+    Editor,
+    Manager,
+}
+
+impl std::fmt::Display for PipelineShareAccessLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Viewer => "viewer",
+            Self::Runner => "runner",
+            Self::Editor => "editor",
+            Self::Manager => "manager",
+        })
+    }
+}
+
+impl std::str::FromStr for PipelineShareAccessLevel {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "viewer" => Ok(Self::Viewer),
+            "runner" => Ok(Self::Runner),
+            "editor" => Ok(Self::Editor),
+            "manager" => Ok(Self::Manager),
+            _ => Err(format!("invalid pipeline share access level '{value}'")),
+        }
+    }
+}
+
+fn default_pipeline_share_access_level() -> PipelineShareAccessLevel {
+    PipelineShareAccessLevel::Editor
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineShareRecord {
+    pub id: String,
+    pub pipeline_id: String,
+    pub user_id: String,
+    pub username: String,
+    pub access_level: PipelineShareAccessLevel,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineSharingRecord {
+    pub pipeline_id: String,
+    pub owner_user_id: String,
+    pub owner_username: String,
+    pub visibility: PipelineVisibility,
+    pub shares: Vec<PipelineShareRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PipelineShareCreateRequest {
+    pub user_id: String,
+    pub username: String,
+    #[serde(default = "default_pipeline_share_access_level")]
+    pub access_level: PipelineShareAccessLevel,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PipelineVisibilityUpdateRequest {
+    pub visibility: PipelineVisibility,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

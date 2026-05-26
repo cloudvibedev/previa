@@ -24,6 +24,9 @@ export interface ProjectRecord {
   name: string;
   description?: string | null;
   tags?: string[];
+  ownerUserId?: string;
+  ownerUsername?: string;
+  visibility?: ProjectVisibility;
   createdAt: string;
   updatedAt: string;
 }
@@ -53,6 +56,47 @@ export interface PipelineInput {
   name: string;
   description?: string | null;
   steps: ApiPipelineStep[];
+}
+
+export type PipelineVisibility = "private" | "public";
+export type PipelineShareAccessLevel = "viewer" | "runner" | "editor" | "manager";
+export type ProjectVisibility = "private" | "public";
+export type ProjectShareAccessLevel = "viewer" | "runner" | "editor" | "manager";
+
+export interface ProjectShareRecord {
+  id: string;
+  projectId: string;
+  userId: string;
+  username: string;
+  accessLevel: ProjectShareAccessLevel;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectSharingRecord {
+  projectId: string;
+  ownerUserId: string;
+  ownerUsername: string;
+  visibility: ProjectVisibility;
+  shares: ProjectShareRecord[];
+}
+
+export interface PipelineShareRecord {
+  id: string;
+  pipelineId: string;
+  userId: string;
+  username: string;
+  accessLevel: PipelineShareAccessLevel;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PipelineSharingRecord {
+  pipelineId: string;
+  ownerUserId: string;
+  ownerUsername: string;
+  visibility: PipelineVisibility;
+  shares: PipelineShareRecord[];
 }
 
 export interface ProjectUpsertRequest {
@@ -446,6 +490,9 @@ function projectRecordToLocal(
     name: r.name,
     description: r.description ?? undefined,
     tags: r.tags ?? [],
+    ownerUserId: r.ownerUserId,
+    ownerUsername: r.ownerUsername,
+    visibility: r.visibility,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     spec,
@@ -497,6 +544,44 @@ export async function upsertProject(baseUrl: string, id: string, data: ProjectUp
 
 export async function deleteProject(baseUrl: string, id: string): Promise<void> {
   await request<void>(`${baseUrl}/projects/${id}`, { method: "DELETE" });
+}
+
+export async function getProjectSharing(baseUrl: string, projectId: string): Promise<ProjectSharingRecord> {
+  const apiBase = ensureApiPrefix(baseUrl);
+  return request<ProjectSharingRecord>(`${apiBase}/projects/${projectId}/shares`);
+}
+
+export async function shareProjectWithUser(
+  baseUrl: string,
+  projectId: string,
+  payload: { userId: string; username: string; accessLevel?: ProjectShareAccessLevel },
+): Promise<ProjectSharingRecord> {
+  const apiBase = ensureApiPrefix(baseUrl);
+  return request<ProjectSharingRecord>(`${apiBase}/projects/${projectId}/shares`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessLevel: "editor", ...payload }),
+  });
+}
+
+export async function revokeProjectShare(baseUrl: string, projectId: string, userId: string): Promise<void> {
+  const apiBase = ensureApiPrefix(baseUrl);
+  await request<void>(`${apiBase}/projects/${projectId}/shares/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function updateProjectVisibility(
+  baseUrl: string,
+  projectId: string,
+  visibility: ProjectVisibility,
+): Promise<ProjectSharingRecord> {
+  const apiBase = ensureApiPrefix(baseUrl);
+  return request<ProjectSharingRecord>(`${apiBase}/projects/${projectId}/visibility`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ visibility }),
+  });
 }
 
 // ============ Runners ============
@@ -589,6 +674,46 @@ export async function deletePipeline(baseUrl: string, projectId: string, pipelin
   console.log("[DEBUG][api] DELETE /pipelines START", { projectId, pipelineId, timestamp: Date.now() });
   await request<void>(`${baseUrl}/projects/${projectId}/pipelines/${pipelineId}`, { method: "DELETE" });
   console.log("[DEBUG][api] DELETE /pipelines END", { projectId, pipelineId, timestamp: Date.now() });
+}
+
+export async function getPipelineSharing(baseUrl: string, projectId: string, pipelineId: string): Promise<PipelineSharingRecord> {
+  const apiBase = ensureApiPrefix(baseUrl);
+  return request<PipelineSharingRecord>(`${apiBase}/projects/${projectId}/pipelines/${pipelineId}/shares`);
+}
+
+export async function sharePipelineWithUser(
+  baseUrl: string,
+  projectId: string,
+  pipelineId: string,
+  payload: { userId: string; username: string; accessLevel?: PipelineShareAccessLevel },
+): Promise<PipelineSharingRecord> {
+  const apiBase = ensureApiPrefix(baseUrl);
+  return request<PipelineSharingRecord>(`${apiBase}/projects/${projectId}/pipelines/${pipelineId}/shares`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessLevel: "editor", ...payload }),
+  });
+}
+
+export async function revokePipelineShare(baseUrl: string, projectId: string, pipelineId: string, userId: string): Promise<void> {
+  const apiBase = ensureApiPrefix(baseUrl);
+  await request<void>(`${apiBase}/projects/${projectId}/pipelines/${pipelineId}/shares/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function updatePipelineVisibility(
+  baseUrl: string,
+  projectId: string,
+  pipelineId: string,
+  visibility: PipelineVisibility,
+): Promise<PipelineSharingRecord> {
+  const apiBase = ensureApiPrefix(baseUrl);
+  return request<PipelineSharingRecord>(`${apiBase}/projects/${projectId}/pipelines/${pipelineId}/visibility`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ visibility }),
+  });
 }
 
 // ============ Specs ============

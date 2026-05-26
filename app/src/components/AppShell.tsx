@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { CircleHelp, EllipsisVertical, Github, ShieldCheck, Server } from "lucide-react";
+import { CircleHelp, EllipsisVertical, Github, ShieldCheck, Server, UserCircle } from "lucide-react";
 import { Outlet, useNavigate } from "react-router-dom";
 
 import { AppHeader } from "@/components/AppHeader";
+import { AccountSettingsDialog } from "@/components/AccountSettingsDialog";
 import { EventsPanel } from "@/components/EventsPanel";
 import { InstallAppButton } from "@/components/InstallAppButton";
 import { OnboardingModal } from "@/components/OnboardingModal";
@@ -87,6 +88,7 @@ export function AppShell() {
   const currentUser = useAuthStore((state) => state.user);
   const [headerConfig, setHeaderConfigState] = useState<AppHeaderConfig>({});
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
   const hasUnavailableRunners = orchestratorInfo !== null && orchestratorInfo.activeRunners === 0;
 
@@ -147,6 +149,17 @@ export function AppShell() {
           <ShieldCheck className="h-4 w-4" />
         </Button>
       ) : null}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-9 w-9 rounded-full"
+        onClick={() => setIsAccountOpen(true)}
+        aria-label="Conta do usuario"
+        title="Conta"
+      >
+        <UserCircle className="h-4 w-4" />
+      </Button>
       {headerConfig.headerActions}
     </>
   ), [currentUser?.role, handleOpenOnboarding, hasUnavailableRunners, headerConfig.headerActions, navigate]);
@@ -227,6 +240,22 @@ export function AppShell() {
               </Button>
             </MobileHeaderActionRow>
           ) : null}
+          <MobileHeaderActionRow label="Conta">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full"
+              onClick={() => {
+                setIsAccountOpen(true);
+                setIsMobileActionsOpen(false);
+              }}
+              aria-label="Conta do usuario"
+              title="Conta"
+            >
+              <UserCircle className="h-4 w-4" />
+            </Button>
+          </MobileHeaderActionRow>
           <MobileHeaderActionRow label="Eventos">
             <EventsPanel />
           </MobileHeaderActionRow>
@@ -253,6 +282,7 @@ export function AppShell() {
           <Outlet />
         </div>
         <OnboardingModal open={isOnboardingOpen} onOpenChange={setIsOnboardingOpen} />
+        <AccountSettingsDialog open={isAccountOpen} onOpenChange={setIsAccountOpen} />
         <OnboardingModal />
       </div>
     </AppHeaderContext.Provider>
