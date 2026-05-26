@@ -190,5 +190,6 @@ pub use api_tokens::{
 };
 pub use users::{
     UserInsert, UserUpdate, delete_user_record, insert_user_record, list_user_records,
-    load_user_auth_record_by_username, update_user_record,
+    load_user_auth_record_by_id, load_user_auth_record_by_username, load_user_record,
+    update_user_record,
 };

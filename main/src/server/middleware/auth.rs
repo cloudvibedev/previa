@@ -169,6 +169,9 @@ async fn authenticate_bearer(state: &AppState, token: &str) -> Option<Principal>
 }
 
 fn required_permission(method: &Method, path: &str) -> Permission {
+    if path == "/api/v1/auth/me" {
+        return Permission::ReadProjects;
+    }
     if path.starts_with("/api/v1/users") {
         return Permission::ManageUsers;
     }

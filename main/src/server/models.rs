@@ -72,6 +72,10 @@ pub enum AuthPrincipalSource {
 pub struct AuthUserResponse {
     pub id: String,
     pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
     pub role: Role,
     pub source: AuthPrincipalSource,
 }
@@ -131,6 +135,8 @@ pub struct ApiTokenCreateResponse {
 pub struct UserRecord {
     pub id: String,
     pub username: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
     pub role: Role,
     pub active: bool,
     pub created_at: String,
@@ -141,6 +147,10 @@ pub struct UserRecord {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UserCreateRequest {
     pub username: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
     pub password: String,
     pub role: Role,
     #[serde(default = "default_user_active")]
@@ -153,6 +163,10 @@ pub struct UserUpdateRequest {
     #[serde(default)]
     pub username: Option<String>,
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
     pub password: Option<String>,
     #[serde(default)]
     pub role: Option<Role>,
@@ -162,6 +176,21 @@ pub struct UserUpdateRequest {
 
 fn default_user_active() -> bool {
     true
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuthMeUpdateRequest {
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub current_password: Option<String>,
+    #[serde(default)]
+    pub new_password: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
