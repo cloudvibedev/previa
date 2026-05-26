@@ -155,7 +155,7 @@ pub async fn run_load_test_for_project(
                 &project_id,
                 &pipeline_id,
                 &principal,
-                PipelineAccess::Write,
+                PipelineAccess::Run,
             )
             .await
             {

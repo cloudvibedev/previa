@@ -109,7 +109,7 @@ pub async fn delete_e2e_history(
             &project_id,
             record.pipeline_id.as_deref(),
             &principal,
-            PipelineAccess::Write,
+            PipelineAccess::Delete,
         )
         .await
         {
@@ -224,7 +224,7 @@ pub async fn delete_e2e_test_by_id(
         &project_id,
         record.pipeline_id.as_deref(),
         &principal,
-        PipelineAccess::Write,
+        PipelineAccess::Delete,
     )
     .await
     {

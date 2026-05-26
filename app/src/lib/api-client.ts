@@ -59,9 +59,9 @@ export interface PipelineInput {
 }
 
 export type PipelineVisibility = "private" | "public";
-export type PipelineShareAccessLevel = "editor";
+export type PipelineShareAccessLevel = "viewer" | "runner" | "editor" | "manager";
 export type ProjectVisibility = "private" | "public";
-export type ProjectShareAccessLevel = "editor";
+export type ProjectShareAccessLevel = "viewer" | "runner" | "editor" | "manager";
 
 export interface ProjectShareRecord {
   id: string;

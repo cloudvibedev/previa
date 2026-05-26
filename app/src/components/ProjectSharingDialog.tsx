@@ -33,6 +33,7 @@ export function ProjectSharingDialog({
   const [sharing, setSharing] = useState<api.ProjectSharingRecord | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedAccessLevel, setSelectedAccessLevel] = useState<api.ProjectShareAccessLevel>("editor");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -60,10 +61,10 @@ export function ProjectSharingDialog({
     };
   }, [baseUrl, open, projectId]);
 
-  const shareableUsers = useMemo(() => {
-    const shared = new Set(sharing?.shares.map((share) => share.userId) ?? []);
-    return users.filter((user) => user.id !== sharing?.ownerUserId && !shared.has(user.id));
-  }, [sharing, users]);
+  const shareableUsers = useMemo(
+    () => users.filter((user) => user.id !== sharing?.ownerUserId),
+    [sharing, users],
+  );
 
   async function handleTogglePublic(checked: boolean) {
     if (!baseUrl || !projectId) return;
@@ -88,9 +89,11 @@ export function ProjectSharingDialog({
       const next = await api.shareProjectWithUser(baseUrl, projectId, {
         userId: user.id,
         username: user.username,
+        accessLevel: selectedAccessLevel,
       });
       setSharing(next);
       setSelectedUserId("");
+      setSelectedAccessLevel("editor");
       toast.success("Stack compartilhada");
     } catch {
       toast.error("Nao foi possivel compartilhar");
@@ -167,6 +170,17 @@ export function ProjectSharingDialog({
                     <option key={user.id} value={user.id}>{user.username}</option>
                   ))}
                 </select>
+                <select
+                  className="h-9 w-32 rounded-md border bg-background px-3 text-sm"
+                  value={selectedAccessLevel}
+                  disabled={saving}
+                  onChange={(event) => setSelectedAccessLevel(event.target.value as api.ProjectShareAccessLevel)}
+                  aria-label="Tipo de acesso"
+                >
+                  {SHARE_ACCESS_LEVELS.map((level) => (
+                    <option key={level.value} value={level.value}>{level.label}</option>
+                  ))}
+                </select>
                 <Button type="button" size="icon" disabled={!selectedUserId || saving} onClick={handleShare}>
                   <UserPlus className="h-4 w-4" />
                 </Button>
@@ -176,6 +190,9 @@ export function ProjectSharingDialog({
                 {sharing?.shares.map((share) => (
                   <div key={share.userId} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
                     <span>{share.username}</span>
+                    <span className="ml-auto mr-2 text-xs text-muted-foreground">
+                      {shareAccessLabel(share.accessLevel)}
+                    </span>
                     <Button
                       type="button"
                       variant="ghost"
@@ -202,4 +219,15 @@ export function ProjectSharingDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+const SHARE_ACCESS_LEVELS: Array<{ value: api.ProjectShareAccessLevel; label: string }> = [
+  { value: "viewer", label: "Ver" },
+  { value: "runner", label: "Executar" },
+  { value: "editor", label: "Editar" },
+  { value: "manager", label: "Gerenciar" },
+];
+
+function shareAccessLabel(value: api.ProjectShareAccessLevel): string {
+  return SHARE_ACCESS_LEVELS.find((level) => level.value === value)?.label ?? value;
 }

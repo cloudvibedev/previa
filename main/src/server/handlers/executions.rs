@@ -589,7 +589,7 @@ pub async fn cancel_execution(
         &execution.project_id,
         execution.pipeline_id.as_deref(),
         &principal,
-        PipelineAccess::Write,
+        PipelineAccess::Run,
     )
     .await
     {

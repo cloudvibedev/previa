@@ -1,12 +1,16 @@
+use std::str::FromStr;
+
 use sqlx::Row;
 
 use crate::server::auth::permissions::Role;
 use crate::server::auth::{Principal, PrincipalSource};
 use crate::server::db::DbPool;
+use crate::server::models::ProjectShareAccessLevel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectAccess {
     Read,
+    Run,
     Write,
     Manage,
     Delete,
@@ -64,19 +68,48 @@ pub async fn load_project_access_record(
     }))
 }
 
-pub async fn project_is_shared_with(
+pub async fn load_project_share_access_level(
     db: &DbPool,
     project_id: &str,
     principal: &Principal,
-) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query_scalar::<sqlx::Any, i64>(
-        db.sql("SELECT 1 FROM project_shares WHERE project_id = ? AND user_id = ? LIMIT 1"),
-    )
+) -> Result<Option<ProjectShareAccessLevel>, sqlx::Error> {
+    let row = sqlx::query_scalar::<sqlx::Any, String>(db.sql(
+        "SELECT access_level FROM project_shares
+            WHERE project_id = ? AND user_id = ? LIMIT 1",
+    ))
     .bind(project_id)
     .bind(&principal.subject)
     .fetch_optional(db)
     .await?;
-    Ok(row.is_some())
+
+    Ok(row.map(|value| {
+        ProjectShareAccessLevel::from_str(&value).unwrap_or(ProjectShareAccessLevel::Editor)
+    }))
+}
+
+fn project_share_allows(level: ProjectShareAccessLevel, access: ProjectAccess) -> bool {
+    match access {
+        ProjectAccess::Read => matches!(
+            level,
+            ProjectShareAccessLevel::Viewer
+                | ProjectShareAccessLevel::Runner
+                | ProjectShareAccessLevel::Editor
+                | ProjectShareAccessLevel::Manager
+        ),
+        ProjectAccess::Run => matches!(
+            level,
+            ProjectShareAccessLevel::Runner
+                | ProjectShareAccessLevel::Editor
+                | ProjectShareAccessLevel::Manager
+        ),
+        ProjectAccess::Write => matches!(
+            level,
+            ProjectShareAccessLevel::Editor | ProjectShareAccessLevel::Manager
+        ),
+        ProjectAccess::Manage | ProjectAccess::Delete => {
+            matches!(level, ProjectShareAccessLevel::Manager)
+        }
+    }
 }
 
 pub async fn can_access_project(
@@ -97,14 +130,16 @@ pub async fn can_access_project(
         return Ok(true);
     }
 
-    if matches!(access, ProjectAccess::Read | ProjectAccess::Write) && is_public(&record) {
+    if matches!(
+        access,
+        ProjectAccess::Read | ProjectAccess::Run | ProjectAccess::Write
+    ) && is_public(&record)
+    {
         return Ok(true);
     }
 
-    if matches!(access, ProjectAccess::Read | ProjectAccess::Write)
-        && project_is_shared_with(db, project_id, principal).await?
-    {
-        return Ok(true);
+    if let Some(level) = load_project_share_access_level(db, project_id, principal).await? {
+        return Ok(project_share_allows(level, access));
     }
 
     Ok(false)
@@ -200,6 +235,68 @@ mod tests {
                 .await
                 .expect("shared delete denied")
         );
+    }
+
+    #[tokio::test]
+    async fn project_share_levels_gate_read_run_write_and_manage() {
+        let db = db().await;
+        upsert_project_with_pipelines_for_owner(
+            &db,
+            "project-1".to_owned(),
+            ProjectUpsertRequest {
+                name: "Stack".to_owned(),
+                description: None,
+                tags: Vec::new(),
+                created_at: None,
+                updated_at: None,
+                spec: None,
+                pipelines: Vec::new(),
+            },
+            "owner-1",
+            "owner",
+        )
+        .await
+        .expect("project");
+
+        let teammate = user("user-2", "teammate");
+        for (level, expected) in [
+            (
+                ProjectShareAccessLevel::Viewer,
+                [true, false, false, false, false],
+            ),
+            (
+                ProjectShareAccessLevel::Runner,
+                [true, true, false, false, false],
+            ),
+            (
+                ProjectShareAccessLevel::Editor,
+                [true, true, true, false, false],
+            ),
+            (
+                ProjectShareAccessLevel::Manager,
+                [true, true, true, true, true],
+            ),
+        ] {
+            upsert_project_share_record(&db, "project-1", "user-2", "teammate", level)
+                .await
+                .expect("share");
+
+            for (access, allowed) in [
+                (ProjectAccess::Read, expected[0]),
+                (ProjectAccess::Run, expected[1]),
+                (ProjectAccess::Write, expected[2]),
+                (ProjectAccess::Manage, expected[3]),
+                (ProjectAccess::Delete, expected[4]),
+            ] {
+                assert_eq!(
+                    can_access_project(&db, "project-1", &teammate, access)
+                        .await
+                        .expect("access check"),
+                    allowed,
+                    "{level:?} should allow {access:?}={allowed}"
+                );
+            }
+        }
     }
 
     #[tokio::test]

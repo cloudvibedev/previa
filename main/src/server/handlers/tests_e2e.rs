@@ -105,7 +105,7 @@ pub async fn run_e2e_test_for_project(
                 &project_id,
                 &pipeline_id,
                 &principal,
-                PipelineAccess::Write,
+                PipelineAccess::Run,
             )
             .await
             {
@@ -206,7 +206,7 @@ pub async fn run_e2e_rerun_from_step_for_project(
                 &project_id,
                 &pipeline_id,
                 &principal,
-                PipelineAccess::Write,
+                PipelineAccess::Run,
             )
             .await
             {

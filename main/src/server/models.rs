@@ -528,13 +528,19 @@ impl std::str::FromStr for ProjectVisibility {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectShareAccessLevel {
+    Viewer,
+    Runner,
     Editor,
+    Manager,
 }
 
 impl std::fmt::Display for ProjectShareAccessLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Viewer => "viewer",
+            Self::Runner => "runner",
             Self::Editor => "editor",
+            Self::Manager => "manager",
         })
     }
 }
@@ -544,7 +550,10 @@ impl std::str::FromStr for ProjectShareAccessLevel {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
+            "viewer" => Ok(Self::Viewer),
+            "runner" => Ok(Self::Runner),
             "editor" => Ok(Self::Editor),
+            "manager" => Ok(Self::Manager),
             _ => Err(format!("invalid project share access level '{value}'")),
         }
     }
@@ -640,13 +649,19 @@ impl std::str::FromStr for PipelineVisibility {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PipelineShareAccessLevel {
+    Viewer,
+    Runner,
     Editor,
+    Manager,
 }
 
 impl std::fmt::Display for PipelineShareAccessLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Viewer => "viewer",
+            Self::Runner => "runner",
             Self::Editor => "editor",
+            Self::Manager => "manager",
         })
     }
 }
@@ -656,7 +671,10 @@ impl std::str::FromStr for PipelineShareAccessLevel {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
+            "viewer" => Ok(Self::Viewer),
+            "runner" => Ok(Self::Runner),
             "editor" => Ok(Self::Editor),
+            "manager" => Ok(Self::Manager),
             _ => Err(format!("invalid pipeline share access level '{value}'")),
         }
     }
