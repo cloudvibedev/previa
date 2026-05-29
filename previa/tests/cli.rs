@@ -725,6 +725,9 @@ if not argv:
 if argv[0] == "pull":
     sys.exit(0)
 
+if argv[0] == "info":
+    sys.exit(0)
+
 if argv[0] == "inspect":
     state = load_state()
     records = []
