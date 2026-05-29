@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/github/license/runvibe/previa?cacheSeconds=300)](https://github.com/runvibe/previa/blob/main/LICENSE)
 [![Stars](https://img.shields.io/github/stars/runvibe/previa?style=social&cacheSeconds=300)](https://github.com/runvibe/previa/stargazers)
 
-**The first AI-First IDE for QA. Test, design, and validate APIs with AI assistance from your desktop, CI/CD, or your favorite AI assistant.**
+**Previa is a local-first QA runtime for AI agents. It gives assistants a real API testing environment to create, run, inspect, and debug end-to-end workflows instead of guessing.**
 
 Previa is a platform for simulating, executing, and tracing real end-to-end API operations so you can see what happened, where a failure occurred, and why.
 
@@ -36,6 +36,20 @@ In practice, the flow looks like this:
 ```text
 previa CLI -> previa-main -> previa-runner -> target API
 ```
+
+## Agent Loop
+
+```text
+agent -> MCP/API -> previa-main -> previa-runner -> target API -> structured execution result -> agent
+```
+
+Use Previa when an agent needs to verify a real workflow:
+
+1. Start the local runtime with `previa up -d`.
+2. Open the IDE with `previa open`.
+3. Import an OpenAPI spec or create a stack.
+4. Let the agent create or update a pipeline through MCP/API.
+5. Run the pipeline and inspect step-level request, response, assertion, and error details.
 
 ## Why Previa Exists
 
@@ -81,7 +95,13 @@ The installers detect Linux, macOS, or Windows, install the matching `previa` co
 The shortest happy path is:
 
 ```text
-install -> up -> open -> create or import a pipeline -> run tests
+install -> doctor -> up -> open -> create or import a pipeline -> run tests
+```
+
+Check local prerequisites:
+
+```bash
+previa doctor
 ```
 
 Start a Docker-backed stack:

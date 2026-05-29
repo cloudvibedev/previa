@@ -7,10 +7,11 @@ This guide covers the shortest path to a working local Previa stack.
 If you want the shortest operator flow, it is:
 
 1. install `previa`
-2. start a local stack with `previa up -d`
-3. open the IDE with `previa open`
-4. create or import a pipeline
-5. run E2E or load tests from the IDE, API, or MCP-connected assistant
+2. run `previa doctor`
+3. start a local stack with `previa up -d`
+4. open the IDE with `previa open`
+5. create or import a pipeline
+6. run E2E or load tests from the IDE, API, or MCP-connected assistant
 
 ## Install
 
@@ -31,10 +32,16 @@ The installer detects the local OS, places `previa` under the default Previa hom
 
 ## First Local Stack
 
+Check local prerequisites before starting the Docker-backed runtime:
+
+```bash
+previa doctor
+```
+
 Start the default context in detached mode:
 
 ```bash
-previa up --detach
+previa up -d
 ```
 
 Check status:
@@ -71,6 +78,9 @@ Stop the stack:
 ```bash
 previa down
 ```
+
+If `doctor` or startup reports a Docker, image, or port issue, see
+[Troubleshooting](./troubleshooting.md).
 
 ## Work Inside a Repo
 

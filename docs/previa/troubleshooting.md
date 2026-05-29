@@ -76,9 +76,11 @@ What it means:
 
 What to do:
 
+- run `previa doctor` for a full local runtime check
+- confirm Docker Desktop or Docker Engine is running
 - confirm that either `docker compose version` or `docker-compose version` works in your shell
 - if only `docker-compose` is available, `previa` will use it automatically
-- if neither command works, install Docker Compose and try `previa up` again
+- if neither command works, install Docker Compose and try `previa up -d` again
 
 ## Runner Selector Did Not Match
 

@@ -49,6 +49,17 @@ $PREVIA_HOME/bin
 
 When `previa up --bin` downloads those runtime binaries, it targets the exact same release version as the running `previa` CLI.
 
+## Post-install Verification
+
+After installing or upgrading the CLI, verify the Docker-backed OSS runtime path:
+
+```bash
+previa doctor
+previa pull all
+previa up -d
+previa status
+```
+
 ## Compatibility
 
 Previa keeps local runtime pieces aligned by version:

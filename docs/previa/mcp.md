@@ -102,6 +102,13 @@ Authorization = "Bearer ${PREVIA_API_TOKEN}"
 
 On the same machine, `localhost` is usually the right host even if `previa-main` is bound to `0.0.0.0`.
 
+## Agent Prompt Example
+
+Use Previa as the QA runtime for this API change. Inspect the current project,
+create or update a pipeline for the changed workflow, run the E2E test, and
+summarize any failing step with request, response, assertion, and suggested fix.
+Do not mark the change verified until the Previa execution passes.
+
 ## What the Server Exposes
 
 Today, the Previa MCP server exposes:
