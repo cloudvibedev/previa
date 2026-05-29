@@ -593,10 +593,15 @@ async fn cmd_doctor(paths: &PreviaPaths, _http: &Client, args: DoctorArgs) -> Re
     ];
 
     if state.is_none() {
-        checks.push(diagnostics::check_port_available("127.0.0.1", 5588, "main"));
+        let targets = diagnostics::doctor_bind_targets(&stack_paths)?;
         checks.push(diagnostics::check_port_available(
-            "127.0.0.1",
-            55880,
+            &targets.main.host,
+            targets.main.port,
+            "main",
+        ));
+        checks.push(diagnostics::check_port_available(
+            &targets.runner.host,
+            targets.runner.port,
             "runner",
         ));
     }
