@@ -10,6 +10,7 @@ import {
   type LoadHistoryRecord,
   type RunnerRecord,
 } from "@/lib/api-client";
+import { parseApiErrorText, userFacingApiErrorMessage } from "@/lib/api-errors";
 
 const baseUrl = "http://127.0.0.1:5588/api/v1";
 
@@ -105,6 +106,29 @@ describe("api-client runners", () => {
 
     await expect(deleteRunner(baseUrl, runner.id)).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith(`${baseUrl}/runners/${runner.id}`, { method: "DELETE" });
+  });
+});
+
+describe("api error parsing", () => {
+  it("parses structured backend errors", () => {
+    expect(parseApiErrorText('{"error":"not_found","message":"project not found"}')).toEqual({
+      code: "not_found",
+      message: "project not found",
+      raw: '{"error":"not_found","message":"project not found"}',
+    });
+  });
+
+  it("maps network and auth categories to useful messages", () => {
+    expect(userFacingApiErrorMessage({
+      code: "service_unavailable",
+      message: "runner unavailable",
+      raw: "",
+    })).toBe("Service unavailable: runner unavailable");
+    expect(userFacingApiErrorMessage({
+      code: "forbidden",
+      message: "forbidden",
+      raw: "",
+    })).toBe("You do not have permission to perform this action.");
   });
 });
 

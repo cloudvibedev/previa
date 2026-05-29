@@ -3,6 +3,7 @@
  * Every function receives `baseUrl` (e.g. "http://localhost:5588/api/v1") as its first argument.
  */
 
+import { parseApiErrorText, userFacingApiErrorMessage, type ParsedApiError } from "@/lib/api-errors";
 import { useEventStore } from "@/stores/useEventStore";
 import { clearAuthSession, getAuthToken } from "@/stores/useAuthStore";
 import type { Pipeline, OpenAPISpec } from "@/types/pipeline";
@@ -253,6 +254,9 @@ export interface LoadCapacityPreviewResponse {
 // ============ Helper ============
 
 export class ApiError extends Error {
+  readonly parsed: ParsedApiError;
+  readonly userMessage: string;
+
   constructor(
     message: string,
     readonly statusCode: number,
@@ -260,11 +264,13 @@ export class ApiError extends Error {
   ) {
     super(message);
     this.name = "ApiError";
+    this.parsed = parseApiErrorText(responseText);
+    this.userMessage = userFacingApiErrorMessage(this.parsed);
   }
 }
 
 export function isForbiddenApiError(error: unknown): boolean {
-  return error instanceof ApiError && error.statusCode === 403;
+  return error instanceof ApiError && (error.statusCode === 403 || error.parsed.code === "forbidden");
 }
 
 export function apiErrorTranslationKey(error: unknown, fallbackKey: string): string {
@@ -276,7 +282,9 @@ export function apiErrorMessage(
   fallbackMessage: string,
   permissionMessage = "Você não tem permissão para realizar esta ação.",
 ): string {
-  return isForbiddenApiError(error) ? permissionMessage : fallbackMessage;
+  if (isForbiddenApiError(error)) return permissionMessage;
+  if (error instanceof ApiError) return error.userMessage;
+  return fallbackMessage;
 }
 
 function simpleHash(input: string): string {
@@ -304,6 +312,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     const res = await fetch(url, requestInit);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      const parsed = parseApiErrorText(text);
       const statusCode = res.status;
       if (statusCode === 401) {
         clearAuthSession();
@@ -312,8 +321,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
         uid: simpleHash(`${method}:${url}:${text || `HTTP ${statusCode}`}`),
         type: "error",
         title: detectOperation(url, method),
-        message: text || `HTTP ${statusCode}`,
-        details: { method, url, statusCode },
+        message: userFacingApiErrorMessage(parsed),
+        details: { method, url, statusCode, code: parsed.code, raw: parsed.raw },
       });
       throw new ApiError(`HTTP ${statusCode}: ${text}`, statusCode, text);
     }
