@@ -2,6 +2,32 @@
 
 All notable changes to Previa are documented in this file.
 
+## [v1.0.0-alpha.41] - 2026-05-29
+
+### Features
+- Parse structured api errors in app (33d5611)
+- Add agent runtime onboarding (841b7e5)
+- Add previa doctor diagnostics (d13905c)
+
+### Bug Fixes
+- Keep docker fake compatible with preflight (ce81ebf)
+- Surface actionable api errors (ce0374a)
+- Improve docker startup diagnostics (55d9ff9)
+- Return ok for doctor json reports (9621e94)
+- Harden previa doctor diagnostics (9e336f6)
+
+### Documentation
+- Document oss agent runtime path (6179075)
+- Reposition onboarding for ai agents (f7e9e67)
+- Plan oss v1 docker onboarding errors (ed04b95)
+
+### Maintenance
+- Bump version to v1.0.0-alpha.41 (a2d79fa)
+- Align project contracts and test hygiene (a418b28)
+- Update release metadata for v1.0.0-alpha.40 (3685452)
+
+Full Changelog: https://github.com/runvibe/previa/compare/v1.0.0-alpha.40...v1.0.0-alpha.41
+
 ## [v1.0.0-alpha.40] - 2026-05-26
 
 ### Features
